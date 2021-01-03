@@ -3,6 +3,7 @@ alias sudo='sudo '
 
 # 
 alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/Code.exe"
+alias open="explorer.exe"
 
 alias ..="cd .."
 alias ...="cd ../.."
