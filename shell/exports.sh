@@ -8,7 +8,12 @@ export FZF_DEFAULT_OPTS='
 '
 export XDG_CONFIG_HOME="$HOME/.config"
 
-export path=(
+# split path to array and concatenate for compatibility with WSL
+# dont work with path with spaces
+# originalPath=$(echo "$PATH" | sed 's! !\\ !g')
+oldPath=(`echo $PATH | tr ':' ' '`)
+
+newpath=(
   "$HOME/bin"
   "$DOTLY_PATH/bin"
   "$DOTFILES_PATH/bin"
@@ -25,3 +30,5 @@ export path=(
   "/usr/sbin"
   "/sbin"
 )
+
+export path=("${newpath[@]}" "${oldPath[@]}")

@@ -14,8 +14,10 @@ alias tt="exa --tree --level=2 --long"
 alias ~="cd ~"
 # alias code='cd ~/Code'
 # TODO symlink to ~/Code
+alias dotfiles='cd /mnt/d/Bruno/dotfiles/.dotfiles'
 alias cdc='cd /mnt/d/Bruno/Code'
 alias cdw="cdc; cd Work"
+alias clece="cdw; cd Stratesys/Clece"
 
 # Git
 alias gaa="git add -A"
@@ -35,7 +37,8 @@ alias gl="$DOTLY_PATH/bin/dot git pretty-log"
 # Utils
 alias k='kill -9'
 alias i.='(idea $PWD &>/dev/null &)'
-alias c.='(code $PWD &>/dev/null &)'
+alias c.='(code --remote wsl+Ubuntu-20.04 "$(pwd)" &>/dev/null &)'
+alias cw.='(code "$(wslpath -w "$(pwd)")" &>/dev/null &)'
 alias o.='open .'
 alias up='dot package update_all'
 
