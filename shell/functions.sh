@@ -36,6 +36,33 @@ selected=( $(fc -rl 1 |
 	return $ret
 }
 
+function s() {
+	servor $1 index.html 1000 --reload
+}
+
+function export_apps() {
+	sudo apt list --installed > "$DOTFILES_PATH/os/linux/apt-installed.txt"
+	echo "APT apps exported"
+
+	ls -1 /usr/local/lib/node_modules | grep -v npm > "$DOTFILES_PATH/langs/js/global_modules.txt"
+	echo "NPM apps exported"
+}
+
+function import_apps() {
+	sudo dpkg-query -l | awk '{if ($1 == "ii") print $2}' > "$DOTFILES_PATH/os/linux/apt-installed.txt"
+	sudo xargs -a "$DOTFILES_PATH/os/linux/apt-installed.txt" apt install
+	echo "APT aps imported!"
+
+	xargs -I_ npm install -g "_" < "$DOTFILES_PATH/langs/js/global_modules.txt"
+	echo "NPM apps imported!"
+}
+
+function clone_git_repo() {
+  repo_url=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/user/repos?per_page=200" | jq --raw-output ".[].ssh_url" | fzf)
+  git clone "$repo_url"
+  echo "$repo_url"
+}
+
 function lazy_nvm {
 	unset -f nvm
 	unset -f npm

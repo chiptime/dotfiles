@@ -1,9 +1,11 @@
 # Enable aliases to be sudo’ed
 alias sudo='sudo '
 
-# 
+# WSL
 alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/Code.exe"
 alias open="explorer.exe"
+alias docker="docker.exe"
+alias docker-compose="docker-compose "
 
 alias ..="cd .."
 alias ...="cd ../.."
@@ -15,7 +17,6 @@ alias tt="exa --tree --level=2 --long"
 alias ~="cd ~"
 # alias code='cd ~/Code'
 # TODO symlink to ~/Code
-alias dotfiles='cd /mnt/d/Bruno/dotfiles/.dotfiles'
 alias cdc='cd /mnt/d/Bruno/Code'
 alias cdw="cdc; cd Work"
 alias clece="cdw; cd Stratesys/Clece"
@@ -34,6 +35,7 @@ alias gpsf="git push --force"
 alias gpl="git pull --rebase --autostash"
 alias gb="git branch"
 alias gl="$DOTLY_PATH/bin/dot git pretty-log"
+alias gcl="clone_git_repo"
 
 # Utils
 alias k='kill -9'
@@ -42,4 +44,3 @@ alias c.='(code --remote wsl+Ubuntu-20.04 "$(pwd)" &>/dev/null &)'
 alias cw.='(code "$(wslpath -w "$(pwd)")" &>/dev/null &)'
 alias o.='open .'
 alias up='dot package update_all'
-
