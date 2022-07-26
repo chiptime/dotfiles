@@ -1,3 +1,14 @@
+# time
+export TIMEFMT=$'%J\n%U user\n%S system\n%P cpu\n%*E total'
+
+# Brew
+export HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
+export HOMEBREW_CELLAR="/home/linuxbrew/.linuxbrew/Cellar"
+export HOMEBREW_REPOSITORY="/home/linuxbrew/.linuxbrew/Homebrew"
+export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin${PATH+:$PATH}"
+export MANPATH="/home/linuxbrew/.linuxbrew/share/man${MANPATH+:$MANPATH}:"
+export INFOPATH="/home/linuxbrew/.linuxbrew/share/info:${INFOPATH:-}"
+
 # export JAVA_HOME='/Library/Java/JavaVirtualMachines/amazon-corretto-15.jdk/Contents/Home'
 export GEM_HOME="$HOME/.gem"
 export GOPATH="$HOME/.go"
@@ -18,6 +29,11 @@ export DISPLAY="$(grep nameserver /etc/resolv.conf | sed 's/nameserver //'):0"
 export LIBGL_ALWAYS_INDIRECT=1
 #echo xfce4-session >~/.xsession
 
+export GDK_SCALE=0.5
+export GDK_DPI_SCALE=2
+# export GDK_SCALE=3
+# export GDK_DPI_SCALE=2
+export XCURSOR_SIZE=64
 # split path to array and concatenate for compatibility with WSL
 # dont work with path with spaces
 # originalPath=$(echo "$PATH" | sed 's! !\\ !g')
@@ -33,6 +49,12 @@ newpath=(
   "$GEM_HOME/bin"
   "$GOPATH/bin"
   "$HOME/.cargo/bin"
+  "$HOMEBREW_PREFIX"
+  "$HOMEBREW_CELLAR"
+  "$HOMEBREW_REPOSITORY"
+  "$PATH"
+  "$MANPATH"
+  "$INFOPATH"
   "/usr/local/opt/ruby/bin"
   "/usr/local/opt/python/libexec/bin"
   "/usr/local/bin"

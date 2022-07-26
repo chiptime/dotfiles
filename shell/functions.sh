@@ -37,7 +37,9 @@ selected=( $(fc -rl 1 |
 }
 
 function s() {
-	servor $1 index.html 1000 --reload
+	npm >/dev/null 2>/dev/null
+	# servor "$1" index.html 8080 --reload
+	servor
 }
 
 function export_apps() {
@@ -58,9 +60,9 @@ function import_apps() {
 }
 
 function clone_git_repo() {
-  repo_url=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/user/repos?per_page=200" | jq --raw-output ".[].ssh_url" | fzf)
-  git clone "$repo_url"
-  echo "$repo_url"
+  repo_url=$(curl -s -H "PRIVATE-TOKEN: $GITLAB_STR_TOKEN" "https://gitlab.stratesys.global/api/v4/projects?per_page=200" | jq --raw-output ".[].http_url_to_repo" | fzf | sed 's/https\?:\/\///')
+  git clone "https://token:$GITLAB_STR_TOKEN@$repo_url"
+  echo "https://$repo_url"
 }
 
 function lazy_nvm {
@@ -72,6 +74,7 @@ function lazy_nvm {
 	if [ -d "${HOME}/.nvm" ]; then
 		export NVM_DIR="$HOME/.nvm"
 		[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" # linux
+		export NODE_PATH=$(npm root -g)
 		#[ -s "$(brew --prefix nvm)/nvm.sh" ] && source $(brew --prefix nvm)/nvm.sh # osx
 	fi
 }

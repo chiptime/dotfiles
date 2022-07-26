@@ -15,4 +15,5 @@
     ~/.zshrc: shell/zsh/.zshrc
     ~/.p10k.zsh: shell/zsh/themes/.p10k.zsh
     ~/.vimrc: editors/vim/.vimrc
+    ~/.vim/colors/dark-redux.vim: editors/vim/themes/dark-redux.vim
     ~/.config/nvim/init.vim: editors/vim/init.vim
