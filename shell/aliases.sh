@@ -2,7 +2,8 @@
 alias sudo='sudo '
 
 # WSL
-alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/Code.exe"
+# alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/Code.exe"
+alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/bin/code"
 alias open="explorer.exe"
 alias docker="docker.exe"
 alias docker-compose="docker-compose "
@@ -43,4 +44,5 @@ alias i.='(idea $PWD &>/dev/null &)'
 alias c.='(code --remote wsl+Ubuntu-20.04 "$(pwd)" &>/dev/null &)'
 alias cw.='(code "$(wslpath -w "$(pwd)")" &>/dev/null &)'
 alias o.='open .'
-alias up='dot package update_all'
+alias wt.='cmd.exe /c start wt.exe -d .'
+# alias up='dot package update_all'

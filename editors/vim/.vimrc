@@ -14,14 +14,14 @@ set laststatus=2
 set backspace=2
 set guioptions-=T
 set guioptions-=L
-"Get out of insert mode 
+"Get out of insert mode
 "Salir de modo insertar
 imap ii <Esc>
 "imap <C-c> <Esc>l
 "mueve bloques de codigo en modo visual o V-Line
 "Moves Blocks of code in visual mode or V-Line
 xnoremap K :move '<-2<CR>gv-gv
-xnoremap J :move '>+1<CR>gv-gv 
+xnoremap J :move '>+1<CR>gv-gv
 
 " Better indenting
 " Mejor Indentación
@@ -45,9 +45,32 @@ call plug#begin('~/.vim/plugged')
 Plug 'morhetz/gruvbox'
 Plug 'shinchu/lightline-gruvbox.vim'
 Plug 'sheerun/vim-polyglot'
+Plug 'martinsione/darkplus.nvim'
+Plug 'tomasiser/vim-code-dark'
+Plug 'folke/tokyonight.nvim', { 'branch': 'main' }
 
 " "IDE
 Plug 'easymotion/vim-easymotion'
+Plug 'mg979/vim-visual-multi', {'branch': 'master'}
+Plug 'Yggdroot/indentLine'
+Plug 'RRethy/vim-illuminate'
+Plug 'preservim/nerdcommenter' " toogle comment: <leader>c<space>
+
+
+"pairs () [] {} ''
+Plug 'jiangmiao/auto-pairs'
+Plug 'alvan/vim-closetag'
+Plug 'frazrepo/vim-rainbow'
+Plug 'tpope/vim-surround' " <leader>S <'(', '[', '<', '{'>
+
+
+" Debugging
+Plug 'puremourning/vimspector'
+
+" Translate
+Plug 'voldikss/vim-translator'
+let g:translator_target_lang =  'es'
+
 
 " Languages
 Plug 'pangloss/vim-javascript'    " JavaScript support
@@ -55,6 +78,27 @@ Plug 'leafgarland/typescript-vim' " TypeScript syntax
 
 "Nerdtree
 Plug 'preservim/nerdtree'
+Plug 'ryanoasis/vim-devicons'
+Plug 'tiagofumo/vim-nerdtree-syntax-highlight'
+Plug 'Xuyuanp/nerdtree-git-plugin'
+
+"Nerdtree shortcuts
+nnoremap <C-O> :NERDTreeToggle<CR>
+
+"autocmd BufEnter * if winnr('$') == 1 && exists('b:NERDTree') && b:NERDTree.isTabTree() | quit | endif
+"nnoremap ctrl+shift+e :NERDTreeToggle<CR>
+
+
+" GIT
+Plug 'iamcco/sran.nvim', { 'do': { -> sran#util#install() } }
+Plug 'iamcco/git-p.nvim'
+let g:gitp_blame_virtual_text = 1
+set updatetime=300
+
+"Plug 'APZelos/blamer.nvim'
+"let g:blamer_enabled = 1
+"let g:blamer_delay = 200
+"vim.g.blamer_show_in_visual_modes = 0
 
 "Navigate with C-h C-l C-j C-k
 "Navegar con C-h C-l C-j C-k
@@ -64,17 +108,22 @@ Plug 'christoomey/vim-tmux-navigator'
 Plug 'vim-airline/vim-airline'
 Plug 'vim-airline/vim-airline-themes'
 
-" Stable version of coc
+" Autocomplete
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
-
-"Close pairs () [] {} ''
-"Cerrar los pares () [] {} '' 
-Plug 'jiangmiao/auto-pairs'
-Plug 'alvan/vim-closetag'
+" Plug 'neovim/nvim-lspconfig'
+Plug 'sirver/ultisnips'
+"SirVer/ultisnips
 
 "FZF
 Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
-Plug 'junegunn/fzf.vim',
+Plug 'junegunn/fzf.vim'
+
+"let $FZF_DEFAULT_COMMAND = 'command! -bang -nargs=* Ag call fzf#vim#ag(<q-args>, {'options': '--delimiter : --nth 4..'}, <bang>0)'
+com! -bar -bang Ag call fzf#vim#ag(<q-args>, fzf#vim#with_preview({'options': '--delimiter=: --nth=4..'}, 'right'), <bang>0)
+
+"HTTP
+"Plug 'nicwest/vim-http'
+Plug 'aquach/vim-http-client'
 
 call plug#end()
 
@@ -105,7 +154,7 @@ nmap <leader>w :w <CR>
 nmap <C-w> :q <CR>
 nmap <leader>q :q <CR>
 nmap <leader>so :so%<CR>
-"search commands 
+"search commands
 "comandos de busqueda
 nmap <leader>gs  :CocSearch
 nmap <leader>fs :FZF<CR>
@@ -123,7 +172,7 @@ nmap <Leader>s <Plug>(easymotion-s2)
 " TAB en modo normal se moverá al siguiente buffer
 nnoremap <silent> <TAB> :bnext<CR>
 " SHIFT-TAB will go back
-" SHIFT-TAB va para atras 
+" SHIFT-TAB va para atras
 nnoremap <silent> <S-TAB> :bprevious<CR>
 "close buffer
 "cerrar buffer
@@ -158,7 +207,7 @@ let g:lightline = {
       \}
 
 "--gruvbox config--
-colorscheme gruvbox
+colorscheme tokyonight
 let g:gruvbox_contrast_dark = "medium"
 highlight Normal ctermbg=234
 set laststatus=2
