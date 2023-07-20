@@ -1,12 +1,59 @@
-# Enable aliases to be sudo’ed
 alias sudo='sudo '
 
 # WSL
 # alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/Code.exe"
-alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/bin/code"
+# alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/bin/code"
 alias open="explorer.exe"
 alias docker="docker.exe"
 alias docker-compose="docker-compose "
+
+notify-send() {
+    title="${@}"
+
+    params=""
+
+    count=0
+
+    while [ $# -gt 0 ]; do
+
+        if [[ $1 == "--"* ]]; then
+
+            _param=$(echo $1 | sed "s/--app-name/--appId/g")
+
+            params="$params $_param"
+
+            shift
+
+        elif [[ $count == 0 ]]; then
+
+            v=$(echo "$1" | sed 's/"/\\"/g')
+
+            params="$params-c \"$v\""
+
+            shift
+        else
+            v=$(echo $1 | tr '\n' ' ')
+
+            params="$params \"$v\""
+
+            shift
+        fi
+
+        count=count+1
+    done
+
+    # echo "$params"
+    # echo "\n\n"
+    # echo "wsl-notify-send.exe $params"
+    # echo "\n\n"
+
+    # all=$(echo $title | sed "s/--app-name/--appId/g")
+
+    command=(wsl-notify-send.exe $params)
+
+    eval "${command[@]}"
+}
+zsh-notify() { wsl-notify-send.exe --appId=$appId --category $WSL_DISTRO_NAME "${@}"; }
 
 alias ..="cd .."
 alias ...="cd ../.."
@@ -16,9 +63,8 @@ alias tt="exa --tree --level=2 --long"
 
 # Jumps
 alias ~="cd ~"
-# alias code='cd ~/Code'
-# TODO symlink to ~/Code
-alias cdc='cd /mnt/d/Bruno/Code'
+alias cdcw='cd /mnt/d/Bruno/Code'
+alias cdc='cd ~/Code'
 alias cdw="cdc; cd Work"
 alias clece="cdw; cd Stratesys/Clece"
 

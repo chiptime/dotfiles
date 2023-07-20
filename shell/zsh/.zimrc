@@ -1,11 +1,18 @@
 # If you modify this execute `zimfw uninstall & zimfw install`
+zmodule Aloxaf/fzf-tab
+
 zmodule zimfw/environment
-zmodule zimfw/git-info
+#zmodule zimfw/git-info
 zmodule zimfw/history
 zmodule zimfw/input
 zmodule zsh-users/zsh-autosuggestions
-zmodule zsh-users/zsh-syntax-highlighting
+# zmodule zsh-users/zsh-syntax-highlighting
+#zmodule zdharma-continuum/fast-syntax-highlighting
 zmodule zimfw/completion
-zmodule romkatv/powerlevel10k
+#zmodule romkatv/powerlevel10k
+zmodule MichaelAquilina/zsh-auto-notify
+#zmodule yuki-yano/fzf-preview.vim --branch main
+#zmodule spaceship-prompt/spaceship-prompt --name spaceship --no-submodules
+zmodule sindresorhus/pure --source async.zsh --source pure.zsh
 
-zhighlighters=(main brackets)
+# zhighlighters=(main brackets)

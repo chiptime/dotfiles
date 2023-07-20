@@ -1,5 +1,7 @@
 # time
-export TIMEFMT=$'%J\n%U user\n%S system\n%P cpu\n%*E total'
+export TIMEFMT=$'%J %U user %S system %P cpu %*E total'
+
+export AUTO_NOTIFY_THRESHOLD=10
 
 # Brew
 export HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
@@ -23,6 +25,7 @@ export XDG_CONFIG_HOME="$HOME/.config"
 
 # export _JAVA_OPTIONS=-Xmx512M
 export JAVA_HOME="/usr/lib/jvm/java-8-openjdk-amd64"
+export JENV="$HOME/.jenv/bin"
 
 # variables for WSL2 UI Apps - VcXsrv
 export DISPLAY="$(grep nameserver /etc/resolv.conf | sed 's/nameserver //'):0"
@@ -43,6 +46,7 @@ export XCURSOR_SIZE=64
 newpath=(
   "$HOME/bin"
   "$JAVA_HOME"
+  "$JENV"
   "$DOTLY_PATH/bin"
   "$DOTFILES_PATH/bin"
   "$JAVA_HOME/bin"
