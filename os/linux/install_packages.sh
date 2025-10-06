@@ -52,6 +52,7 @@ mkdir ~/programs/homebrew && curl -L https://github.com/Homebrew/brew/tarball/ma
 brew install denisidoro/tools/docpars
 brew install fzf
 
+
 curl -fsSL https://raw.githubusercontent.com/zimfw/install/master/install.zsh | zsh
 
 # instalar dotly y setear configuracion
@@ -59,3 +60,6 @@ git clone https://github.com/chiptime/dotfiles $HOME/.dotfiles
 cd $HOME/.dotfiles
 git submodule update --init --recursive modules/dotly
 DOTFILES_PATH="$HOME/.dotfiles" DOTLY_PATH="$HOME/.dotfiles/modules/dotly" "$HOME/.dotfiles/modules/dotly/bin/dot" self install
+
+
+brew install pure
