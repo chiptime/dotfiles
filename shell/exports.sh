@@ -1,3 +1,7 @@
+# dotly
+export DOTFILES_PATH="$HOME/.dotfiles"
+export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
+
 # time
 export TIMEFMT=$'%J %U user %S system %P cpu %*E total'
 

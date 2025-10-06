@@ -62,4 +62,4 @@ git submodule update --init --recursive modules/dotly
 DOTFILES_PATH="$HOME/.dotfiles" DOTLY_PATH="$HOME/.dotfiles/modules/dotly" "$HOME/.dotfiles/modules/dotly/bin/dot" self install
 
 
-brew install pure
+brew install eza
