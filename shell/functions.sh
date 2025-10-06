@@ -73,9 +73,10 @@ function lazy_nvm {
 	unset -f node
 	unset -f npx
 
-	if [ -d "${HOME}/.nvm" ]; then
-		export NVM_DIR="$HOME/.nvm"
+	if [ -d "$HOME/.config/nvm" ]; then
+		export NVM_DIR="$HOME/.config/nvm"
 		[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" # linux
+		# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 		export NODE_PATH=$(npm root -g)
 		#[ -s "$(brew --prefix nvm)/nvm.sh" ] && source $(brew --prefix nvm)/nvm.sh # osx
 	fi
