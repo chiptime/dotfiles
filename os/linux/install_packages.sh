@@ -66,6 +66,7 @@ DOTFILES_PATH="$HOME/.dotfiles" DOTLY_PATH="$HOME/.dotfiles/modules/dotly" "$HOM
 
 
 brew install eza
+brew install htop
 
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 curl -fsSL https://bun.com/install | bash # for macOS, Linux, and WSL
