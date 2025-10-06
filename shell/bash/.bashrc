@@ -1,7 +1,5 @@
 # Fig pre block. Keep at the top of this file.
 [[ -f "$HOME/.fig/shell/bashrc.pre.bash" ]] && builtin source "$HOME/.fig/shell/bashrc.pre.bash"
-export DOTFILES_PATH="/mnt/d/Bruno/wsl/dotfiles/.dotfiles"
-export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
 
 source "$DOTFILES_PATH/shell/init.sh"
 
