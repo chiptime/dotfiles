@@ -11,7 +11,10 @@ sudo apt upgrade -y
 sudo apt install -y build-essential zsh neovim
 sudo apt install -y bat
 sudo apt install -y tldr
-sudo apt install -y openjdk-8-jdk unzip openjdk x11-apps
+sudo apt install -y openjdk-8-jdk
+sudo apt install -y unzip
+sudo apt install -y openjdk
+sudo apt install -y x11-apps
 sudo apt install -y openssh-client
 # sudo apt install -y redis-tools
 # 2021-03-24 09:50:08	apt install -yq libicu[0-9] libkrb5-3 zlib1g
@@ -48,7 +51,7 @@ mkdir ~/programs/homebrew && curl -L https://github.com/Homebrew/brew/tarball/ma
 
 #uninstall python from cargo
 # cargo uninstall python
-
+brew install gemini-cli
 brew install denisidoro/tools/docpars
 brew install fzf
 
@@ -63,3 +66,6 @@ DOTFILES_PATH="$HOME/.dotfiles" DOTLY_PATH="$HOME/.dotfiles/modules/dotly" "$HOM
 
 
 brew install eza
+
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+curl -fsSL https://bun.com/install | bash # for macOS, Linux, and WSL
