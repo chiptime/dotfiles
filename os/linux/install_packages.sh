@@ -70,3 +70,5 @@ brew install htop
 
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 curl -fsSL https://bun.com/install | bash # for macOS, Linux, and WSL
+
+sudo apt install -y dkms
