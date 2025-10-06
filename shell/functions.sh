@@ -140,4 +140,7 @@ _npm_completion() {
             words=("${COMP_WORDS[@]}")
 }
 
-compdef _npm_completion npm
+# execute if is zsh terminal
+if [ -n "$ZSH_VERSION" ]; then
+	compdef _npm_completion npm
+fi
