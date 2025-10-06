@@ -57,9 +57,9 @@ zsh-notify() { wsl-notify-send.exe --appId=$appId --category $WSL_DISTRO_NAME "$
 
 alias ..="cd .."
 alias ...="cd ../.."
-alias ll="exa -l"
-alias la="exa -la"
-alias tt="exa --tree --level=2 --long"
+alias ll="eza -l"
+alias la="eza -la"
+alias tt="eza --tree --level=2 --long"
 
 # Jumps
 alias ~="cd ~"
