@@ -1,3 +1,10 @@
+#audio
+# Este comando extrae la IP del host de Windows (Nameserver)
+# export HOST_IP="$(ip route |awk '/^default/{print $3}')"
+# export PULSE_SERVER="tcp:$HOST_IP"
+# FORZAR A PULSEAUDIO PARA MICROFONO (IGNORAR ALSA)
+export PULSE_CLIENTCONFIG=/etc/pulse/client.conf
+
 # time
 export TIMEFMT=$'%J %U user %S system %P cpu %*E total'
 
@@ -27,10 +34,8 @@ export XDG_CONFIG_HOME="$HOME/.config"
 export JAVA_HOME="/usr/lib/jvm/java-8-openjdk-amd64"
 export JENV="$HOME/.jenv/bin"
 
-# variables for WSL2 UI Apps - VcXsrv
-export DISPLAY="$(grep nameserver /etc/resolv.conf | sed 's/nameserver //'):0"
-export LIBGL_ALWAYS_INDIRECT=1
 #echo xfce4-session >~/.xsession
+# export PATH=$HOME/.local/bin:$PATH
 
 export GDK_SCALE=0.5
 export GDK_DPI_SCALE=2
@@ -63,6 +68,7 @@ newpath=(
   "/usr/local/opt/python/libexec/bin"
   "/usr/local/bin"
   "/usr/local/sbin"
+  "$HOME/.local/bin"
   "/bin"
   "/usr/bin"
   "/usr/sbin"

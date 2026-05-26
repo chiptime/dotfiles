@@ -4,7 +4,6 @@ alias sudo='sudo '
 # alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/Code.exe"
 # alias code="/mnt/c/Program\ Files/Microsoft\ VS\ Code/bin/code"
 alias open="explorer.exe"
-alias docker="docker.exe"
 alias docker-compose="docker-compose "
 
 notify-send() {
