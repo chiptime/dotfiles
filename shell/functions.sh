@@ -44,6 +44,20 @@ function s() {
 	servor
 }
 
+# Tmux session launcher
+# Uso: tx compare-prices | tx voice
+# Plantillas en: ~/.config/tmux/sessions/<nombre>.sh
+function tx() {
+	local script="$HOME/.config/tmux/sessions/${1}.sh"
+	if [[ -f "$script" ]]; then
+		source "$script"
+	else
+		echo "No existe la sesión: $1"
+		echo "Disponibles:"
+		ls ~/.config/tmux/sessions/ 2>/dev/null | sed 's/\.sh$//'
+	fi
+}
+
 function export_apps() {
 	sudo apt list --installed > "$DOTFILES_PATH/os/linux/apt-installed.txt"
 	echo "APT apps exported"
@@ -139,6 +153,21 @@ _npm_completion() {
 
             cword="$COMP_CWORD"
             words=("${COMP_WORDS[@]}")
+}
+
+# Fix corrupt zsh history file
+function fix-zsh-history() {
+	if [ ! -f ~/.zsh_history ]; then
+		echo "No .zsh_history file found"
+		return 1
+	fi
+
+	echo "Backing up and repairing .zsh_history..."
+	mv ~/.zsh_history ~/.zsh_history_bad
+	strings ~/.zsh_history_bad > ~/.zsh_history
+	fc -R ~/.zsh_history
+	rm ~/.zsh_history_bad
+	echo "✓ .zsh_history repaired successfully!"
 }
 
 # execute if is zsh terminal

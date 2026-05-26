@@ -1,6 +1,7 @@
 # dotly
-export DOTFILES_PATH="$HOME/.dotfiles"
-export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
+# Paths are now exported in ~/.zshenv
+# export DOTFILES_PATH="$HOME/.dotfiles"
+# export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
 
 PATH=$(
   IFS=":"
@@ -55,3 +56,59 @@ PATH=~/.console-ninja/.bin:$PATH
 
 # opencode
 export PATH=/home/bruno/.opencode/bin:$PATH
+
+# Configuraciones para un historial más seguro
+HISTSIZE=10000
+SAVEHIST=10000
+setopt INC_APPEND_HISTORY     # Escribe el comando inmediatamente (evita pérdida por crash)
+setopt SHARE_HISTORY          # Comparte historial entre pestañas y sincroniza mejor
+setopt HIST_IGNORE_ALL_DUPS   # Evita que el archivo crezca con basura repetida
+setopt HIST_REDUCE_BLANKS     # Limpia espacios extra
+
+# Decirle a WezTerm el título de la pestaña segun la carpeta actual
+precmd() {
+  print -Pn "\e]0;$(basename $PWD)\a"
+}
+
+# Widget para pegar imagen de Windows con Alt+V
+paste_image_widget() {
+  local filename="screenshot_$(date +%Y%m%d_%H%M%S).png"
+  # Ejecutamos PowerShell en background, evitamos ensuciar la pantalla
+  powershell.exe -Command "Add-Type -AssemblyName System.Windows.Forms; \$img=[System.Windows.Forms.Clipboard]::GetImage(); if (\$img) { \$img.Save(\"$(wslpath -w $(pwd))\\$filename\") } else { exit 1 }" > /dev/null
+  
+  if [ $? -eq 0 ]; then
+    # Inserta el nombre del archivo donde esté el cursor
+    LBUFFER="${LBUFFER}${filename} "
+    zle -R # Redibuja el prompt
+  else
+    zle -M "❌ No hay imagen en el portapapeles" # Muestra mensaje sin romper el comando actual
+  fi
+}
+zle -N paste_image_widget
+bindkey '^[v' paste_image_widget  # ^[v es Alt + V en zsh
+
+tx () { 
+    local script="$HOME/.config/tmux/sessions/${1}.sh";
+    if [[ -f "$script" ]]; then
+        source "$script";
+    else
+        echo "No existe la sesión: $1";
+        echo "Disponibles:";
+        ls ~/.config/tmux/sessions/ 2> /dev/null | sed 's/\.sh$//';
+    fi
+}
+
+# ==============================================================================
+# WEZTERM SHELL INTEGRATION
+# ==============================================================================
+# El split de WezTerm pasa el CWD vía variable de entorno (evita validación Windows)
+if [[ -n "$WEZTERM_CWD" && -d "$WEZTERM_CWD" ]]; then
+  cd "$WEZTERM_CWD"
+  unset WEZTERM_CWD
+fi
+# Habilita "Semantic Zones" para poder saltar de prompt en prompt y 
+# detectar el directorio actual (CWD) nativamente en WezTerm.
+# ZSH no define $HOSTNAME por defecto, y wezterm.sh lo necesita
+# para armar la URL del OSC 7 (CWD tracking).
+export HOSTNAME="${HOST:-$(hostname 2>/dev/null || echo localhost)}"
+source "$DOTFILES_PATH/shell/zsh/plugins/wezterm/wezterm.sh"

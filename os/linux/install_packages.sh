@@ -16,6 +16,8 @@ sudo apt install -y unzip
 sudo apt install -y openjdk
 sudo apt install -y x11-apps
 sudo apt install -y openssh-client
+sudo apt install ffmpeg
+
 # sudo apt install -y redis-tools
 # 2021-03-24 09:50:08	apt install -yq libicu[0-9] libkrb5-3 zlib1g
 # 2021-03-24 09:50:14	apt install -yq gnome-keyring libsecret-1-0
@@ -73,3 +75,33 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 curl -fsSL https://bun.com/install | bash # for macOS, Linux, and WSL
 
 sudo apt install -y dkms
+sudo apt install -y nvidia-cuda-toolkit
+sudo apt install -y nvidia-utils-580
+sudo apt install -y pulseaudio-utils libasound-dev
+sudo apt install -y portaudio19-dev
+
+nvidia-smi
+sudo apt update
+# instalar whisperx
+sudo apt install python3.12 python3.12-venv
+
+python3.12 -m venv venv_new
+source venv_new/bin/activate
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+pip install whisperx
+pip install pyaudio
+pip install huggingface_hub
+
+# toco reinstalar las librerias porque dio conflicto de liberias:
+sudo apt install --reinstall pulseaudio-utils libasound-dev
+# PyAudio, ahora que las dependencias de portaudio están instaladas
+pip install pyaudio
+
+# Hugging Face (para autenticación de Pyannote)
+pip install huggingface_hub
+
+# Autenticación (si no lo has hecho ya en este nuevo entorno)
+# huggingface-cli login
+
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
