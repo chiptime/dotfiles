@@ -37,3 +37,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # LazyGit
 alias lg="lazygit"
+
+
+# Added by Antigravity CLI installer
+export PATH="/home/bruno/.local/bin:$PATH"

@@ -21,151 +21,154 @@ end
 -- Importar la API de WezTerm
 local wezterm = require 'wezterm'
 
+local startup_done = false
+
 wezterm.on('gui-startup', function(cmd)
-  -- Si lanzamos wezterm con esta variable de entorno, abrimos el layout completo
   if os.getenv("STARTUP_WORKSPACES") == "1" then
-    local tab, pane, window = wezterm.mux.spawn_window({
-      args = {'wsl.exe', '-d', 'Ubuntu', '-e', 'zsh', '-ic', 'tx compare-prices'}
-    })
-    window:spawn_tab { args = {'wsl.exe', '-d', 'Ubuntu', '-e', 'zsh', '-ic', 'tx compare-prices-2'} }
-    window:spawn_tab { args = {'wsl.exe', '-d', 'Ubuntu', '-e', 'zsh', '-ic', 'tx compare-prices-3'} }
-    window:spawn_tab { args = {'wsl.exe', '-d', 'Ubuntu', '-e', 'zsh', '-ic', 'tx voice'} }
-    window:spawn_tab { args = {'wsl.exe', '-d', 'Ubuntu', '-e', 'zsh', '-ic', 'tx sis'} }
-    window:spawn_tab { args = {'wsl.exe', '-d', 'Ubuntu', '-e', 'zsh', '-ic', 'tx tools'} }
+    if not startup_done then
+      startup_done = true
+
+      local HOME = '/home/bruno'
+      local CP  = HOME .. '/Code/personal/hungry/compare-prices'
+      local VC   = HOME .. '/Code/personal/voice-assistant'
+      local SIS  = HOME .. '/Code/Work/Stratesys/Clece/sis'
+
+      -- 1. Spawn the default window WezTerm expects to avoid phantom windows
+      local default_tab, default_pane, win = wezterm.mux.spawn_window(cmd or {})
+      local window_gui = win:gui_window()
+
+      local function wsl_args(cwd, cmd_str)
+        return {
+          domain = { DomainName = 'WSL:Ubuntu' },
+          args = {'zsh', '-ic', 'cd ' .. cwd .. ' && ' .. cmd_str .. '; exec zsh'}
+        }
+      end
+
+      local function make_2x2(cwd, cmds, title)
+        local spawn_cmd = wsl_args(cwd, cmds[1])
+        -- Todas las tabs se agregan a la ventana 'win' existente
+        local tab = win:spawn_tab({
+          domain = spawn_cmd.domain,
+          args = spawn_cmd.args
+        })
+        if title then tab:set_title(title) end
+        local pane_a = tab:panes()[1]
+
+        local spawn_cmd_c = wsl_args(cwd, cmds[3])
+        window_gui:perform_action(wezterm.action.SplitPane{
+          direction = 'Down', command = { domain = spawn_cmd_c.domain, args = spawn_cmd_c.args }
+        }, pane_a)
+        local pane_c = tab:active_pane()
+
+        local spawn_cmd_d = wsl_args(cwd, cmds[4])
+        window_gui:perform_action(wezterm.action.SplitPane{
+          direction = 'Right', command = { domain = spawn_cmd_d.domain, args = spawn_cmd_d.args }
+        }, pane_c)
+        local pane_d = tab:active_pane()
+
+        window_gui:perform_action(wezterm.action.ActivatePaneDirection('Up'), pane_d)
+        local pane_a_again = tab:active_pane()
+
+        local spawn_cmd_b = wsl_args(cwd, cmds[2])
+        window_gui:perform_action(wezterm.action.SplitPane{
+          direction = 'Right', command = { domain = spawn_cmd_b.domain, args = spawn_cmd_b.args }
+        }, pane_a_again)
+      end
+
+      local function make_2x1(cwd, cmds, title)
+        local spawn_cmd = wsl_args(cwd, cmds[1])
+        local tab = win:spawn_tab({
+          domain = spawn_cmd.domain,
+          args = spawn_cmd.args
+        })
+        if title then tab:set_title(title) end
+        local pane = tab:panes()[1]
+
+        local spawn_cmd2 = wsl_args(cwd, cmds[2])
+        window_gui:perform_action(wezterm.action.SplitPane{
+          direction = 'Right', command = { domain = spawn_cmd2.domain, args = spawn_cmd2.args }
+        }, pane)
+      end
+
+      local function get_oc_cmd(idx)
+        local jq_idx = idx - 1
+        local sleep_time = jq_idx % 4
+        return string.format(
+          "sleep %d; export CODEGRAPH_MCP_LOG_ATTACH=1 SID=$(opencode session list --format json -n 12 2>/dev/null | jq -r '.[%d].id'); if [ -n \"$SID\" ] && [ \"$SID\" != \"null\" ]; then opencode -s \"$SID\"; else opencode; fi",
+          sleep_time, jq_idx
+        )
+      end
+
+      local function staggered_oc()
+        return {'sleep 0; opencode', 'sleep 1; opencode', 'sleep 2; opencode', 'sleep 3; opencode'}
+      end
+
+      make_2x2(CP, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "CP 1-4")
+      make_2x2(CP, { get_oc_cmd(5), get_oc_cmd(6), get_oc_cmd(7), get_oc_cmd(8) }, "CP 5-8")
+      make_2x2(CP, { get_oc_cmd(9), get_oc_cmd(10), get_oc_cmd(11), get_oc_cmd(12) }, "CP 9-12")
+
+      make_2x2(VC, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "Voice Assistant")
+      make_2x2(SIS, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "SIS")
+
+      make_2x2(CP, {
+        'sleep 0; gentle-ai',
+        'sleep 1; claude',
+        'sleep 2; opencode web --hostname 0.0.0.0 --port 4096',
+        'sleep 3; bun run scripts/mobile-proxy.ts'
+      }, "AI Tools")
+
+      make_2x1(VC, {
+         './deploy_electron_to_windows.sh',
+         './run_dev.sh'
+    }, "VC Windows Deploy")
+
+      -- 3. Cerrar la pestaña default inicial enviando un 'exit' para dejar solo nuestras 7 pestañas
+      default_pane:send_text("exit\r")
+    end
+
     return
   end
 
-  -- Comportamiento por defecto (cuando lo abrís normal)
   local tab, pane, window = wezterm.mux.spawn_window(cmd or {})
 end)
 
--- Crear el objeto de configuración (esto te da autocompletado si usas un buen editor)
 local config = wezterm.config_builder()
----------------------------------------------------------------
--- 1. SISTEMA OPERATIVO Y SHELL
----------------------------------------------------------------
--- Forzamos a WezTerm a que arranque directamente dentro de WSL usando ZSH
--- El flag -i asegura modo interactivo (zshrc siempre se carga)
 config.default_prog = { 'wsl.exe', '~', '-e', 'zsh', '-i' }
----------------------------------------------------------------
--- 2. APARIENCIA BÁSICA (Grado Corporativo)
----------------------------------------------------------------
--- Esquema de colores integrado (tiene cientos, este es un clásico)
 config.color_scheme = 'Tokyo Night'
--- Tipografía: Asegurate de tener una fuente Nerd Font instalada en Windows
--- Si no tenés JetBrains, cambiala por 'Consolas' o 'Cascadia Code'
 config.font = wezterm.font('Hack NF')
 config.font_size = 13.5
--- Cuántas líneas guardar de scrollback (build logs largos, etc.)
 config.scrollback_lines = 10000
-
---------------------------------------------------------------
--- 3. INTERFAZ MINIMALISTA
---------------------------------------------------------------
--- Ocultar barra de pestañas si hay solo una (ideal si usas Zellij/Tmux)
 config.hide_tab_bar_if_only_one_tab = true
--- Cursor barra parpadeante, más fácil de ubicar en paredes de texto
 config.default_cursor_style = 'BlinkingBar'
 config.cursor_blink_rate = 500
--- Campana visual en vez de pitido molesto
 config.audible_bell = "Disabled"
--- Nota: El bracketed_paste_mode se maneja desde el shell (Bash/Zsh), no desde wezterm.
-config.visual_bell = {
-  fade_in_duration_ms = 75,
-  fade_out_duration_ms = 75,
-  target = "BackgroundColor",
-}
--- Quitar los bordes feos de Windows 11 para que se vea nativo
 config.window_decorations = "RESIZE"
--- Opacidad ligera para ver el fondo (opcional, ponelo en 1.0 para sólido)
 config.window_background_opacity = 0.95
----------------------------------------------------------------
--- 4. ATAJOS DE TECLADO BÁSICOS Y LÓGICA CUSTOM
----------------------------------------------------------------
-config.disable_default_key_bindings = false
+
 config.keys = {
-  -- Copiar al portapapeles
-  { key = 'c',     mods = 'CTRL|SHIFT', action = wezterm.action.CopyTo 'Clipboard' },
-
-  -- Pegar directo usando la acción nativa de WezTerm
-  { key = 'v',     mods = 'CTRL|SHIFT', action = wezterm.action.PasteFrom 'Clipboard' },
-
-  -- Zoom de fuente (útil para presentar, compartir pantalla, o vista cansada)
-  { key = '=',     mods = 'CTRL',       action = wezterm.action.IncreaseFontSize },
-  { key = '-',     mods = 'CTRL',       action = wezterm.action.DecreaseFontSize },
-  { key = '0',     mods = 'CTRL',       action = wezterm.action.ResetFontSize },
-
-  -- Cerrar panel/tab (muscle memory de navegador)
-  { key = 'w',     mods = 'CTRL',       action = wezterm.action.CloseCurrentPane { confirm = true } },
-
-  -- Nueva pestaña WSL
-  { key = 't',     mods = 'CTRL|SHIFT', action = wezterm.action.SpawnTab 'CurrentPaneDomain' },
-
-  -- Navegación entre pestañas
-  { key = 'Tab',   mods = 'CTRL',       action = wezterm.action.ActivateTabRelative(1) },
-  { key = 'Tab',   mods = 'CTRL|SHIFT', action = wezterm.action.ActivateTabRelative(-1) },
-
-  -- Split pane horizontal (hereda CWD vía --cd de wsl.exe)
-  { key = 'd',     mods = 'CTRL|SHIFT', action = wezterm.action_callback(function(window, pane)
-    local cwd_url = pane:get_current_working_dir()
-    local cwd = cwd_url and cwd_url.file_path or nil
-    if cwd then
-      wezterm.log_info("split-cwd", cwd)
-      window:perform_action(
-        wezterm.action.SplitHorizontal {
-          args = {'wsl.exe', '--cd', cwd, '-e', 'zsh', '-i'},
-        },
-        pane
-      )
-    else
-      window:perform_action(wezterm.action.SplitHorizontal { domain = 'CurrentPaneDomain' }, pane)
-    end
-  end)},
-  -- Split pane vertical (hereda CWD vía --cd de wsl.exe)
-  { key = 'Enter', mods = 'CTRL|SHIFT', action = wezterm.action_callback(function(window, pane)
-    local cwd_url = pane:get_current_working_dir()
-    local cwd = cwd_url and cwd_url.file_path or nil
-    if cwd then
-      wezterm.log_info("split-cwd", cwd)
-      window:perform_action(
-        wezterm.action.SplitVertical {
-          args = {'wsl.exe', '--cd', cwd, '-e', 'zsh', '-i'},
-        },
-        pane
-      )
-    else
-      window:perform_action(wezterm.action.SplitVertical { domain = 'CurrentPaneDomain' }, pane)
-    end
-  end)},
-
-  -- Moverse entre panes con Ctrl+Shift + flechas
-  { key = 'LeftArrow',  mods = 'CTRL|SHIFT', action = wezterm.action.ActivatePaneDirection 'Left' },
+  { key = 'c', mods = 'CTRL|SHIFT', action = wezterm.action.CopyTo 'Clipboard' },
+  { key = 'v', mods = 'CTRL|SHIFT', action = wezterm.action.PasteFrom 'Clipboard' },
+  { key = 'w', mods = 'CTRL', action = wezterm.action.CloseCurrentPane { confirm = true } },
+  { key = 'd', mods = 'CTRL|SHIFT', action = wezterm.action.SplitHorizontal { domain = 'CurrentPaneDomain' } },
+  { key = 'Enter', mods = 'CTRL|SHIFT', action = wezterm.action.SplitVertical { domain = 'CurrentPaneDomain' } },
+  { key = 'LeftArrow', mods = 'CTRL|SHIFT', action = wezterm.action.ActivatePaneDirection 'Left' },
   { key = 'RightArrow', mods = 'CTRL|SHIFT', action = wezterm.action.ActivatePaneDirection 'Right' },
-  { key = 'UpArrow',    mods = 'CTRL|SHIFT', action = wezterm.action.ActivatePaneDirection 'Up' },
-  { key = 'DownArrow',  mods = 'CTRL|SHIFT', action = wezterm.action.ActivatePaneDirection 'Down' },
-
-  -- Zoom pane actual (fullscreen temporal), mismo atajo que Tmux
-  { key = 'z',     mods = 'CTRL|SHIFT', action = wezterm.action.TogglePaneZoomState },
-
-  -- Quick Select: etiqueta cada URL/path/git-SHA con una letra. Apretás la letra y se copia.
-  { key = 'Space', mods = 'CTRL|SHIFT', action = wezterm.action.QuickSelect },
-
-  -- Buscar en todo el scrollback con regex (sin mouse, sin seleccionar)
-  { key = 'f',     mods = 'CTRL|SHIFT', action = wezterm.action.Search 'CurrentSelectionOrEmptyString' },
-
-  -- Copy Mode: entrás al scrollback como si fuera Vim (/ buscar, v seleccionar, y copiar)
-  { key = 'x',     mods = 'CTRL|SHIFT', action = wezterm.action.ActivateCopyMode },
-
-  -- Scroll to Prompt (requiere Shell Integration)
-  { key = 'PageUp',   mods = 'CTRL|SHIFT', action = wezterm.action.ScrollToPrompt(-1) },
+  { key = 'UpArrow', mods = 'CTRL|SHIFT', action = wezterm.action.ActivatePaneDirection 'Up' },
+  { key = 'DownArrow', mods = 'CTRL|SHIFT', action = wezterm.action.ActivatePaneDirection 'Down' },
+  { key = 'z', mods = 'CTRL|SHIFT', action = wezterm.action.TogglePaneZoomState },
+  { key = 'q', mods = 'CTRL|SHIFT', action = wezterm.action.QuickSelect },
+  { key = 'f', mods = 'CTRL|SHIFT', action = wezterm.action.Search 'CurrentSelectionOrEmptyString' },
+  { key = 'x', mods = 'CTRL|SHIFT', action = wezterm.action.ActivateCopyMode },
+  { key = 'PageUp', mods = 'CTRL|SHIFT', action = wezterm.action.ScrollToPrompt(-1) },
   { key = 'PageDown', mods = 'CTRL|SHIFT', action = wezterm.action.ScrollToPrompt(1) },
+  -- Intercepta Ctrl + Z y no ejecuta ninguna acción
+  { key = 'z', mods = 'CTRL', action = wezterm.action.DisableDefaultAssignment },
 }
--- INYECCIÓN: Lógica para pegar imágenes con Alt + V
+
 table.insert(config.keys, {
   key = 'v',
   mods = 'ALT',
   action = wezterm.action_callback(function(window, pane)
-    -- Script de PowerShell que lee el portapapeles, guarda el PNG y devuelve la ruta WSL
     local ps_script = [[
       Add-Type -AssemblyName System.Windows.Forms;
       $img = [System.Windows.Forms.Clipboard]::GetImage();
@@ -175,8 +178,6 @@ table.insert(config.keys, {
           $filename = "screenshot_$(Get-Date -Format 'yyyyMMdd_HHmmss').png";
           $winPath = Join-Path $dir $filename;
           $img.Save($winPath);
-
-          # Convertir ruta Windows (C:\...) a ruta WSL (/mnt/c/...) rapidísimo
           $drive = $winPath.Substring(0,1).ToLower();
           $rest = $winPath.Substring(3).Replace('\', '/');
           Write-Output "/mnt/$drive/$rest";
@@ -184,20 +185,29 @@ table.insert(config.keys, {
           exit 1
       }
     ]]
-    -- Ejecutamos PowerShell directo desde WezTerm (Host)
     local success, stdout, stderr = wezterm.run_child_process({
       "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_script
     })
     if success then
-      -- Si hubo imagen, limpiamos el salto de línea que escupe PowerShell
       local wsl_path = stdout:gsub("[\r\n]", "")
-
-      -- Inyectamos el texto simulando que lo tipeaste en el teclado
       pane:send_text(wsl_path .. " ")
     else
-      -- Si no hay imagen, te lo avisamos con una notificación nativa de WezTerm
-      window:toast_notification("WezTerm", "No hay imagen en el portapapeles de Windows", nil, 4000)
+      window:toast_notification("WezTerm", "No hay imagen en el portapapeles", nil, 4000)
     end
   end),
 })
+
+-- AI Helper: asistente de terminal vía LiteLLM (Alt+I)
+local ai_helper = wezterm.plugin.require("https://github.com/Michal1993r/ai-helper.wezterm")
+ai_helper.apply_to_config(config, {
+  type = "http",
+  api_url = "http://127.0.0.1:4000/v1/chat/completions",
+  api_key = os.getenv("LITELLM_MASTER_KEY") or "sk-test-key-12345",
+  model = "qwen-3.6-27b",
+  keybinding = { key = "i", mods = "ALT" },
+  system_prompt = "You are a CLI assistant. Be brief. Print commands in copy-pasteable format. Chain with && when useful.",
+  timeout = 30,
+  show_loading = true,
+})
+
 return config
