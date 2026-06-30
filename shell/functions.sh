@@ -171,6 +171,6 @@ function fix-zsh-history() {
 }
 
 # execute if is zsh terminal
-if [ -n "$ZSH_VERSION" ]; then
-	compdef _npm_completion npm
+if type compdef >/dev/null 2>&1; then
+    compdef _npm_completion npm
 fi

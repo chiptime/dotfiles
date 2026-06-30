@@ -5,3 +5,7 @@ source ~/.bashrc
 
 # Fig post block. Keep at the bottom of this file.
 [[ -f "$HOME/.fig/shell/bash_profile.post.bash" ]] && builtin source "$HOME/.fig/shell/bash_profile.post.bash"
+
+
+# Added by Antigravity CLI installer
+export PATH="/home/bruno/.local/bin:$PATH"

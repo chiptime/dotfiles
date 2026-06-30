@@ -91,3 +91,20 @@ alias cw.='(code "$(wslpath -w "$(pwd)")" &>/dev/null &)'
 alias o.='open .'
 alias wt='cmd.exe /c start wt.exe -d .'
 # alias up='dot package update_all'
+
+# AI
+
+# Codex personal (default, no necesita alias especial)
+# codex → usa ~/.codex automáticamente
+
+# Codex trabajo
+alias cxw='CODEX_HOME=~/.codex-work codex'
+## no va aqui, pero es parte de la config
+# ln -s ~/.codex/skills                      ~/.codex-work/skills
+# ln -s ~/.codex/AGENTS.md                   ~/.codex-work/AGENTS.md
+# ln -s ~/.codex/engram-instructions.md      ~/.codex-work/engram-instructions.md
+# ln -s ~/.codex/engram-compact-prompt.md    ~/.codex-work/engram-compact-prompt.md
+# ln -s ~/.codex/sdd-cheap.config.toml       ~/.codex-work/sdd-cheap.config.toml
+# ln -s ~/.codex/sdd-mid.config.toml         ~/.codex-work/sdd-mid.config.toml
+# ln -s ~/.codex/sdd-strong.config.toml      ~/.codex-work/sdd-strong.config.toml
+##
