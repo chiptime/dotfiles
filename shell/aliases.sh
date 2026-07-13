@@ -94,6 +94,8 @@ alias wt='cmd.exe /c start wt.exe -d .'
 
 # AI
 
+alias pi-web='~/.config/nvm/versions/node/v22.20.0/bin/pi-web'
+
 # Codex personal (default, no necesita alias especial)
 # codex → usa ~/.codex automáticamente
 
