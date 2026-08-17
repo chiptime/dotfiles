@@ -1,3 +1,6 @@
+local features = require("config.features")
+local tree_filetype = features.legacy and "NvimTree" or "neo-tree"
+
 return {
   {
     "folke/which-key.nvim",
@@ -18,7 +21,7 @@ return {
         component_separators = "",
         section_separators = "",
         disabled_filetypes = {
-          statusline = { "NvimTree", "lazy" },
+          statusline = { tree_filetype, "lazy" },
         },
         globalstatus = true,
         theme = "auto",

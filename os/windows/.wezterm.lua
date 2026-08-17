@@ -103,21 +103,23 @@ wezterm.on('gui-startup', function(cmd)
         return {'sleep 0; opencode', 'sleep 1; opencode', 'sleep 2; opencode', 'sleep 3; opencode'}
       end
 
-      make_2x2(CP, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "CP 1-4")
-      make_2x2(CP, { get_oc_cmd(5), get_oc_cmd(6), get_oc_cmd(7), get_oc_cmd(8) }, "CP 5-8")
-      make_2x2(CP, { get_oc_cmd(9), get_oc_cmd(10), get_oc_cmd(11), get_oc_cmd(12) }, "CP 9-12")
+      -- make_2x2(CP, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "CP 1-4")
+      -- make_2x2(CP, { get_oc_cmd(5), get_oc_cmd(6), get_oc_cmd(7), get_oc_cmd(8) }, "CP 5-8")
+      -- make_2x2(CP, { get_oc_cmd(9), get_oc_cmd(10), get_oc_cmd(11), get_oc_cmd(12) }, "CP 9-12")
 
-      make_2x2(VC, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "Voice Assistant")
-      make_2x2(SIS, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "SIS")
+      -- make_2x2(VC, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "Voice Assistant")
+      -- make_2x2(SIS, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "SIS")
 
       make_2x2(CP, {
-        'sleep 0; gentle-ai',
-        'sleep 1; claude',
-        'sleep 2; opencode web --hostname 0.0.0.0 --port 4096',
-        'sleep 3; bun run scripts/mobile-proxy.ts'
+        'opencode web --hostname 0.0.0.0 --port 4096',
+        'bun run scripts/mobile-proxy.ts',
+        'bun run scripts/copilot-backend.ts',
+        'gentle-ai',
       }, "AI Tools")
 
-      make_2x1(VC, {
+      make_2x2(VC, {
+         'codex',
+         'claude',
          './deploy_electron_to_windows.sh',
          './run_dev.sh'
     }, "VC Windows Deploy")
