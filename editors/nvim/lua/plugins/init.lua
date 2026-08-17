@@ -1,5 +1,7 @@
 return {
+  { import = "plugins.navigation_legacy" },
   { import = "plugins.navigation" },
+  { import = "plugins.ide" },
   { import = "plugins.ui" },
   { import = "plugins.treesitter" },
   { import = "plugins.lsp" },

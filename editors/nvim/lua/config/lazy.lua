@@ -25,7 +25,7 @@ require("lazy").setup(require("plugins"), {
     lazy = true,
   },
   install = {
-    missing = true,
+    missing = false,
   },
   checker = {
     enabled = false,
