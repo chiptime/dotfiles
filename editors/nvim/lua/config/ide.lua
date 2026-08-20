@@ -161,7 +161,7 @@ local function open_neotree(source, reveal)
   if not neo then
     return
   end
-  local args = { action = "focus", source = source, position = "left" }
+  local args = { action = "focus", source = source, position = "current" }
   if reveal then
     args.reveal = true
   end
