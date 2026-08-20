@@ -1,0 +1,12 @@
+[Unit]
+Description=AI Quotas - local dashboard (ai-quotas)
+Documentation=file://%h/.dotfiles/tools/ai-quotas/README.md
+
+[Service]
+ExecStart=%h/.local/bin/ai-quotas serve
+Environment=AI_QUOTAS_PORT=47623
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
