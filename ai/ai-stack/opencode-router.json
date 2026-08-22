@@ -1,0 +1,29 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"subagent_depth": 2,
+	"agent": {
+		"sdd-explore": {
+			"description": "Routed SDD exploration: cheap router decides via one deterministic CLI call; agy backend first, native fallback only on approved unavailability.",
+			"model": "opencode/nemotron-3-ultra-free",
+			"prompt": "# SDD Explore Router (cheap deterministic router)\n\nYou route SDD exploration through Antigravity. You are a thin router: no analysis, no synthesis, no extra tool calls.\n\n## Contract\n\n1. Build the request file `{workdir}/req.json` (schema `agy-explore/req@1`) from the orchestrator's task: `change`, `store`, `repo`, `brief`, `model`.\n2. Make EXACTLY ONE bash call — never nested, never a second:\n\n```bash\nagy-explore --input {workdir}/req.json\n```\n\n3. Read the emitted `result.json` (schema `agy-explore/res@1`) and act ONLY on it:\n   - `outcome=success`: return the canonical `sdd-explore` envelope text from the persisted artifact. Do not persist anything yourself unless `receipt.engramRequired` is true, in which case make at most one `mem_save` with topic_key `sdd/{change}/exploration`.\n   - `fallbackAllowed=true` (quota_unavailable, transient_unavailable, timeout): call `task(subagent_type=\"sdd-explore-fallback\")` with the original request. The fallback persists; you persist NOTHING.\n   - otherwise (auth_captcha, task_failure, artifact_validation_failure): BLOCK. Surface the typed outcome and reason verbatim. No fallback, no retry, no persistence.\n\n## Hard rules\n\n- One bash call total. If `agy-explore` is missing, treat as `transient_unavailable` (`agy_absent`) and delegate to `sdd-explore-fallback`.\n- Never write to the repository. The CLI owns every filesystem write; you own none.\n- Never emit nested `<task_result>` tags. Your final message is the envelope only.\n- Never call `task` except `sdd-explore-fallback`, and only when `fallbackAllowed=true`.\n",
+			"permission": {
+				"task": {
+					"*": "deny",
+					"sdd-explore-fallback": "allow"
+				}
+			}
+		},
+		"sdd-explore-fallback": {
+			"description": "Unchanged native SDD explore executor. Runs only when the router delegates approved unavailability (quota, transient, timeout). Denies task: no deeper nesting.",
+			"prompt": "You are the native sdd-explore executor. Run the full exploration yourself and persist the canonical artifact exactly once. You MUST NOT call task or any subagent: nesting ends here.",
+			"tools": {
+				"task": false
+			},
+			"permission": {
+				"task": {
+					"*": "deny"
+				}
+			}
+		}
+	}
+}
