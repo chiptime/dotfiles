@@ -32,6 +32,9 @@ wezterm.on('gui-startup', function(cmd)
       local CP  = HOME .. '/Code/personal/hungry/compare-prices'
       local VC   = HOME .. '/Code/personal/voice-assistant'
       local SIS  = HOME .. '/Code/Work/Stratesys/Clece/sis'
+      -- opencode web via the sdd-explore router launcher (exports OPENCODE_CONFIG).
+      -- Rollback to plain native: replace OC_WEB usage with 'opencode web'.
+      local OC_WEB = HOME .. '/Code/personal/ai-stack/scripts/opencode-web.sh'
 
       -- 1. Spawn the default window WezTerm expects to avoid phantom windows
       local default_tab, default_pane, win = wezterm.mux.spawn_window(cmd or {})
@@ -111,7 +114,7 @@ wezterm.on('gui-startup', function(cmd)
       -- make_2x2(SIS, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "SIS")
 
       make_2x2(CP, {
-        'opencode web --hostname 0.0.0.0 --port 4096',
+        OC_WEB .. ' --hostname 0.0.0.0 --port 4096',
         'bun run scripts/mobile-proxy.ts',
         'bun run scripts/copilot-backend.ts',
         'gentle-ai',

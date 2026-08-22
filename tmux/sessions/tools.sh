@@ -25,8 +25,8 @@ sleep 1
 tmux send-keys -t "$SESSION:0.1" "gemini" Enter
 sleep 1
 
-# Pane 2 — bottom-left: opencode web
-tmux send-keys -t "$SESSION:0.2" "opencode web --hostname 0.0.0.0 --port 4096" Enter
+# Pane 2 — bottom-left: opencode web (via sdd-explore router launcher)
+tmux send-keys -t "$SESSION:0.2" "$HOME/Code/personal/ai-stack/scripts/opencode-web.sh --hostname 0.0.0.0 --port 4096" Enter
 sleep 1
 
 # Pane 3 — bottom-right: mobile-proxy
