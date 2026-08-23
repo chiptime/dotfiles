@@ -18,3 +18,4 @@
     ~/.config/nvim: editors/nvim
     ~/.config/opencode/commands/notion-backlog.md: ai/agents/opencode/commands/notion-backlog.md
     ~/.config/ai-stack/opencode-router.json: ai/ai-stack/opencode-router.json
+    ~/.local/bin/opencode-web: ai/ai-stack/bin/opencode-web.sh

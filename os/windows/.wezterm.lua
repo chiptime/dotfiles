@@ -32,9 +32,10 @@ wezterm.on('gui-startup', function(cmd)
       local CP  = HOME .. '/Code/personal/hungry/compare-prices'
       local VC   = HOME .. '/Code/personal/voice-assistant'
       local SIS  = HOME .. '/Code/Work/Stratesys/Clece/sis'
-      -- opencode web via the sdd-explore router launcher (exports OPENCODE_CONFIG).
-      -- Rollback to plain native: replace OC_WEB usage with 'opencode web'.
-      local OC_WEB = HOME .. '/Code/personal/ai-stack/scripts/opencode-web.sh'
+      -- opencode web via the portable dotfiles launcher (~/.local/bin/opencode-web,
+      -- dotbot-linked from ai/ai-stack/bin/opencode-web.sh; exports OPENCODE_CONFIG
+      -- + PATH for the routed sdd-explore binary). Rollback: 'opencode web'.
+      local OC_WEB = HOME .. '/.local/bin/opencode-web'
 
       -- 1. Spawn the default window WezTerm expects to avoid phantom windows
       local default_tab, default_pane, win = wezterm.mux.spawn_window(cmd or {})
