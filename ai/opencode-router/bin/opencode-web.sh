@@ -21,7 +21,7 @@ CONFIG="${AI_STACK_ROUTER_CONFIG:-$HOME/.config/ai-stack/opencode-router.json}"
 
 if [ ! -f "$CONFIG" ]; then
   echo "router config not installed: $CONFIG" >&2
-  echo "run your dotfiles install (links ai/ai-stack/opencode-router.json)" >&2
+  echo "run your dotfiles install (links ai/opencode-router/opencode-router.json)" >&2
   exit 2
 fi
 

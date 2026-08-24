@@ -1,0 +1,3 @@
+No ha sido posible completar la operación porque el archivo [`/ruta/inexistente/xyz.txt`](file:///ruta/inexistente/xyz.txt) no existe en el sistema. 
+
+Debido a esto, no se puede leer ni copiar su contenido en [`salida.md`](file:///tmp/agy-spike/task-fail/salida.md). Por favor, verifica la ruta del archivo e inténtalo de nuevo indicando la ubicación correcta.

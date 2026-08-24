@@ -33,7 +33,7 @@ wezterm.on('gui-startup', function(cmd)
       local VC   = HOME .. '/Code/personal/voice-assistant'
       local SIS  = HOME .. '/Code/Work/Stratesys/Clece/sis'
       -- opencode web via the portable dotfiles launcher (~/.local/bin/opencode-web,
-      -- dotbot-linked from ai/ai-stack/bin/opencode-web.sh; exports OPENCODE_CONFIG
+      -- dotbot-linked from ai/opencode-router/bin/opencode-web.sh; exports OPENCODE_CONFIG
       -- + PATH for the routed sdd-explore binary). Rollback: 'opencode web'.
       local OC_WEB = HOME .. '/.local/bin/opencode-web'
 
