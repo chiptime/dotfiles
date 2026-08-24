@@ -75,10 +75,13 @@ describe('unit: outcomes — classify run signals', () => {
 		['exit 124 from timeout(1) maps to timeout', { exitCode: 124, log: '' }, 'timeout', 'timeout'],
 		['auth/captcha log maps to auth_captcha', { exitCode: 1, log: 'agent hit a CAPTCHA wall; authentication required' }, 'auth_captcha', 'auth_or_captcha'],
 		['quota log maps to quota_unavailable', { exitCode: 1, log: '429 quota exceeded: RESOURCE_EXHAUSTED' }, 'quota_unavailable', 'quota_exhausted'],
+		['quota word, clean exit, no artifact keeps quota gate', { exitCode: 0, artifactBytes: 0, log: '429 quota exceeded' }, 'quota_unavailable', 'quota_exhausted'],
 		['outage log maps to transient_unavailable', { exitCode: 1, log: 'server error 503, service overloaded, connection refused' }, 'transient_unavailable', 'provider_outage'],
 		['other nonzero exit maps to task_failure', { exitCode: 2, log: 'usage: agy <prompt>' }, 'task_failure', 'nonzero_exit'],
 		['empty artifact maps to artifact_validation_failure', { exitCode: 0, log: 'finished cleanly', artifactBytes: 0 }, 'artifact_validation_failure', 'artifact_missing_or_empty'],
 		['clean run with artifact maps to success', { exitCode: 0, log: 'wrote exploration.md', artifactBytes: 412 }, 'success', 'ok'],
+		['quota word does not override artifact-backed success', { exitCode: 0, artifactBytes: 412, log: '429 quota exceeded: RESOURCE_EXHAUSTED' }, 'success', 'ok'],
+		['auth word does not override artifact-backed success', { exitCode: 0, artifactBytes: 412, log: 'captcha wall; authentication required' }, 'success', 'ok'],
 	];
 	for (const [name, signal, outcome, reason] of cases) {
 		test(name, () => {
@@ -90,6 +93,10 @@ describe('unit: outcomes — classify run signals', () => {
 
 	test('auth markers take precedence over quota markers', () => {
 		expect(classifyRun({ exitCode: 1, log: '429 rate limit AND captcha challenge' }).outcome).toBe('auth_captcha');
+	});
+
+	test('artifact-backed success outranks auth and quota markers', () => {
+		expect(classifyRun({ exitCode: 0, artifactBytes: 412, log: '429 rate limit AND captcha challenge' }).outcome).toBe('success');
 	});
 
 	test('timeout takes precedence over log markers', () => {
