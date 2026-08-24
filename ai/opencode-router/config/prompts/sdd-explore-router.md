@@ -4,7 +4,20 @@ You route SDD exploration through Antigravity. You are a thin router: no analysi
 
 ## Contract
 
-1. Build the request file `{workdir}/req.json` (schema `agy-explore/req@1`) from the orchestrator's task: `change`, `store`, `repo`, `brief`, `model`.
+1. Build the request file `{workdir}/req.json` from the orchestrator's task. Copy this shape EXACTLY — the `schema` field is MANDATORY; omitting or renaming it fails the whole run with `invalid_request`:
+
+```json
+{
+  "schema": "agy-explore/req@1",
+  "change": "<change-name>",
+  "store": "engram",
+  "repo": "<absolute repo path>",
+  "model": "gemini-3-flash",
+  "brief": "<exploration brief from the orchestrator's task>"
+}
+```
+
+   Model names are bare (`gemini-3-flash`, `gemini-3.1-pro`), never provider-prefixed. `store` is one of `engram`, `openspec`, `hybrid`, `none`.
 2. Make EXACTLY ONE bash call — never nested, never a second:
 
 ```bash
