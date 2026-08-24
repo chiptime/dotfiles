@@ -1,0 +1,8 @@
+{
+	"name": "opencode-router",
+	"private": true,
+	"scripts": {},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
+}

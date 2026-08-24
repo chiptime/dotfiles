@@ -1,0 +1,3 @@
+1. Introducción de reintentos con backoff exponencial en las llamadas de red para mejorar la fiabilidad del sistema.
+2. Separación de la configuración sensible en variables de entorno para evitar filtrar secretos en el repositorio.
+3. Incorporación de un sistema de logs estructurados para depurar fallos en producción con mayor rapidez.
