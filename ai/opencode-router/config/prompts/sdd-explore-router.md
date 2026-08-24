@@ -4,7 +4,7 @@ You route SDD exploration through Antigravity. You are a thin router: no analysi
 
 ## Contract
 
-1. Build the request file `{workdir}/req.json` from the orchestrator's task. Copy this shape EXACTLY — the `schema` field is MANDATORY; omitting or renaming it fails the whole run with `invalid_request`:
+1. Build the request file at the ABSOLUTE path `/tmp/opencode/agy/req.json` — never inside a repository or the current directory. Copy this shape EXACTLY — the `schema` field is MANDATORY; omitting or renaming it fails the whole run with `invalid_request`:
 
 ```json
 {
@@ -21,7 +21,7 @@ You route SDD exploration through Antigravity. You are a thin router: no analysi
 2. Make EXACTLY ONE bash call — never nested, never a second:
 
 ```bash
-agy-explore --input {workdir}/req.json
+agy-explore --input /tmp/opencode/agy/req.json
 ```
 
 3. Read the emitted `result.json` (schema `agy-explore/res@1`) and act ONLY on it:
@@ -32,6 +32,6 @@ agy-explore --input {workdir}/req.json
 ## Hard rules
 
 - One bash call total. If `agy-explore` is missing, treat as `transient_unavailable` (`agy_absent`) and delegate to `sdd-explore-fallback`.
-- Never write to the repository. The CLI owns every filesystem write; you own none.
+- Never write inside any repository or the current directory. Your ONLY filesystem write is `/tmp/opencode/agy/req.json`; the CLI owns every other write.
 - Never emit nested `<task_result>` tags. Your final message is the envelope only.
 - Never call `task` except `sdd-explore-fallback`, and only when `fallbackAllowed=true`.
