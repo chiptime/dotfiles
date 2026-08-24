@@ -2,6 +2,18 @@
  * Typed outcome contracts for the agy exploration backend (v1). Raw agy
  * exit codes are NOT trusted alone; classification combines spawn error,
  * timeout, run.log markers, exit code, and artifact presence.
+ *
+ * classifyRun precedence (first match wins):
+ * 1. spawnError ENOENT            → transient_unavailable (agy_absent)
+ * 2. timedOut OR exitCode 124     → timeout (timeout)
+ * 3. exitCode 0 AND artifactBytes → success (ok) — a non-empty artifact on a
+ *    clean exit is the authoritative success signal; log-pattern regexes gate
+ *    only runs that miss this rule (failed runs)
+ * 4. AUTH_RE matches log          → auth_captcha (auth_or_captcha)
+ * 5. QUOTA_RE matches log         → quota_unavailable (quota_exhausted)
+ * 6. TRANSIENT_RE matches log     → transient_unavailable (provider_outage)
+ * 7. exitCode !== 0               → task_failure (nonzero_exit)
+ * 8. artifactBytes missing/0      → artifact_validation_failure (artifact_missing_or_empty)
  */
 export type Outcome =
 	| 'success'
@@ -59,11 +71,17 @@ export function isFallbackAllowed(outcome: Outcome): boolean {
 	return outcome === 'quota_unavailable' || outcome === 'transient_unavailable' || outcome === 'timeout';
 }
 
-/** Deterministic exit/log → Outcome mapping. Order is the precedence. */
+/**
+ * Deterministic exit/log → Outcome mapping. First match wins across the 8
+ * rules documented on this module: ENOENT, timeout, artifact-backed success
+ * (exit 0 + artifact present — immune to log patterns), then the AUTH/QUOTA/
+ * TRANSIENT regex gates for failed runs, nonzero exit, and empty artifact.
+ */
 export function classifyRun(signal: RunSignal): Classification {
 	const log = signal.log ?? '';
 	if (signal.spawnError === 'ENOENT') return { outcome: 'transient_unavailable', reason: 'agy_absent' };
 	if (signal.timedOut || signal.exitCode === 124) return { outcome: 'timeout', reason: 'timeout' };
+	if (signal.exitCode === 0 && signal.artifactBytes) return { outcome: 'success', reason: 'ok' };
 	if (AUTH_RE.test(log)) return { outcome: 'auth_captcha', reason: 'auth_or_captcha' };
 	if (QUOTA_RE.test(log)) return { outcome: 'quota_unavailable', reason: 'quota_exhausted' };
 	if (TRANSIENT_RE.test(log)) return { outcome: 'transient_unavailable', reason: 'provider_outage' };
