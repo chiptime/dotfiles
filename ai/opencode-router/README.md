@@ -10,12 +10,15 @@ the `ai-stack` repo (VPS infra) is NOT needed for anything router-related.
 | Piece | Lives at | Notes |
 |---|---|---|
 | Router source | `src/agy/*.ts` | typed outcomes, quota pools, containment, persistence |
+| Dispatcher plugin source | `src/plugin/sdd-explore-dispatch.ts` + `src/agy/dispatch-core.ts` | 0-LLM before-hook interceptor (pure core + thin adapter) |
+| Dispatcher plugin artifact | `~/.config/opencode/plugins/sdd-explore-dispatch.ts` | bundled by `build.sh`; auto-loads globally in opencode |
 | Config template + prompt | `config/` | `opencode-router.template.json` + `prompts/sdd-explore-router.md` |
 | Rendered router config | `opencode-router.json` | committed output of `build.sh`; dotbot-links to `~/.config/ai-stack/opencode-router.json` |
 | Launcher | `bin/opencode-web.sh` | dotbot-links to `~/.local/bin/opencode-web` |
 | Router binary | `~/.local/bin/agy-explore` | compiled by `build.sh` from `src/agy/cli.ts` |
-| Tests | `tests/agy-router.test.ts` | unit + integration + contract + smoke, hermetic (stub agy) |
+| Tests | `tests/agy-router.test.ts`, `tests/dispatch.test.ts` | unit + integration + contract + smoke, hermetic (stub agy) |
 | Quota records | `~/.local/state/ai-quotas/` | provided by `tools/ai-quotas` (same dotfiles) |
+| Request flow diagram | `FLOW.md` | Mermaid diagram of the full dispatch flow with per-path costs |
 
 ## New machine bootstrap
 
@@ -32,17 +35,22 @@ No `ai-stack` checkout is required at any point — that repo is VPS infrastruct
 Edit `src/` or `config/`, then from this directory:
 
 ```bash
-bun test tests/agy-router.test.ts   # must be green
-./build.sh                          # re-render config + recompile the binary
+bun test               # must be green (router + dispatcher suites)
+./build.sh             # re-render config + recompile binary + rebundle plugin
 ```
 
-The binary embeds the code at build time — pulling changes without running
-`build.sh` is NOT a deploy. The rendered `opencode-router.json` is committed;
-the integrity test fails if it ever drifts from `config/` template + prompt.
+The binary and the plugin artifact embed the code at build time — pulling
+changes without running `build.sh` is NOT a deploy. The rendered
+`opencode-router.json` is committed; the integrity test fails if it ever
+drifts from `config/` template + prompt.
 
 ## Rollback
 
 - Hot kill switch (no restart): `touch ~/.config/ai-stack/force-native` — routed
-  explores return `force_native` and run the native executor. Remove the file to
-  re-enable routing.
+  explores return `force_native` and run the native executor. The dispatcher
+  plugin honors the SAME file (plus `AI_STACK_SDD_EXPLORE=native`), falling
+  through to the native router/executor before anything runs. Remove the file
+  to re-enable routing.
+- Delete `~/.config/opencode/plugins/sdd-explore-dispatch.ts` and restart
+  opencode to remove the interceptor entirely (rebuild via `build.sh`).
 - Full native: launch `opencode web` directly instead of `opencode-web`.

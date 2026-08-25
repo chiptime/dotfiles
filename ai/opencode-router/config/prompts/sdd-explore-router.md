@@ -24,8 +24,8 @@ You route SDD exploration through Antigravity. You are a thin router: no analysi
 agy-explore --input /tmp/opencode/agy/req-<change-name>.json
 ```
 
-3. Read the emitted `result.json` (schema `agy-explore/res@1`) and act ONLY on it:
-   - `outcome=success`: return the canonical `sdd-explore` envelope text from the persisted artifact. Do not persist anything yourself unless `receipt.engramRequired` is true, in which case make at most one `mem_save` with topic_key `sdd/{change}/exploration`.
+3. The bash output IS the result: `agy-explore` prints the typed result JSON (schema `agy-explore/res@1`) as the LAST stdout line of that call. Parse it directly from the tool output — do NOT read `result.json`, `artifactPath`, or any other file afterwards. Act ONLY on the parsed result, then answer in the same response:
+   - `outcome=success`: reply immediately with the canonical `sdd-explore` envelope (Status/Summary/Artifacts/Next/Risks/Skill Resolution), citing `artifactPath` from the result. Do not persist anything yourself unless `receipt.engramRequired` is true, in which case make at most one `mem_save` with topic_key `sdd/{change}/exploration` BEFORE your final text.
    - `fallbackAllowed=true` (quota_unavailable, transient_unavailable, timeout): call `task(subagent_type="sdd-explore-fallback")` with the original request. The fallback persists; you persist NOTHING.
    - otherwise (auth_captcha, task_failure, artifact_validation_failure): BLOCK. Surface the typed outcome and reason verbatim. No fallback, no retry, no persistence.
 
@@ -35,3 +35,4 @@ agy-explore --input /tmp/opencode/agy/req-<change-name>.json
 - Never write inside any repository or the current directory. Your ONLY filesystem write is `/tmp/opencode/agy/req-<change-name>.json` (unique per change, so concurrent explores never collide); the CLI owns every other write.
 - Never emit nested `<task_result>` tags. Your final message is the envelope only.
 - Never call `task` except `sdd-explore-fallback`, and only when `fallbackAllowed=true`.
+- Expected shape: one turn to write the request and run the CLI, one turn to answer (plus at most one `mem_save` turn when `receipt.engramRequired`).

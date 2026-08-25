@@ -74,9 +74,10 @@ describe('unit: outcomes — classify run signals', () => {
 		['timeout flag maps to timeout', { exitCode: null, timedOut: true }, 'timeout', 'timeout'],
 		['exit 124 from timeout(1) maps to timeout', { exitCode: 124, log: '' }, 'timeout', 'timeout'],
 		['auth/captcha log maps to auth_captcha', { exitCode: 1, log: 'agent hit a CAPTCHA wall; authentication required' }, 'auth_captcha', 'auth_or_captcha'],
-		['quota log maps to quota_unavailable', { exitCode: 1, log: '429 quota exceeded: RESOURCE_EXHAUSTED' }, 'quota_unavailable', 'quota_exhausted'],
-		['quota word, clean exit, no artifact keeps quota gate', { exitCode: 0, artifactBytes: 0, log: '429 quota exceeded' }, 'quota_unavailable', 'quota_exhausted'],
-		['outage log maps to transient_unavailable', { exitCode: 1, log: 'server error 503, service overloaded, connection refused' }, 'transient_unavailable', 'provider_outage'],
+		['quota log + nonzero exit maps to quota_unavailable', { exitCode: 1, log: '429 quota exceeded: RESOURCE_EXHAUSTED' }, 'quota_unavailable', 'quota_exhausted'],
+		['exit-code corroboration: quota word on clean exit is NOT unavailability', { exitCode: 0, artifactBytes: 0, log: '429 quota exceeded' }, 'artifact_validation_failure', 'artifact_missing_or_empty'],
+		['exit-code corroboration: transient word on clean exit is NOT unavailability', { exitCode: 0, artifactBytes: 0, log: 'server error 503, service overloaded, connection refused' }, 'artifact_validation_failure', 'artifact_missing_or_empty'],
+		['outage log + nonzero exit maps to transient_unavailable', { exitCode: 1, log: 'server error 503, service overloaded, connection refused' }, 'transient_unavailable', 'provider_outage'],
 		['other nonzero exit maps to task_failure', { exitCode: 2, log: 'usage: agy <prompt>' }, 'task_failure', 'nonzero_exit'],
 		['empty artifact maps to artifact_validation_failure', { exitCode: 0, log: 'finished cleanly', artifactBytes: 0 }, 'artifact_validation_failure', 'artifact_missing_or_empty'],
 		['clean run with artifact maps to success', { exitCode: 0, log: 'wrote exploration.md', artifactBytes: 412 }, 'success', 'ok'],
@@ -101,6 +102,16 @@ describe('unit: outcomes — classify run signals', () => {
 
 	test('timeout takes precedence over log markers', () => {
 		expect(classifyRun({ exitCode: 124, log: 'quota exceeded', timedOut: true }).outcome).toBe('timeout');
+	});
+
+	test('exit-code corroboration: quota/transient log noise on a clean exit never allows fallback', () => {
+		expect(isFallbackAllowed(classifyRun({ exitCode: 0, artifactBytes: 0, log: '429 quota exceeded' }).outcome)).toBe(false);
+		expect(isFallbackAllowed(classifyRun({ exitCode: 0, artifactBytes: 0, log: '503 service unavailable' }).outcome)).toBe(false);
+	});
+
+	test('exit-code corroboration: the same logs with a nonzero exit do allow fallback', () => {
+		expect(isFallbackAllowed(classifyRun({ exitCode: 1, log: '429 quota exceeded' }).outcome)).toBe(true);
+		expect(isFallbackAllowed(classifyRun({ exitCode: 1, log: '503 service unavailable' }).outcome)).toBe(true);
 	});
 });
 
@@ -475,6 +486,27 @@ describe('unit: spawn — timeout, workdir-only args, run.log, daily guard', () 
 		const r = runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 150 });
 		expect(r.timedOut).toBe(true);
 		expect(r.exitCode).not.toBe(0);
+	});
+	test('--model passthrough: appended when provided, absent when missing/empty', async () => {
+		const dir = await mkdtemp('/tmp/agy-spawn-');
+		const stub = `${dir}/stub.sh`;
+		await Bun.write(stub, '#!/bin/sh\nprintf "%s" "$*" > "$0.args"\nexit 0\n');
+		Bun.spawnSync(['chmod', '+x', stub]);
+		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: 'gemini-3-flash' });
+		expect(await Bun.file(`${stub}.args`).text()).toContain('--model gemini-3-flash');
+		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: '' });
+		expect(await Bun.file(`${stub}.args`).text()).not.toContain('--model');
+		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000 });
+		expect(await Bun.file(`${stub}.args`).text()).not.toContain('--model');
+	});
+	test('depsFor wiring: req.model reaches the agy argv via run()', async () => {
+		const dir = await mkdtemp('/tmp/agy-spawn-');
+		const stub = `${dir}/stub.sh`;
+		await Bun.write(stub, '#!/bin/sh\nprintf "%s" "$*" > "$0.args"\nexit 0\n');
+		Bun.spawnSync(['chmod', '+x', stub]);
+		const req = { schema: 'agy-explore/req@1' as const, change: 'model-pass', store: 'openspec' as const, repo: '/r', brief: 'b', model: 'gemini-3.1-pro' };
+		depsFor(req, dir, { agyBin: stub, timeoutMs: 5000 }).run();
+		expect(await Bun.file(`${stub}.args`).text()).toContain('--model gemini-3.1-pro');
 	});
 	test('daily guard counts only conversation DBs from today', async () => {
 		const dir = await mkdtemp('/tmp/agy-guard-');
