@@ -376,3 +376,6 @@ precmd_functions+=(__override_wezterm_shell_integration)
 
 # Added by Antigravity CLI installer
 export PATH="/home/bruno/.local/bin:$PATH"
+
+# OpenCode server auth (local-only file, never committed)
+[[ -f "$HOME/.local/share/opencode/server.env" ]] && source "$HOME/.local/share/opencode/server.env"
