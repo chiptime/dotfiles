@@ -34,4 +34,20 @@ echo "rendered: $OUT (from config/ template + prompt)"
 mkdir -p "$HOME/.local/bin"
 bun build --compile src/agy/cli.ts --outfile "$BIN"
 echo "compiled: $BIN"
+
+# (c) bundle the sdd-explore dispatcher plugin into the global plugins dir.
+# Design option (b): the versioned source of truth is src/plugin/
+# sdd-explore-dispatch.ts + src/agy/dispatch-core.ts in THIS repo; build.sh
+# renders a single self-contained artifact into ~/.config/opencode/plugins
+# (unversioned, auto-loaded at startup). No runtime cross-repo imports, so
+# the plugin survives reboots/upgrades with zero path magic. The .ts
+# extension is deliberate: the auto-loader demonstrably picks up .ts files
+# there today, and the bundle payload is plain ESM JS (valid TS input).
+PLUGIN_SRC="$ROOT/src/plugin/sdd-explore-dispatch.ts"
+PLUGIN_OUT="$HOME/.config/opencode/plugins/sdd-explore-dispatch.ts"
+[ -f "$PLUGIN_SRC" ] || { echo "plugin source missing: $PLUGIN_SRC" >&2; exit 2; }
+mkdir -p "$HOME/.config/opencode/plugins"
+bun build --target=bun --format=esm "$PLUGIN_SRC" --outfile "$PLUGIN_OUT"
+echo "bundled: $PLUGIN_OUT"
+
 echo "done: run 'git diff $OUT' to confirm the rendered config is unchanged before committing."

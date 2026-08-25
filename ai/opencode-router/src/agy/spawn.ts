@@ -12,6 +12,8 @@ export interface SpawnOptions {
 	workdir: string;
 	timeoutMs: number;
 	env?: Record<string, string>;
+	/** Requested model passed through to agy as `--model`; omitted when empty. */
+	model?: string;
 }
 
 export interface SpawnRun {
@@ -27,7 +29,9 @@ export function runAgy(opts: SpawnOptions): SpawnRun {
 	mkdirSync(opts.workdir, { recursive: true });
 	const start = Date.now();
 	// NOTE: no --add-dir ever; agy runs with skip-permissions so any added dir would be writable.
-	const proc = spawnSync(opts.bin, ['--print', opts.prompt, '--add-dir', opts.workdir, '--dangerously-skip-permissions'], {
+	const args = ['--print', opts.prompt, '--add-dir', opts.workdir, '--dangerously-skip-permissions'];
+	if (opts.model) args.push('--model', opts.model);
+	const proc = spawnSync(opts.bin, args, {
 		cwd: opts.workdir,
 		timeout: opts.timeoutMs,
 		encoding: 'utf8',

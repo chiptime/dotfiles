@@ -10,8 +10,13 @@
  *    clean exit is the authoritative success signal; log-pattern regexes gate
  *    only runs that miss this rule (failed runs)
  * 4. AUTH_RE matches log          → auth_captcha (auth_or_captcha)
- * 5. QUOTA_RE matches log         → quota_unavailable (quota_exhausted)
- * 6. TRANSIENT_RE matches log     → transient_unavailable (provider_outage)
+ * 5. exitCode !== 0 (or null) AND QUOTA_RE matches log
+ *                                → quota_unavailable (quota_exhausted)
+ * 6. exitCode !== 0 (or null) AND TRANSIENT_RE matches log
+ *                                → transient_unavailable (provider_outage)
+ *    Exit-code corroboration: the log is agy's COMBINED stdout+stderr, so
+ *    quota/transient words can appear as noise on clean runs. They only
+ *    count as unavailability (fallback) when the process exit code agrees.
  * 7. exitCode !== 0               → task_failure (nonzero_exit)
  * 8. artifactBytes missing/0      → artifact_validation_failure (artifact_missing_or_empty)
  */
@@ -74,8 +79,10 @@ export function isFallbackAllowed(outcome: Outcome): boolean {
 /**
  * Deterministic exit/log → Outcome mapping. First match wins across the 8
  * rules documented on this module: ENOENT, timeout, artifact-backed success
- * (exit 0 + artifact present — immune to log patterns), then the AUTH/QUOTA/
- * TRANSIENT regex gates for failed runs, nonzero exit, and empty artifact.
+ * (exit 0 + artifact present — immune to log patterns), AUTH gate, then the
+ * QUOTA/TRANSIENT regex gates for FAILED runs only (nonzero/null exit —
+ * combined-output log noise on a clean exit is not unavailability), nonzero
+ * exit, and empty artifact.
  */
 export function classifyRun(signal: RunSignal): Classification {
 	const log = signal.log ?? '';
@@ -83,9 +90,11 @@ export function classifyRun(signal: RunSignal): Classification {
 	if (signal.timedOut || signal.exitCode === 124) return { outcome: 'timeout', reason: 'timeout' };
 	if (signal.exitCode === 0 && signal.artifactBytes) return { outcome: 'success', reason: 'ok' };
 	if (AUTH_RE.test(log)) return { outcome: 'auth_captcha', reason: 'auth_or_captcha' };
-	if (QUOTA_RE.test(log)) return { outcome: 'quota_unavailable', reason: 'quota_exhausted' };
-	if (TRANSIENT_RE.test(log)) return { outcome: 'transient_unavailable', reason: 'provider_outage' };
-	if (signal.exitCode !== 0) return { outcome: 'task_failure', reason: 'nonzero_exit' };
+	if (signal.exitCode !== 0) {
+		if (QUOTA_RE.test(log)) return { outcome: 'quota_unavailable', reason: 'quota_exhausted' };
+		if (TRANSIENT_RE.test(log)) return { outcome: 'transient_unavailable', reason: 'provider_outage' };
+		return { outcome: 'task_failure', reason: 'nonzero_exit' };
+	}
 	if (!signal.artifactBytes) return { outcome: 'artifact_validation_failure', reason: 'artifact_missing_or_empty' };
 	return { outcome: 'success', reason: 'ok' };
 }
