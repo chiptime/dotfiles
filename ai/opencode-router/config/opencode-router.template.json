@@ -4,7 +4,6 @@
 	"agent": {
 		"sdd-explore": {
 			"description": "Routed SDD exploration: cheap router decides via one deterministic CLI call; agy backend first, native fallback only on approved unavailability.",
-			"model": "opencode/nemotron-3-ultra-free",
 			"prompt": "@prompt-file",
 			"permission": {
 				"task": {

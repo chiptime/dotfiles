@@ -32,7 +32,7 @@
     color: #ffffff;
   }
   #btn-refresh:disabled {
-    opacity: 0.6;
+    opacity: .6;
     cursor: not-allowed;
   }
   .spin {
@@ -42,22 +42,46 @@
   @keyframes spin {
     100% { transform: rotate(360deg); }
   }
-  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 16px; }
+  #ranking { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
+  #ranking .rank-label { color: #8b949e; font-size: 12px; }
+  .chip { display: inline-flex; align-items: baseline; gap: 6px; border: 1px solid #30363d;
+          border-radius: 999px; padding: 4px 12px; font-size: 12px; color: #c9d1d9; }
+  .chip b { font-weight: 600; }
+  .chip .w { color: #8b949e; }
+  .chip.best { border-color: #3fb950; }
+  .chip.best b, .chip.best .w { color: #3fb950; }
+  .chip.ahead { border-color: #d29922; }
+  .chip.ahead b, .chip.ahead .w { color: #d29922; }
+  #groups { display: flex; flex-direction: row; gap: 20px; align-items: flex-start;
+            overflow-x: auto; padding-bottom: 10px; }
+  .group { flex: 0 0 auto; width: min(270px, 85vw); }
+  .group-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
+                flex-wrap: wrap; }
+  .group-title { font-size: 15px; font-weight: 600; }
+  .group-sub { color: #8b949e; font-size: 12px; }
+  .sub-head { color: #8b949e; font-size: 11px; margin: 12px 0 8px;
+              text-transform: uppercase; letter-spacing: .05em; }
+  .cards { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px; }
   .card.stale { opacity: .5; }
+  .card.done { opacity: .45; filter: grayscale(1); }
   .card.missing { background: transparent; border: 1px dashed #484f58; }
-  .card .title { font-weight: 600; font-size: 15px; }
-  .card .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
+  .card .title { font-weight: 600; font-size: 14px; }
   .badges { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #30363d; color: #8b949e; }
   .badge.state-error { border-color: #f85149; color: #f85149; background: rgba(248, 81, 73, .1); }
   .badge.state-stale { border-color: #d29922; color: #d29922; }
+  .badge.state-done { border-color: #8b949e; color: #8b949e; background: rgba(139, 148, 158, .08); }
+  .chip.done { opacity: .45; }
+  .group.exhausted .group-title { color: #8b949e; }
   .big { font-size: 30px; font-weight: 700; margin-top: 12px; }
-  .bar { margin-top: 8px; height: 4px; border-radius: 2px; background: #30363d; overflow: hidden; }
+  .bar { margin-top: 8px; height: 4px; border-radius: 2px; background: #30363d; overflow: hidden; position: relative; }
   .bar > i { display: block; height: 100%; border-radius: 2px; }
   .bar > i.green { background: #3fb950; }
   .bar > i.amber { background: #d29922; }
   .bar > i.red { background: #f85149; }
+  .bar > i.tick { position: absolute; top: 0; left: 0; width: 2px; height: 100%;
+                  background: #e6edf3; opacity: .75; }
   .resets { color: #8b949e; font-size: 12px; margin-top: 8px; }
   .detail { color: #f85149; font-size: 12px; margin-top: 8px; word-break: break-word; }
   .nodata { color: #8b949e; margin-top: 12px; }
@@ -73,16 +97,90 @@
     </button>
   </div>
 </header>
-<div id="grid"></div>
+<div id="ranking"></div>
+<div id="groups"></div>
 <footer>AI Quotas · local only · <span id="refreshed">—</span></footer>
 <script>
 'use strict';
 
 const SYMBOLS = { EUR: '€', USD: '$', CNY: '¥' };
 
+// Provider group order (known pull/file ids first, unknown ones after, by name).
+const ORDER = ['claude', 'zai', 'chatgpt', 'opencode', 'gemini', 'deepseek'];
+
+// Relative subscription capacity in weekly "Claude Pro equivalents"
+// (1 eq = one week of your Claude Pro, the base sub). Tune to your real
+// plans: a 20x plan at 35% weekly has used 7 eq and still has 13 eq free,
+// while the 1x base at 50% has only 0.5 eq free — that is the comparable
+// "how much is left" number. Providers not listed (or 0) are excluded.
+const CAPACITY = { claude: 1, zai: 20, chatgpt: 1, opencode: 1, gemini: 1 };
+
+// Window used for cross-sub comparison (the only one all coding subs share).
+const COMPARISON_LABEL = 'weekly';
+
+// Standard window labels form the main row of a group; everything else
+// (3P variants, generic token limits, balances...) falls into "Otras cuotas".
+// "monthly" matches both OpenCode "Monthly" and Z.ai "MCP monthly".
+function isMainLabel(label) {
+  const l = String(label || '').toLowerCase();
+  return l === '5h window' || l === 'weekly' || l.endsWith('monthly');
+}
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Window tier: hora -> semana -> mes -> sin ventana.
+function windowTier(label) {
+  const l = String(label || '').toLowerCase();
+  if (l.includes('5h') || l.includes('hour')) return 0;
+  if (l.includes('week')) return 1;
+  if (l.includes('month') || l.includes('mes')) return 2;
+  return 3;
+}
+
+// Fuel-gauge view of one provider in weekly Claude-Pro equivalents (eq),
+// annotated with pace: `toca` is what you SHOULD have consumed by now
+// (elapsed window fraction x capacity); `delta = toca - used`.
+// delta > 0 ("faltan") = under-consuming, burn there; delta < 0 ("sobran")
+// = ahead of pace, slow down. Null when pacing is not computable.
+function paceView(provider, recs) {
+  const cap = CAPACITY[provider];
+  if (!cap) return null;
+  const w = recs.find(r => String(r.label || '').toLowerCase() === COMPARISON_LABEL);
+  if (!w || w.state !== 'ok' || typeof w.used_percent !== 'number') return null;
+  const used = (w.used_percent / 100) * cap;
+  const exp = paceExpected(w);
+  return {
+    used, free: cap - used, cap,
+    toca: exp == null ? null : exp * cap,
+    delta: exp == null ? null : exp * cap - used,
+  };
+}
+
+function fmtEq(v) { return v.toFixed(1).replace(/\.0$/, ''); }
+
+// Expected used fraction [0..1] for a window card, from its tier duration
+// and time left to reset (linear pace). Null when unknown/unpacing-able.
+const WINDOW_DUR_MS = { 0: 5 * 3600e3, 1: 7 * 86400e3, 2: 30 * 86400e3 };
+function paceExpected(r) {
+  if (r.state !== 'ok' || !r.resets_at) return null;
+  const dur = WINDOW_DUR_MS[windowTier(r.label)];
+  if (!dur) return null;
+  const left = new Date(r.resets_at) - Date.now();
+  return Math.min(1, Math.max(0, 1 - left / dur));
+}
+
+// Within a provider: main quotas first (hora -> semana -> mes), then
+// "otras" quotas keeping the same internal order, label as tiebreaker.
+function cmpRecords(a, b) {
+  const la = String(a.label || ''), lb = String(b.label || '');
+  const m = (isMainLabel(la) ? 0 : 1) - (isMainLabel(lb) ? 0 : 1);
+  if (m) return m;
+  const t = windowTier(la) - windowTier(lb);
+  if (t) return t;
+  return la.localeCompare(lb);
 }
 
 function ago(sec) {
@@ -105,14 +203,43 @@ function until(ms) {
 
 function barClass(p) { return p > 90 ? 'red' : p >= 70 ? 'amber' : 'green'; }
 
-function card(r) {
-  const title = '<div class="title">' + esc(r.display_name || r.provider) + '</div>';
-  const subtitle = r.label ? '<div class="subtitle">' + esc(r.label) + '</div>' : '';
+// A quota is exhausted ("acabada") when its window is ~full (>= 99.5 catches
+// unrounded values like 99.73) or a balance is ~zero.
+function exhausted(r) {
+  if (r.state !== 'ok') return false;
+  if (r.kind === 'balance') return r.limit != null && r.limit <= 0.005;
+  return typeof r.used_percent === 'number' && r.used_percent >= 99.5;
+}
+
+// Coarse-to-fine exhaustion cascade over the MAIN quotas: monthly binds the
+// whole sub even if weekly looks free, then weekly, then the 5h window.
+// Returns the blocking tier ('mensual' | 'semanal' | '5h') or null.
+function bindingTier(mainRecs) {
+  const tiers = [['mensual', 2], ['semanal', 1], ['5h', 0]];
+  for (const [name, tier] of tiers) {
+    if (mainRecs.some(r => windowTier(r.label) === tier && exhausted(r))) return name;
+  }
+  return null;
+}
+
+// Tier depth of a binding name ('5h' -> 0, 'semanal' -> 1, 'mensual' -> 2).
+const TIER_DEPTH = { '5h': 0, semanal: 1, mensual: 2 };
+
+// `blockedBy` (optional, tier name) grays an otherwise-alive card because a
+// coarser main window is exhausted — the sub cannot serve this quota either.
+function card(r, blockedBy) {
+  const fallback = r.state === 'missing' ? 'Sin datos' : r.state === 'error' ? 'Error' : 'Cuota';
+  const title = '<div class="title">' + esc(r.label || fallback) + '</div>';
+  const done = exhausted(r);
+  const muted = done || (blockedBy && r.state === 'ok');
   let badges = r.source ? '<span class="badge">' + esc(r.source) + '</span>' : '';
+  if (done) badges += '<span class="badge state-done">agotada</span>';
+  else if (muted) badges += '<span class="badge state-done">bloqueada · ' + esc(blockedBy) + '</span>';
   let body = '';
 
   if (r.state === 'missing') {
-    body = '<div class="nodata">no data</div>';
+    body = '<div class="nodata">sin datos' +
+      (r.detail ? ' · ' + esc(r.detail) : '') + '</div>';
   } else if (r.state === 'error') {
     badges += '<span class="badge state-error">error</span>';
     if (r.detail) body = '<div class="detail">' + esc(r.detail) + '</div>';
@@ -128,22 +255,57 @@ function card(r) {
     } else {
       const pct = r.used_percent;
       const pctText = pct == null ? '—' : Math.round(pct) + '%';
+      const exp = paceExpected(r);
+      const tick = pct != null && exp != null
+        ? '<i class="tick" style="left:' + Math.round(Math.min(100, exp * 100)) + '%"></i>'
+        : '';
       const bar = pct == null ? '' :
         '<div class="bar"><i class="' + barClass(pct) + '" style="width:' +
-        Math.min(100, Math.max(0, pct)) + '%"></i></div>';
+        Math.min(100, Math.max(0, pct)) + '%"></i>' + tick + '</div>';
       let resets = '—';
       if (r.resets_at) {
         const t = new Date(r.resets_at);
         resets = 'resets in ' + until(t - Date.now()) + ' · ' +
           t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       }
+      if (exp != null) resets += ' · toca ' + Math.round(exp * 100) + '%';
       body = '<div class="big">' + pctText + '</div>' + bar +
              '<div class="resets">' + resets + '</div>';
     }
   }
 
-  return '<div class="card ' + esc(r.state) + '">' + title + subtitle +
+  return '<div class="card ' + esc(r.state) + (muted ? ' done' : '') + '">' + title +
          '<div class="badges">' + badges + '</div>' + body + '</div>';
+}
+
+function group(provider, recs) {
+  recs.sort(cmpRecords);
+  const main = recs.filter(r => isMainLabel(r.label));
+  const other = recs.filter(r => !isMainLabel(r.label));
+  const blocked = bindingTier(main);
+  const name = (recs.find(r => r.display_name) || {}).display_name || provider;
+  const pcts = recs.filter(r => typeof r.used_percent === 'number').map(r => r.used_percent);
+  const gauge = paceView(provider, recs);
+  const sub = recs.length + (recs.length === 1 ? ' cuota' : ' cuotas') +
+    (pcts.length ? ' · máx ' + Math.round(Math.max.apply(null, pcts)) + '%' : '') +
+    (gauge ? ' · ' + fmtEq(gauge.used) + '/' + fmtEq(gauge.cap) + ' eq usadas' : '') +
+    (gauge && gauge.toca != null ? ' · toca ' + fmtEq(gauge.toca) : '');
+
+  let html = '<section class="group' + (blocked ? ' exhausted' : '') + '">' +
+    '<div class="group-head"><span class="group-title">' + esc(name) + '</span>' +
+    (blocked ? '<span class="badge state-done">agotada · ' + blocked + '</span>' : '') +
+    '<span class="group-sub">' + esc(sub) + '</span></div>';
+  // Cascade downward: windows FINER than the blocking tier are unusable too.
+  const depth = blocked ? TIER_DEPTH[blocked] : null;
+  const render = r => card(r, depth != null && r.state === 'ok' && windowTier(r.label) < depth ? blocked : null);
+  if (main.length) {
+    html += '<div class="cards">' + main.map(render).join('') + '</div>';
+  }
+  if (other.length) {
+    if (main.length) html += '<div class="sub-head">Otras cuotas</div>';
+    html += '<div class="cards">' + other.map(r => card(r)).join('') + '</div>';
+  }
+  return html + '</section>';
 }
 
 async function load(forceRefresh = false) {
@@ -162,17 +324,45 @@ async function load(forceRefresh = false) {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    const ORDER = ['claude', 'gemini', 'zai', 'deepseek', 'chatgpt', 'opencode'];
-    const rank = r => {
-      const i = ORDER.indexOf(r.provider);
+
+    const groups = new Map();
+    for (const r of data.records) {
+      if (!groups.has(r.provider)) groups.set(r.provider, []);
+      groups.get(r.provider).push(r);
+    }
+    const rank = recs => {
+      const i = ORDER.indexOf(recs[0].provider);
       return i === -1 ? ORDER.length : i;
     };
-    const records = data.records.slice().sort((a, b) => {
-      const p = rank(a) - rank(b);
-      if (p) return p;
-      return String(a.label || '').localeCompare(String(b.label || ''));
-    });
-    document.getElementById('grid').innerHTML = records.map(card).join('');
+    const ordered = [...groups.entries()].sort((a, b) =>
+      rank(a[1]) - rank(b[1]) || a[0].localeCompare(b[0]));
+
+    // Pace ranking: "faltan X" = you are behind pace, burn that sub first so
+    // every window closes near 100% (even spend across subs). "sobran X" =
+    // ahead of pace. Blocked subs sink to the end and gray out.
+    const scored = ordered
+      .map(([provider, recs]) => {
+        const pace = paceView(provider, recs);
+        if (!pace || pace.delta == null) return null;
+        const name = (recs.find(r => r.display_name) || {}).display_name || provider;
+        const main = recs.filter(r => isMainLabel(r.label));
+        return { name, ...pace, blocked: bindingTier(main) };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.blocked ? 1 : 0) - (b.blocked ? 1 : 0) || b.delta - a.delta);
+    document.getElementById('ranking').innerHTML = scored.length
+      ? '<span class="rank-label" title="toca = fracción de ventana transcurrida × capacidad. faltan = llevas menos eq de las que tocan: gástalas antes del reset; sobran = vas adelantado.">Ritmo semanal (eq) — gasta las atrasadas:</span>' +
+        scored.map((s, i) =>
+          '<span class="chip' + (s.blocked ? ' done' : s.delta < 0 ? ' ahead' : '') +
+          (!s.blocked && scored.findIndex(x => !x.blocked) === i ? ' best' : '') +
+          '"><b>' + esc(s.name) + '</b><span class="w">' +
+          (s.delta >= 0 ? 'faltan ' + fmtEq(s.delta) : 'sobran ' + fmtEq(-s.delta)) +
+          ' · ' + fmtEq(s.used) + '/' + fmtEq(s.toca) + ' eq' +
+          (s.blocked ? ' · bloqueada (' + s.blocked + ')' : '') + '</span></span>').join('')
+      : '';
+
+    document.getElementById('groups').innerHTML =
+      ordered.map(([provider, recs]) => group(provider, recs)).join('');
     document.getElementById('refreshed').textContent =
       'actualizado ' + new Date(data.generated_at).toLocaleTimeString();
   } catch (e) {

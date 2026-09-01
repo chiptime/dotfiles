@@ -121,9 +121,10 @@ wezterm.on('gui-startup', function(cmd)
         'gentle-ai',
       }, "AI Tools")
 
-      make_2x2(VC, {
-         'codex',
-         'claude',
+      make_2x1(VC, {
+         'htop',
+         'cd ~ && agy',
+        --  'claude',
          './deploy_electron_to_windows.sh',
          './run_dev.sh'
     }, "VC Windows Deploy")

@@ -17,6 +17,11 @@
     ~/.vim/colors/dark-redux.vim: editors/vim/themes/dark-redux.vim
     ~/.config/nvim: editors/nvim
     ~/.config/opencode/commands/notion-backlog.md: ai/agents/opencode/commands/notion-backlog.md
-    ~/.config/opencode/skills/antigravity-explore: ai/agents/opencode/skills/antigravity-explore
+    # antigravity-explore skill: NOT dotbot-managed. OpenCode's skill scanner
+    # (Bun glob, followSymlinks=false) ignores symlinked SKILL.md files, so it
+    # must be a HARDLINK to the dotfiles source:
+    #   ln -f ~/.dotfiles/ai/agents/opencode/skills/antigravity-explore/SKILL.md \
+    #     ~/.config/opencode/skills/antigravity-explore/SKILL.md
+    # (re-run after editors that write-replace, which break the link)
     ~/.config/ai-stack/opencode-router.json: ai/opencode-router/opencode-router.json
     ~/.local/bin/opencode-web: ai/opencode-router/bin/opencode-web.sh

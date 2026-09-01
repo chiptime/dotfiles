@@ -50,4 +50,12 @@ mkdir -p "$HOME/.config/opencode/plugins"
 bun build --target=bun --format=esm "$PLUGIN_SRC" --outfile "$PLUGIN_OUT"
 echo "bundled: $PLUGIN_OUT"
 
+# (d) bundle the quota-balancer read-only advisor (v1 manual advisor; pure
+# core in src/balancer/core.ts). Same artifact contract as (c).
+QB_SRC="$ROOT/src/plugin/quota-balancer.ts"
+QB_OUT="$HOME/.config/opencode/plugins/quota-balancer.ts"
+[ -f "$QB_SRC" ] || { echo "plugin source missing: $QB_SRC" >&2; exit 2; }
+bun build --target=bun --format=esm "$QB_SRC" --outfile "$QB_OUT"
+echo "bundled: $QB_OUT"
+
 echo "done: run 'git diff $OUT' to confirm the rendered config is unchanged before committing."

@@ -1,4 +1,6 @@
+mod balancer;
 mod cli;
+mod history;
 mod providers;
 mod reader;
 mod schema;
