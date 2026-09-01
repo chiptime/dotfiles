@@ -1,0 +1,8 @@
+{
+  "priority": ["claude", "zai", "chatgpt", "gemini", "deepseek", "opencode"],
+  "floor": 0.10, "margin": 0.10, "notice_interval": 900,
+  "tiers": {
+    "frontier": { "anthropic/claude-opus-5": "claude", "zai/glm-4.7": "zai", "openai/gpt-5.2": "chatgpt", "google/gemini-3-pro": "gemini" },
+    "extended": { "anthropic/claude-sonnet-5": "claude", "zai/glm-4.7-air": "zai", "deepseek/deepseek-chat": "deepseek", "opencode/gpt-5-mini": "opencode" }
+  }
+}

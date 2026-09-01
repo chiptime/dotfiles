@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Value};
 
 use crate::reader::{self, Status};
+use crate::{balancer, history};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 pub const DEFAULT_PORT: u16 = 47_623;
@@ -107,6 +108,10 @@ fn route(request: &tiny_http::Request, dir: &Path, pull: &PullFn) -> (u16, Strin
         "/" => (200, "text/html; charset=utf-8".into(), INDEX_HTML.into()),
         "/api/health" => (200, "application/json".into(), "{\"status\":\"ok\"}".into()),
         "/api/quotas" | "/api/refresh" => (200, "application/json".into(), quotas_body(dir, pull, is_refresh)),
+        "/api/balancer/recommend" => match query_param(raw_url, "model").filter(|m| !m.is_empty()) {
+            Some(model) => (200, "application/json".into(), balancer_recommend_body(dir, pull, &model)),
+            None => (400, "application/json".into(), "{\"error\":\"missing model query parameter\"}".into()),
+        },
         _ => (404, "text/plain; charset=utf-8".into(), "not found\n".into()),
     }
 }
@@ -121,6 +126,64 @@ fn quotas_body(dir: &Path, pull: &PullFn, force_refresh: bool) -> String {
     let records: Vec<Value> = statuses.iter().map(|s| status_to_json(s, now)).collect();
     serde_json::to_string(&json!({ "generated_at": now.to_rfc3339(), "records": records }))
         .unwrap_or_else(|_| "{\"generated_at\":\"\",\"records\":[]}".to_string())
+}
+
+/// Build the `/api/balancer/recommend` body: the merged quota truth through
+/// the pure policy (R1), then one best-effort JSONL history line under the
+/// same state dir (R8 — this server is the sole history writer).
+fn balancer_recommend_body(dir: &Path, pull: &PullFn, model: &str) -> String {
+    let now = Utc::now();
+    let statuses = reader::merge_statuses(reader::read_dir_status(dir), pull(false));
+    let advice = balancer::advise(balancer::load_config().as_ref(), model, &statuses);
+    history::append(dir, now, &advice);
+    serde_json::to_string(&advice).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Extract one percent-decoded query parameter from a raw request URL.
+fn query_param(raw_url: &str, key: &str) -> Option<String> {
+    let query = raw_url.split_once('?')?.1;
+    for pair in query.split('&') {
+        let Some((k, v)) = pair.split_once('=') else { continue };
+        if k == key {
+            return Some(percent_decode(v));
+        }
+    }
+    None
+}
+
+/// Decode `%XX` escapes and `+` in one query component, lossily.
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3])
+                    .ok()
+                    .and_then(|h| u8::from_str_radix(h, 16).ok());
+                match hex {
+                    Some(byte) => {
+                        out.push(byte);
+                        i += 3;
+                    }
+                    None => {
+                        out.push(bytes[i]);
+                        i += 1;
+                    }
+                }
+            }
+            byte => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Flatten one status into a JSON object: all record fields (when present)
@@ -317,5 +380,86 @@ mod tests {
             other => panic!("expected 404, got {other:?}"),
         };
         assert_eq!(missing.header("Content-Type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[test]
+    fn balancer_recommend_route_serves_advice_shape_and_history() {
+        let dir = tempdir().unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr().to_ip().unwrap());
+        let pull: PullFn = Arc::new(|_force| vec![]);
+        let state_dir = dir.path().to_path_buf();
+        std::thread::spawn(move || run_loop(server, state_dir, pull));
+
+        // Unknown model or missing config: either way advice fails open (R1/R9).
+        let advice: Value = ureq::get(&format!("{base}/api/balancer/recommend?model=x"))
+            .call()
+            .unwrap()
+            .into_json()
+            .unwrap();
+        assert_eq!(advice["schema"], "ai-quotas/balancer-advice@1");
+        assert_eq!(advice["switch"], false);
+        assert_eq!(advice["requested_model"], "x");
+        assert_eq!(advice["recommended_model"], "x");
+        assert!(advice["advice_age_seconds"].is_u64());
+
+        // Percent-encoded slash decodes back into the full model id.
+        let encoded: Value =
+            ureq::get(&format!("{base}/api/balancer/recommend?model=openai%2Fgpt-5.2"))
+                .call()
+                .unwrap()
+                .into_json()
+                .unwrap();
+        assert_eq!(encoded["requested_model"], "openai/gpt-5.2");
+        assert_eq!(encoded["recommended_model"], "openai/gpt-5.2");
+
+        // Missing model parameter is a client error, not advice.
+        match ureq::get(&format!("{base}/api/balancer/recommend")).call() {
+            Err(ureq::Error::Status(code, _)) => assert_eq!(code, 400),
+            other => panic!("expected 400, got {other:?}"),
+        }
+
+        // Every advice lands as one JSONL line under the state dir (R8).
+        let history_dir = dir.path().join("history");
+        let mut files: Vec<_> = fs::read_dir(&history_dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(files.len(), 1, "one daily history file");
+        let body = fs::read_to_string(files.remove(0)).unwrap();
+        assert_eq!(body.lines().count(), 2, "one line per advice served");
+        assert!(body.contains("ai-quotas/balancer-advice@1"));
+    }
+
+    #[test]
+    fn balancer_recommend_missing_config_and_empty_state_fail_open() {
+        let dir = tempdir().unwrap();
+        let pull: PullFn = Arc::new(|_force| vec![]);
+
+        // Missing config: switch:false, no error (R9).
+        std::env::set_var("AI_QUOTAS_BALANCER_CONFIG", dir.path().join("missing.json"));
+        let v: Value =
+            serde_json::from_str(&balancer_recommend_body(dir.path(), &pull, "openai/gpt-5.2"))
+                .unwrap();
+        assert_eq!(v["reason"], "config_missing");
+        assert_eq!(v["switch"], false);
+        assert_eq!(v["recommended_model"], "openai/gpt-5.2");
+        assert!(v.get("requested_remaining").is_none());
+
+        // Config present but no telemetry for the requested provider.
+        std::fs::write(
+            dir.path().join("balancer.json"),
+            include_str!("../config/balancer.example.json"),
+        )
+        .unwrap();
+        std::env::set_var("AI_QUOTAS_BALANCER_CONFIG", dir.path().join("balancer.json"));
+        let v: Value =
+            serde_json::from_str(&balancer_recommend_body(dir.path(), &pull, "openai/gpt-5.2"))
+                .unwrap();
+        assert_eq!(v["reason"], "insufficient_data");
+        assert_eq!(v["switch"], false);
+        assert!(v.get("requested_remaining").is_none());
+        assert!(v.get("recommended_remaining").is_none());
+        std::env::remove_var("AI_QUOTAS_BALANCER_CONFIG");
     }
 }

@@ -737,9 +737,9 @@ describe('contract: binding — depth/permission/recursion before production bin
 	test('template caps nesting: subagent_depth is exactly 2', async () => {
 		expect(JSON.parse(await Bun.file(TEMPLATE).text()).subagent_depth).toBe(2);
 	});
-	test('router agent binds sdd-explore to the cheap free model', async () => {
+	test('router agent inherits the local sdd-explore model while owning the routing prompt', async () => {
 		const t = JSON.parse(await Bun.file(TEMPLATE).text());
-		expect(t.agent['sdd-explore'].model).toBe('opencode/nemotron-3-ultra-free');
+		expect('model' in t.agent['sdd-explore']).toBe(false);
 		expect(t.agent['sdd-explore'].prompt).toBe('@prompt-file');
 	});
 	test('router task permission allows ONLY sdd-explore-fallback (wildcard deny)', async () => {
@@ -776,10 +776,10 @@ describe('contract: rendered config integrity (dotfiles mode)', () => {
 		const committed = JSON.parse(await Bun.file(RENDERED).text());
 		expect(committed).toEqual(renderTemplate(template, promptText));
 	});
-	test('committed rendered config carries the bound model and depth', async () => {
+	test('committed rendered config inherits model ownership and carries the routing contract', async () => {
 		const committed = JSON.parse(await Bun.file(RENDERED).text());
 		expect(committed.subagent_depth).toBe(2);
-		expect(committed.agent['sdd-explore'].model).toBe('opencode/nemotron-3-ultra-free');
+		expect('model' in committed.agent['sdd-explore']).toBe(false);
 		expect(committed.agent['sdd-explore'].prompt).toContain('agy-explore --input');
 	});
 });

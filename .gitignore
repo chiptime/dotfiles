@@ -5,3 +5,4 @@
 .pi-subagents
 # Router typecheck deps (lockfile stays committed)
 ai/opencode-router/node_modules/
+.playwright-mcp/
