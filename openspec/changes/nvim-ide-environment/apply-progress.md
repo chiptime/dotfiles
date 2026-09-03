@@ -1,103 +1,136 @@
-# Apply Progress: nvim-ide-environment — Slice P0 (vtsls parity)
+# Apply Progress: nvim-ide-environment
 
-**Status: 4/5 tasks done; task 1.5 (manual parity battery) pending — it requires the user's real acceptance repo and interactive nvim.** Everything automatable was verified headlessly against the live config (`~/.config/nvim` → symlink to `editors/nvim`). No branch, no PR: single work-unit commit on `master`.
+Direct work-unit commits on `master` (no branch, no PR, per orchestrator). Verified headlessly against the live config (`~/.config/nvim` → symlink to `editors/nvim`); scratch scripts live under `/tmp/opencode/` and are never committed.
 
-## Task status
+## Slice status
+
+| Slice | Status | Commit |
+|---|---|---|
+| P0 vtsls parity | 4/5 done — task 1.5 (manual parity battery) pending on the user's acceptance repo | `25697a9` |
+| P1 terminal + bufferline | 12/12 done (P1a `PENDING`, P1b `PENDING` — see below) | this change |
+
+---
+
+## Slice P0 — vtsls parity (tasks 1.1–1.5)
+
+**Status: 4/5 done; task 1.5 (manual parity battery) pending — it requires the user's real acceptance repo and interactive nvim.**
 
 | # | Task | Status | Evidence |
 |---|------|--------|----------|
-| 1.1 | vtsls-first ordering + tsdk settings in `frontend.lua` | ✅ done | `names = { "vtsls", "ts_ls", "tsserver" }`; `config.settings` exactly per design Decision 1; no `cmd`, no `init_options`; `root_markers` kept. Focused test below (12/12 PASS) |
-| 1.2 | Inlay hints on `LspAttach`, capability-guarded | ✅ done | `client:supports_method("textDocument/inlayHint")` guard → `vim.lsp.inlay_hint.enable(true, { bufnr = event.buf })`. Runtime: enabled=true on TS buffer; enabled=false + no error on `html` (negative control) |
-| 1.3 | Runtime gates: `:MasonInstall vtsls` + parser check | ✅ done | Headless Mason install OK (`vtsls` 0.3.0 at `~/.local/share/nvim/mason/bin/vtsls`); parsers `typescript.so` + `tsx.so` already present; no silent auto-install (Mason packages dir was empty beforehand; `automatic_installation=false` untouched) |
-| 1.4 | Headless fallback test (registry without vtsls) | ✅ done | Ephemeral script (not committed): 12/12 checks PASS, exit 0 |
-| 1.5 | Manual parity battery in acceptance repo | ⏳ pending | Requires user's interactive nvim + heaviest real TS repo — see checklist below |
+| 1.1 | vtsls-first ordering + tsdk settings in `frontend.lua` | ✅ done | `names = { "vtsls", "ts_ls", "tsserver" }`; `config.settings` per design Decision 1; no `cmd`, no `init_options`; `root_markers` kept |
+| 1.2 | Inlay hints on `LspAttach`, capability-guarded | ✅ done | `client:supports_method("textDocument/inlayHint")` guard → `vim.lsp.inlay_hint.enable(true, { bufnr = event.buf })` |
+| 1.3 | Runtime gates: vtsls install + parser check | ✅ done | `vtsls` 0.3.0 via headless Mason Lua API; parsers `typescript` + `tsx` already present; no silent auto-install |
+| 1.4 | Headless fallback test (registry without vtsls) | ✅ done | 12/12 checks PASS, exit 0 (`/tmp/opencode/sdd-p0-fallback-test.lua`) |
+| 1.5 | Manual parity battery in acceptance repo | ⏳ pending | Requires user's interactive nvim; checklist below |
 
-## Verification evidence
+### P0 pending manual battery (task 1.5, user, interactive)
 
-### Focused check (WU-P0: headless registry-order assert)
+- [ ] `:LspInfo` reports `vtsls`; `:TSInstallInfo` shows `typescript` + `tsx`
+- [ ] `gd` cross-file; `<leader>rn` propagates; `K` hover
+- [ ] Inlay hints render without manual command
+- [ ] Completion offers auto-import; `<leader>ca` offers add-import
 
-Command: `nvim --headless -l /tmp/opencode/sdd-p0-fallback-test.lua` (ephemeral, not committed)
-
-```
-PASS names ordered vtsls, ts_ls, tsserver
-PASS native registry attaches vtsls
-PASS native registry configures no ts_ls/tsserver
-PASS legacy registry without vtsls falls back to ts_ls
-PASS legacy fallback configures no vtsls
-PASS registry with only tsserver resolves tsserver
-PASS fallback keeps root_markers
-PASS fallback carries settings
-PASS settings.vtsls has only autoUseWorkspaceTsdk (no enableServerLocalizedHint)
-PASS typescript.updateImportsOnFileMove == always
-PASS typescript.suggest.completeFunctionCalls == true
-PASS typescript.inlayHints present
-RESULT: all checks passed — exit=0
-```
-
-Covers spec scenarios "Native path attaches vtsls" (resolver level) and "Legacy fallback retained".
-
-### Runtime harness (real server, real attach)
-
-Command: `nvim --headless /tmp/opencode/ts-scratch/index.ts -c "luafile /tmp/opencode/sdd-p0-attach-gate.lua" +qa`
-(scratch project: `package.json` + `tsconfig.json` + `index.ts` under `/tmp/opencode/ts-scratch/`)
-
-```
-[attach-gate] filetype=typescript
-[attach-gate] attached=true client_count=1
-[attach-gate] client=vtsls inlayHint_supported=true
-[attach-gate] inlay_hint enabled=true — exit=0
-```
-
-Negative control (server without the capability must not error):
-
-```
-[attach-gate] filetype=html
-[attach-gate] attached=true client_count=1
-[attach-gate] client=html inlayHint_supported=false
-[attach-gate] inlay_hint enabled=false — exit=0
-```
-
-### Runtime gates (task 1.3)
-
-- Config activation discovered: `~/.config/nvim` is a symlink to `/home/bruno/.dotfiles/editors/nvim` — plain `nvim --headless` uses this config; no `NVIM_APPNAME` needed. Neovim 0.12.4 (native LSP path).
-- Parser gate: `parser typescript.so=true tsx.so=true` (headless, post lazy-load) — nothing to install.
-- vtsls install: headless Mason (`require("mason-registry")` + explicit `pkg:install()`, waited for the install **stream to close**). `vtsls --version` → `0.3.0`. First attempt aborted mid-link because `:qa` raced the npm subprocess — cleaned and re-run waiting on stream close; success. Interactive equivalent if ever needed: `:MasonInstall vtsls`.
-- No silent auto-install: Mason had **zero** packages before the explicit install (while `ts_ls` had been the active server), proving nothing auto-installs; `automatic_installation=false` lines untouched.
-
-## Pending manual steps — task 1.5 parity battery (user, interactive)
-
-Acceptance repo: user's heaviest real TypeScript repo (to be named by the user; `~/.config/nvim` already points at this config).
-
-- [ ] `:LspInfo` reports the attached client as `vtsls`
-- [ ] `:TSInstallInfo` shows `typescript` + `tsx` installed (headless check already green — confirm visually)
-- [ ] `gd` on an imported symbol lands on its definition in another file
-- [ ] `<leader>rn` on a cross-file symbol; all references update (verify via `gr` or grep)
-- [ ] `K` on a typed symbol shows a hover float with the type signature
-- [ ] Inlay hints render on a TS buffer with no manual command (parameter/type hints)
-- [ ] Completion at an unimported symbol offers an auto-import item; accepting it inserts the import
-- [ ] Code action (`<leader>ca`) on an unresolved identifier offers an add-import source action
-
-Record results in the PR body (or change log) once run.
-
-## Deviations from tasks.md
+### P0 deviations (kept from the P0 batch)
 
 | Deviation | Reason |
 |---|---|
-| Headless Mason install via `mason-registry` Lua API instead of `:MasonInstall` command | `:MasonInstall` is async and cannot be awaited headlessly; the Lua API is the same code path the command uses. First attempt hit a `:qa`-vs-npm race (mason terminated the install on exit); resolved by waiting for the install stream `closed` event |
-| Extra negative-control server (`html-lsp`) installed into Mason | Task 1.2 requires "no error on non-supporting server"; no installed server lacked the capability, so one real non-supporting server was needed to prove the guard |
-| `client:supports_method(...)` (colon) instead of dot-call | Neovim 0.12 deprecates `client.supports_method(m)` dot-call (removal in 0.13, `runtime/lua/vim/lsp/client.lua:256-268`); colon form works on all supported versions. Surfaced by the 1.3 runtime gate, fixed within the slice |
-| Ephemeral scripts under `/tmp/opencode/` (not committed) | Per tasks.md convention: scratch scripts stay out of commits |
-| `tasks.md` checkboxes 1.1–1.4 updated and committed with the slice | OpenSpec convention: task completion must be visible in the tasks artifact |
+| Headless Mason install via `mason-registry` Lua API instead of `:MasonInstall` | command is async; waited on install stream `closed` (`:qa` races npm mid-link) |
+| `client:supports_method(...)` colon call | Neovim 0.12 deprecates dot-call (removal 0.13) |
 
-## Work-unit evidence (WU-P0)
+---
+
+## Slice P1 — terminal + bufferline (tasks 2.1–2.12)
+
+### Task status (WU-P1a: 2.1–2.7, 2.10–2.12)
+
+| # | Task | Status | Evidence |
+|---|------|--------|----------|
+| 2.1 | RED profile-parser fixtures | ✅ done | RED run before 2.3: `FAIL module exposes parse_profile`, exit 1; GREEN after 2.3: **21/21 PASS**, exit 0 |
+| 2.2 | toggleterm plugin spec | ✅ done | `plugins/terminal.lua`: `cond = not features.legacy`, `cmd = { "ToggleTerm", "TermSelect" }`, `size = 12`, `direction = "horizontal"` |
+| 2.3 | Rewrite `config/terminal.lua` | ✅ done | `vim.json.decode` under `pcall`; panel counts 1–8; one-visible cycling via `get_all(true)` close-visible + open next; keymaps `tp/to/tn/t]/t[/tq/ts`; `:Terminal`+`tt/tT/tc` deleted; `<Esc><Esc>` kept |
+| 2.4 | PID preservation | ✅ done | core harness: `PID preserved across hide/cycle/re-show` PASS (jobpid equal for t1 and t2) |
+| 2.5 | Headless invariants | ✅ done | 34/34 PASS: one-visible cycling t1→t2→t1, silent hide (0 notifications, 0 new `:messages`), zero terminals after startup, sidebar `winwidth == 34` + central identity before/after toggling, terminal window spans full width (botright) |
+| 2.6 | Profile fixtures runtime | ✅ done | absent → 1 running shell immediately, silent; valid 2-terminal → both jobs running (`sleep 543`/`sleep 544`), one visible; unparsable → absent + exactly 1 WARN |
+| 2.7 | Legacy entries gone | ✅ done | `:Terminal`/`:TerminalVertical`/`:TerminalTab` undefined; `tt/tT/tc` maparg empty; new maps + `<Esc><Esc>` defined; `git diff` on `terminal_legacy.lua` empty (0 lines) |
+| 2.8 | bufferline spec | 🔜 P1b | see below |
+| 2.9 | Bufferline scenarios | 🔜 P1b | see below |
+| 2.10 | Import `plugins.terminal` | ✅ done | one line in `plugins/init.lua`; headless startup resolves both specs |
+| 2.11 | Pins toggleterm + bufferline | ✅ done | `lazy-lock.json`: `toggleterm.nvim` `9a88eae8`, `bufferline.nvim` `655133c3` via headless `require("lazy").install({ wait = true })`; `Lazy restore` exit 0 |
+| 2.12 | README terminal boundary | ✅ done | keymap table, profile format + data-only rule, no-auto-start, one-visible, count-9 reservation, legacy-route note |
+
+### WU-P1a verification evidence
+
+**Focused check (task 2.1 fixtures — RED→GREEN):**
+
+Command: `nvim --headless -l /tmp/opencode/sdd-p1-profile-fixtures.lua` (ephemeral)
+
+```
+# RED (before 2.3):
+FAIL module exposes parse_profile
+RESULT: 1 check(s) failed — exit 1
+
+# GREEN (after 2.3):
+PASS module exposes parse_profile
+PASS valid profile returns two entries
+PASS entries carry exact name/cmd data
+PASS parse is silent on valid profile
+PASS parse never executes commands (marker absent)
+PASS payload-bearing file stays inert data (string, not executed)
+PASS payload never executed (marker absent)
+PASS lua-source profile rejected (nil)
+PASS lua-source rejection warns exactly once
+PASS lua-source payload never executed
+PASS sibling terminals.lua ignored (json wins)
+PASS sibling terminals.lua never executed
+PASS lua-only fixture treated as absent (nil)
+PASS absent profile is silent
+PASS lua-only sibling never executed
+PASS unparsable profile treated as absent (nil)
+PASS unparsable profile warns exactly once
+PASS absent profile returns nil
+PASS absent profile is silent
+PASS entries without non-empty name+cmd are dropped
+PASS empty-field profile is silent (absent, not parse failure)
+RESULT: 0 check(s) failed — exit 0
+```
+
+**Runtime harness (tasks 2.4–2.7):**
+
+Command: `nvim --headless /tmp/opencode/sdd-p1-runtime/repo/scratch.md -c "luafile /tmp/opencode/sdd-p1-runtime-core.lua" +qa!`
+
+→ 34/34 PASS. Highlights: `:Terminal`-family commands and `tt/tT/tc` maps undefined; `tp/to/tn/t]/t[/tq/ts` + `<Esc><Esc>` defined; zero terminals after startup; sidebar `winwidth == 34` and central-window identity stable across create/cycle/hide/re-show/shutdown; terminal window width == `&columns` (botright full width); `jobpid()` identical before hide / after cycle / after re-show; zero `vim.notify` calls and zero new `:messages` lines across all hide/show/cycle ops.
+
+Command (task 2.6, per case): `SDD_P1_CASE={absent|valid|unparsable} nvim --headless <fixture-repo>/scratch.md -c "luafile /tmp/opencode/sdd-p1-runtime-profile.lua" +qa!`
+
+→ 3 cases × all checks PASS (absent: 5/5; valid: 7/7; unparsable: 5/5). Fixture repos are throwaway `git init` dirs under `/tmp/opencode/sdd-p1-profile-repos/`.
+
+### WU-P1a work-unit evidence
 
 | Evidence | Value |
 |---|---|
-| Focused test | `nvim --headless -l /tmp/opencode/sdd-p0-fallback-test.lua` → 12/12 PASS, exit 0 |
-| Runtime harness | TS attach gate → `client=vtsls`, hints enabled; html control → no error, hints off |
-| Rollback boundary | Revert `editors/nvim/lua/lang/frontend.lua` + `editors/nvim/lua/plugins/lsp.lua` only (this commit); unrelated work untouched |
-| Changed lines | 25 insertions + 1 deletion (26 total) — within the ~45 estimate |
+| Focused test | profile fixtures: RED exit 1 → GREEN 21/21 exit 0 |
+| Runtime harness | core invariants 34/34; profile cases absent/valid/unparsable all PASS; `Lazy restore` exit 0 |
+| Rollback boundary | Revert `plugins/terminal.lua`, `config/terminal.lua`, the `plugins/init.lua` import line, and the two `lazy-lock.json` pins (plus README section) — no unrelated work touched; `terminal_legacy.lua` byte-frozen (0-line diff verified) |
+| Changed lines | this commit: ~310 add / ~71 del (terminal rewrite 278 lines incl. doc comments) |
+
+### P1 deviations from tasks.md/design
+
+| Deviation | Reason |
+|---|---|
+| `Terminal:new` + immediate `term:spawn()` at allocation (no open/close flash) | toggleterm's `get_all()` only sees spawned terminals; creating without spawning let two profile terminals collide on count 1 and toggleterm silently re-id'd one (caught by task 2.6 fixtures: `sleep 543`/`sleep 544` came back swapped). Spawning at allocation keeps counts 1–8 unique and satisfies "both terminals start" without any window flash |
+| `M.new_terminal()` returns the created terminal | headless verification needs the term handle; harmless for keymap use |
+| `:TerminalVertical`/`:TerminalTab` also deleted (whole-file rewrite) | tasks pin `:Terminal` removal; the rewrite replaces the native-terminal file entirely — spec "Old entries gone" satisfied; legacy route keeps all three commands |
+| `M.select()` forces plugin load then runs `:TermSelect` | the command exists only after toggleterm loads; design table says `<leader>ts` → `:TermSelect`, kept verbatim |
+| WARN emitted only on JSON decode failure | design: "Parse failure emits one non-blocking WARN"; unreadable/absent/empty stays silent (fixture-asserted 0 warns) |
+
+---
+
+## Pending manual steps (user, interactive)
+
+- Task 1.5 parity battery (P0, checklist above).
+- Interactive feel of `<leader>tp/to/tn/t]/t[/tq/ts` in a real session (headless covers semantics; which-key shows the new `t` group automatically).
 
 ## Next
 
-- Slice P1 (tasks 2.1–2.12) or `sdd-verify` for P0 once the user runs the 1.5 battery.
+- WU-P1b (tasks 2.8–2.9, bufferline) — separate commit on master.
+- Then slice P2 (AI commit) or `sdd-verify`.

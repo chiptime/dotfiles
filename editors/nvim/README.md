@@ -4,15 +4,37 @@ This is the dotfiles-owned Neovim IDE configuration. It is intentionally lightwe
 
 ## Terminal workflow
 
-Native terminal commands are available for short editor-local commands only:
+On the IDE route, terminals are persistent [toggleterm.nvim](https://github.com/akinsho/toggleterm.nvim) panels: processes survive hide and cycle, at most one terminal window is visible, and nothing starts on its own.
 
-- `:Terminal [cmd]` opens a horizontal terminal split.
-- `:TerminalVertical [cmd]` opens a vertical terminal split.
-- `:TerminalTab [cmd]` opens a terminal tab.
-- `<leader>tt`, `<leader>tT`, and `<leader>tc` open terminal workflows from normal mode.
-- `<Esc><Esc>` leaves terminal mode.
+| Key | Action |
+|-----|--------|
+| `<leader>tp` | Start the repo terminal profile (or a plain shell when none exists) |
+| `<leader>to` | Toggle the visible terminal |
+| `<leader>tn` | New shell terminal |
+| `<leader>t]` / `<leader>t[` | Cycle next / previous terminal |
+| `<leader>tq` | Close and shut down the current terminal |
+| `<leader>ts` | Select a terminal |
+| `<Esc><Esc>` | Leave terminal mode |
 
-No terminal shell starts during Neovim startup. Start long-running servers, agents, package watchers, Pi, and opencode in an external terminal or tmux session instead of inside Neovim.
+Boundaries:
+
+- No terminal starts during Neovim startup or repo opening; `<leader>tp` is the only profile trigger.
+- Cycling and toggling keep one visible window at most and emit no messages.
+- Terminal processes are children of Neovim: they die with it and are never resurrected.
+- The bottom panel holds at most 8 terminals. A reserved count-9 pattern for a future vertical agent panel is documented in the change design; no such code ships yet.
+- The old `:Terminal` commands and `<leader>tt`/`<leader>tT`/`<leader>tc` maps are gone on this route; tmux keeps hosting Pi, opencode, and anything outside this editor-local panel.
+
+### Repo terminal profile
+
+A repository may version `.nvim/terminals.json`. It is read as data only (JSON, never executed) and supports multiple named terminals:
+
+```json
+{ "version": 1, "terminals": [ { "name": "web", "cmd": "pnpm dev" } ] }
+```
+
+Unknown keys are ignored. A missing, unparsable, or empty profile is treated as absent (one warning at most), and `<leader>tp` then opens a plain shell immediately. A sibling `.nvim/terminals.lua` is never read.
+
+The legacy route (`NVIM_IDE_LAYOUT=0` or Neovim <0.11) keeps the native `:Terminal`, `:TerminalVertical`, and `:TerminalTab` commands with `<leader>tt`/`<leader>tT`/`<leader>tc` and wipe-on-close behavior.
 
 ## Validation commands
 
