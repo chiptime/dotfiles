@@ -32,7 +32,7 @@ return {
   },
   server_choices = {
     {
-      names = { "ts_ls", "tsserver" },
+      names = { "vtsls", "ts_ls", "tsserver" },
       config = {
         filetypes = {
           "javascript",
@@ -52,6 +52,25 @@ return {
           "next.config.mjs",
         },
         single_file_support = false,
+        settings = {
+          vtsls = {
+            autoUseWorkspaceTsdk = true,
+          },
+          typescript = {
+            updateImportsOnFileMove = "always",
+            suggest = {
+              completeFunctionCalls = true,
+            },
+            inlayHints = {
+              parameterNames = { enabled = "all" },
+              parameterTypes = { enabled = true },
+              variableTypes = { enabled = true },
+              propertyDeclarationTypes = { enabled = true },
+              functionLikeReturnType = { enabled = true },
+              enumMemberValues = { enabled = true },
+            },
+          },
+        },
       },
     },
   },

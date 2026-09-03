@@ -29,10 +29,10 @@ Total exceeds one 400-line PR, so delivery is 3 chained PRs (P0 → P1 → P2), 
 
 ## Phase 1 — Slice P0: vtsls parity (PR 1)
 
-- [ ] 1.1 vtsls-first ordering + settings — `editors/nvim/lua/lang/frontend.lua`: `names = { "vtsls", "ts_ls", "tsserver" }`; add `config.settings` per design Decision 1 (`vtsls.autoUseWorkspaceTsdk`, `typescript.inlayHints.*`, `updateImportsOnFileMove = "always"`, `suggest.completeFunctionCalls`); no explicit `cmd`. Deps: none. Verify: headless assert ordered names; spec "Native path attaches vtsls". Est: ~35.
-- [ ] 1.2 Inlay hints on attach — `editors/nvim/lua/plugins/lsp.lua` existing `LspAttach`: `vim.lsp.inlay_hint.enable(true, { bufnr })` guarded by `supports_method("textDocument/inlayHint")`. Deps: 1.1. Verify: hints render on TS buffer; no error on non-supporting server. Est: ~10.
-- [ ] 1.3 Runtime steps + parser gate — run `:MasonInstall vtsls`; `:TSInstallInfo` shows `typescript` + `tsx`; confirm no install starts before that. Deps: 1.1. Verify: spec "Explicit install enables vtsls", "No silent auto-install". Est: 0.
-- [ ] 1.4 Headless fallback test — script builds registry without `vtsls`, asserts `ts_ls`/`tsserver` resolution. Deps: 1.1. Verify: spec "Legacy fallback retained". Est: 0.
+- [x] 1.1 vtsls-first ordering + settings — `editors/nvim/lua/lang/frontend.lua`: `names = { "vtsls", "ts_ls", "tsserver" }`; add `config.settings` per design Decision 1 (`vtsls.autoUseWorkspaceTsdk`, `typescript.inlayHints.*`, `updateImportsOnFileMove = "always"`, `suggest.completeFunctionCalls`); no explicit `cmd`. Deps: none. Verify: headless assert ordered names; spec "Native path attaches vtsls". Est: ~35.
+- [x] 1.2 Inlay hints on attach — `editors/nvim/lua/plugins/lsp.lua` existing `LspAttach`: `vim.lsp.inlay_hint.enable(true, { bufnr })` guarded by `supports_method("textDocument/inlayHint")`. Deps: 1.1. Verify: hints render on TS buffer; no error on non-supporting server. Est: ~10.
+- [x] 1.3 Runtime steps + parser gate — run `:MasonInstall vtsls`; `:TSInstallInfo` shows `typescript` + `tsx`; confirm no install starts before that. Deps: 1.1. Verify: spec "Explicit install enables vtsls", "No silent auto-install". Est: 0.
+- [x] 1.4 Headless fallback test — script builds registry without `vtsls`, asserts `ts_ls`/`tsserver` resolution. Deps: 1.1. Verify: spec "Legacy fallback retained". Est: 0.
 - [ ] 1.5 Manual parity battery — acceptance repo (named at apply time): `:LspInfo` = vtsls; `gd` cross-file; `<leader>rn` propagates; `K` hover; hints visible; auto-import completion + add-import source action. Deps: 1.1–1.4. Verify: all "Parity Acceptance Battery" scenarios; record results in PR. Est: 0.
 
 Work-unit commit (WU-P0): `feat(nvim): prefer vtsls with tsdk settings and default inlay hints`.
