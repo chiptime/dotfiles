@@ -11,6 +11,29 @@ return {
     },
   },
   {
+    "akinsho/bufferline.nvim",
+    event = "VeryLazy",
+    cond = not features.legacy,
+    dependencies = {
+      "nvim-tree/nvim-web-devicons",
+    },
+    opts = {
+      options = {
+        close_command = "confirm bdelete %d",
+        right_mouse_command = "confirm bdelete %d",
+        offsets = {
+          {
+            filetype = tree_filetype,
+            text = "Explorer",
+            text_align = "left",
+            highlight = "Directory",
+            separator = true,
+          },
+        },
+      },
+    },
+  },
+  {
     "nvim-lualine/lualine.nvim",
     event = "VeryLazy",
     dependencies = {
