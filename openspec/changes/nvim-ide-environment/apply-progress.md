@@ -7,7 +7,7 @@ Direct work-unit commits on `master` (no branch, no PR, per orchestrator). Verif
 | Slice | Status | Commit |
 |---|---|---|
 | P0 vtsls parity | 4/5 done — task 1.5 (manual parity battery) pending on the user's acceptance repo | `25697a9` |
-| P1 terminal + bufferline | 12/12 done (P1a `0c6f697`, P1b `PENDING_COMMIT`) | work-unit commits on master |
+| P1 terminal + bufferline | 12/12 done (P1a `0c6f697`, P1b `40de1fb`) | work-unit commits on master |
 
 ---
 
