@@ -22,4 +22,6 @@ else
   end
 end
 
+require("config.aicommit")
+
 require("config.lazy")
