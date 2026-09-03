@@ -103,11 +103,19 @@ local function setup_lsp_commands()
     local report = {}
     for _, client in ipairs(clients) do
       local inlay_hint = client:supports_method("textDocument/inlayHint") and "yes" or "no"
+      local cmd = client.config.cmd
+      if type(cmd) == "table" then
+        cmd = table.concat(cmd, " ")
+      elseif type(cmd) == "function" then
+        cmd = "(spawn function)"
+      else
+        cmd = "-"
+      end
       report[#report + 1] = ("%s (id=%d)\n  root: %s\n  cmd: %s\n  inlayHint: %s"):format(
         client.name,
         client.id,
         client.config.root_dir or "-",
-        table.concat(client.config.cmd or { "-" }, " "),
+        cmd,
         inlay_hint
       )
     end
