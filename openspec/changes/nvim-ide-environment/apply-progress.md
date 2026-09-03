@@ -7,7 +7,7 @@ Direct work-unit commits on `master` (no branch, no PR, per orchestrator). Verif
 | Slice | Status | Commit |
 |---|---|---|
 | P0 vtsls parity | 4/5 done — task 1.5 (manual parity battery) pending on the user's acceptance repo | `25697a9` |
-| P1 terminal + bufferline | 12/12 done (P1a `PENDING`, P1b `PENDING` — see below) | this change |
+| P1 terminal + bufferline | 12/12 done (P1a `0c6f697`, P1b `PENDING_COMMIT`) | work-unit commits on master |
 
 ---
 
@@ -52,8 +52,8 @@ Direct work-unit commits on `master` (no branch, no PR, per orchestrator). Verif
 | 2.5 | Headless invariants | ✅ done | 34/34 PASS: one-visible cycling t1→t2→t1, silent hide (0 notifications, 0 new `:messages`), zero terminals after startup, sidebar `winwidth == 34` + central identity before/after toggling, terminal window spans full width (botright) |
 | 2.6 | Profile fixtures runtime | ✅ done | absent → 1 running shell immediately, silent; valid 2-terminal → both jobs running (`sleep 543`/`sleep 544`), one visible; unparsable → absent + exactly 1 WARN |
 | 2.7 | Legacy entries gone | ✅ done | `:Terminal`/`:TerminalVertical`/`:TerminalTab` undefined; `tt/tT/tc` maparg empty; new maps + `<Esc><Esc>` defined; `git diff` on `terminal_legacy.lua` empty (0 lines) |
-| 2.8 | bufferline spec | 🔜 P1b | see below |
-| 2.9 | Bufferline scenarios | 🔜 P1b | see below |
+| 2.8 | bufferline spec | ✅ done | `plugins/ui.lua`: `akinsho/bufferline.nvim`, `event = "VeryLazy"`, `cond = not features.legacy`, `close_command`/`right_mouse_command = "confirm bdelete %d"`, `offsets` reusing `tree_filetype` |
+| 2.9 | Bufferline scenarios | ✅ done | harness **19/19 PASS**: click/close handlers wired, current-buffer highlight, modified marker, clean close removes entry, modified close keeps content (no silent discard), session alive, sidebar 34 |
 | 2.10 | Import `plugins.terminal` | ✅ done | one line in `plugins/init.lua`; headless startup resolves both specs |
 | 2.11 | Pins toggleterm + bufferline | ✅ done | `lazy-lock.json`: `toggleterm.nvim` `9a88eae8`, `bufferline.nvim` `655133c3` via headless `require("lazy").install({ wait = true })`; `Lazy restore` exit 0 |
 | 2.12 | README terminal boundary | ✅ done | keymap table, profile format + data-only rule, no-auto-start, one-visible, count-9 reservation, legacy-route note |
@@ -125,12 +125,51 @@ Command (task 2.6, per case): `SDD_P1_CASE={absent|valid|unparsable} nvim --head
 
 ---
 
+### Task status (WU-P1b: 2.8–2.9)
+
+See rows 2.8–2.9 above. Verification evidence:
+
+Command: `nvim --headless -c "luafile /tmp/opencode/sdd-p1-bufferline.lua" +qa!`
+
+```
+PASS bufferline loads
+PASS close_command uses confirm bdelete
+PASS right_mouse_command uses confirm bdelete
+PASS offset reuses tree_filetype (neo-tree)
+PASS bufferline owns the tabline
+PASS line lists open buffers by name
+PASS line wires buffer click for navigation
+PASS line wires close indicator click
+PASS line highlights the current buffer
+PASS line marks modified buffer
+PASS close indicator removes entry (clean buffer)
+PASS closed buffer disappears from the line
+PASS modified close keeps content (no silent discard)
+PASS modified buffer closed via confirm
+PASS closed modified buffer disappears from the line
+PASS editor remains usable after closing last-but-one buffer
+PASS line reflects remaining buffers
+PASS sidebar still 34 wide with bufferline shown
+PASS central window unchanged
+RESULT: 0 check(s) failed
+```
+
+Headless caveat: `confirm` auto-answers "yes" without a UI, so the modified-buffer close SAVES (content preserved — the assertion). Interactively the standard confirm prompt appears; the config never uses `bdelete!`, so nothing is silently discarded. Real mouse click-through remains an interactive check (handlers verified wired above).
+
+### WU-P1b work-unit evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test | bufferline scenario harness 19/19 PASS, exit 0 |
+| Runtime harness | same harness (loads bufferline + sidebar; `winwidth == 34` + central identity with the line shown) |
+| Rollback boundary | Revert the `plugins/ui.lua` hunk only; the orphan `bufferline.nvim` lockfile pin from P1a is ignored by Lazy until the spec returns |
+
 ## Pending manual steps (user, interactive)
 
 - Task 1.5 parity battery (P0, checklist above).
 - Interactive feel of `<leader>tp/to/tn/t]/t[/tq/ts` in a real session (headless covers semantics; which-key shows the new `t` group automatically).
+- Bufferline: real mouse click navigation + close indicator in a live UI (headless verified handlers and confirm semantics).
 
 ## Next
 
-- WU-P1b (tasks 2.8–2.9, bufferline) — separate commit on master.
-- Then slice P2 (AI commit) or `sdd-verify`.
+- Slice P2 (AI commit, tasks 3.1–3.9) or `sdd-verify` for P0+P1.
