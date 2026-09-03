@@ -36,6 +36,18 @@ Unknown keys are ignored. A missing, unparsable, or empty profile is treated as 
 
 The legacy route (`NVIM_IDE_LAYOUT=0` or Neovim <0.11) keeps the native `:Terminal`, `:TerminalVertical`, and `:TerminalTab` commands with `<leader>tt`/`<leader>tT`/`<leader>tc` and wipe-on-close behavior.
 
+## AI commit workflow
+
+`<leader>gc` generates a strict Conventional Commits message in English from the staged diff via the `opencode` CLI, opens it in an editable `COMMIT_EDITMSG` buffer, and commits only when that buffer is written and quit with `:wq`.
+
+Boundaries:
+
+- A staged area is required: an empty index aborts with a notification, and the flow never stages anything (`git add` never runs inside it).
+- Failures abort cleanly — outside a repository, empty index, opencode non-zero exit, 90 s timeout, empty output, or a first line that is not Conventional Commits each notify and abort: no buffer opens, no commit runs.
+- Staged diffs of 65536 bytes or more are summarized before sending: `--stat` plus at most 200 hunk headers with an explicit truncation line.
+- The commit itself runs only from the review buffer (`git commit -F --cleanup=strip`); `:q` discards the message and leaves the index untouched.
+- This is a one-shot generation call to `opencode run`. Long-running agents, opencode sessions, and the TUI stay in tmux, outside Neovim — the same boundary as before, with one narrow editor-local exception.
+
 ## Validation commands
 
 Use an isolated XDG config path before applying live links:

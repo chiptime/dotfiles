@@ -8,6 +8,7 @@ Direct work-unit commits on `master` (no branch, no PR, per orchestrator). Verif
 |---|---|---|
 | P0 vtsls parity | 4/5 done — task 1.5 (manual parity battery) pending on the user's acceptance repo | `25697a9` |
 | P1 terminal + bufferline | 12/12 done (P1a `0c6f697`, P1b `40de1fb`) | work-unit commits on master |
+| P2 AI commit | 9/9 done (WU-P2 commit on master) | see git log after this batch |
 
 ---
 
@@ -164,12 +165,87 @@ Headless caveat: `confirm` auto-answers "yes" without a UI, so the modified-buff
 | Runtime harness | same harness (loads bufferline + sidebar; `winwidth == 34` + central identity with the line shown) |
 | Rollback boundary | Revert the `plugins/ui.lua` hunk only; the orphan `bufferline.nvim` lockfile pin from P1a is ignored by Lazy until the spec returns |
 
+---
+
+## Slice P2 — AI commit (tasks 3.1–3.9)
+
+### Task status (WU-P2)
+
+| # | Task | Status | Evidence |
+|---|------|--------|----------|
+| 3.1 | RED git-root selection | ✅ done | RED before 3.3: `FAIL module config.aicommit loads` + 3 cases, exit 1; GREEN after 3.3: **4/4 PASS**, exit 0 (`/tmp/opencode/sdd-p2-root-selection.lua`) |
+| 3.2 | RED commit-state checks | ✅ done | RED before 3.3: module + 8 cases FAIL, exit 1; GREEN after 3.3: **9/9 PASS**, exit 0 (`/tmp/opencode/sdd-p2-commit-state.lua`) |
+| 3.3 | `config/aicommit.lua` created | ✅ done | 189 lines; full design Data Flow; six abort classes notify-and-abort; COMMIT_EDITMSG buffer with `BufWriteCmd` → `git commit -F --cleanup=strip`; `:q` discards; prompt is a Lua literal; never runs `git add`; `<leader>gc` set |
+| 3.4 | Wire `init.lua` | ✅ done | +2 lines (`require("config.aicommit")`); headless startup exit 0 (isolated XDG too); **19/19 PASS** wiring checks: `<leader>gc` ours (desc), gitsigns buffer-local `gp/gr/gs/gu/gb/gB/gD/gQ` + diffview `gd/gH/gq` + ide `gC/gG` all still mapped after attach |
+| 3.5 | Abort-class verification | ✅ done | **24/24 PASS** — six classes × {notify shown, no COMMIT_EDITMSG, no commit, index unchanged} (`/tmp/opencode/sdd-p2-abort-classes.lua`) |
+| 3.6 | Threshold fixtures | ✅ done | **13/13 PASS** — staged diff exactly 65535 B → payload byte-identical full diff; exactly 65536 B → stat + @@ header, body excluded; 205-hunk fixture → exactly 200 headers + `(hunk headers truncated: 200 of 205 shown)` |
+| 3.7 | Commit semantics | ✅ done | **17/17 PASS** — `:wq` commits the EDITED text; committed content is the index version (dirty worktree excluded, still dirty after); index drained by commit; `:q!`/`:q` → no commit, staged area untouched, buffer gone |
+| 3.8 | Apply-time stdout check | ✅ done | REAL `opencode run` (v1.18.21): raw stdout is byte-clean — hexdump `7465 7374 3a20 ...` = `test: initialize counter with a fixed seed value\n`, zero ANSI (decoration on stderr only), exit 0, ~19 s. Module-level real run: 6 s, buffer opened with `chore: set counter initial value to 42`, validator accepts. **Design Open Question 2 CLOSED** |
+| 3.9 | README AI-commit boundary | ✅ done | `editors/nvim/README.md` "AI commit workflow" section: keymap, staging requirement, six abort classes, 65536 B summary, `:wq`/`:q` semantics, one-shot-call reconciliation with the tmux/agents boundary |
+
+### WU-P2 verification evidence
+
+**Focused check (tasks 3.1/3.2 — RED→GREEN):**
+
+Command: `nvim --headless <script>.lua -c "luafile <script>.lua" +qa!` (ephemeral scripts under `/tmp/opencode/`)
+
+```
+# RED (before 3.3), 3.1:                        # RED (before 3.3), 3.2:
+FAIL module config.aicommit loads               FAIL module config.aicommit loads
+FAIL subdir buffer resolves to its own repo...  FAIL empty index aborts with a staging...
+FAIL git calls run against the resolved root    FAIL empty index: no opencode call
+FAIL non-repo buffer resolves to nil            FAIL (6 further module-dependent cases)
+RESULT: 4 check(s) failed - exit 1              RESULT: 9 check(s) failed - exit 1
+
+# GREEN (after 3.3): 3.1 → RESULT: 0 failed - exit 0 (4/4)
+#                    3.2 → RESULT: 0 failed - exit 0 (9/9)
+```
+
+**Runtime harness:** 3.5 abort classes 24/24 (non-repo, empty index, exit≠0 via fake exit 3, timeout via `exec sleep` fake killed at 1 s → `code=124/signal=15`, ANSI-only empty output, non-conventional first line — each: notify + no buffer + no commit + index unchanged); 3.6 thresholds 13/13; 3.7 semantics 17/17; 3.4 wiring 19/19; isolated-XDG `nvim --headless +qa` exit 0.
+
+### 3.8 raw opencode sample (Open Question 2 closed)
+
+```
+$ opencode run "<prompt+diff>"   # scratch repo /tmp/opencode/sdd-p2-real, trivial staged diff
+exit=0, ~19 s (module-level rerun: 6 s)
+stdout hexdump 00000000: 7465 7374 3a20 696e 6974 6961 6c69 7a65  test: initialize
+raw stdout (cat -A): "test: initialize counter with a fixed seed value$"   ← no ANSI, no CR
+stderr: session/model banner with ANSI codes (discarded; never fed to the validator)
+verdict: stdout is clean; ANSI-strip is a no-op safety net; validator accepted both samples
+```
+
+### WU-P2 work-unit evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test | 3.1/3.2 fixtures: RED exit 1 → GREEN 4/4 + 9/9 exit 0 (after the validator fix, re-run: all suites 0 failed) |
+| Runtime harness | abort classes 24/24; thresholds 13/13; commit semantics 17/17; wiring 19/19; real `opencode run` end-to-end → buffer + validator accept |
+| Rollback boundary | Revert `config/aicommit.lua` + the 2 `init.lua` lines + README section — no other behavior touches; `terminal_legacy.lua` byte-frozen (0-line diff re-verified this batch) |
+| Changed lines | aicommit.lua 189 + init 2 + README 12 + tasks/progress docs — code well under the ~180-line estimate, total under the 450 budget |
+
+### P2 deviations from tasks.md/design
+
+| Deviation | Reason |
+|---|---|
+| Scope pattern `[%w%-%_.]+` instead of the design's `\(..\)` (exactly two chars) | Spec mandates `type(scope)?: subject`; a 2-char-only scope would reject this repo's own `feat(nvim): ...` style (the WU-P2 commit message itself). Any non-empty word-like scope passes |
+| Conventional-Commits check = structural match + type-set lookup, not one alternation regex | Lua patterns have NO alternation (`|`) — the design's single regex is unimplementable as one Lua pattern. Two patterns (scoped/plain) + `TYPES` set cover the same grammar |
+| Timeout class detected as `code == 124 and signal == 15` | `vim.system` reports timeouts this way (probed: no `timeout` field on the result); async callback variant verified identical |
+| Defensive second guard `payload == ""` after the quiet-check | Unreachable in practice (`--quiet` governs); message mirrors the empty-index class so no unclassifiable abort exists |
+
+### P2 implementation gotchas (for verify)
+
+- `vim.system` completes only when the process exits AND stdio pipes close: a fake `sh` that SIGTERMs while its child holds the pipe delays the callback. Real `opencode` is a direct binary — unaffected. Test fakes must `exec sleep`.
+- `vim.fn.maparg` returns a string unless called with the 4th arg `true` (dict with `desc`).
+- gitsigns `g`-maps are buffer-local and appear only after attach in a git repo — wiring checks must open a repo buffer and wait for attach.
+- Notify capture for the async flow must stay installed until the flow settles (restore-after-`run()` misses the callback notify).
+
 ## Pending manual steps (user, interactive)
 
 - Task 1.5 parity battery (P0, checklist above).
 - Interactive feel of `<leader>tp/to/tn/t]/t[/tq/ts` in a real session (headless covers semantics; which-key shows the new `t` group automatically).
 - Bufferline: real mouse click navigation + close indicator in a live UI (headless verified handlers and confirm semantics).
+- `<leader>gc` against real daily commits (headless + one-shot real `opencode run` verified; interactive review-edit-commit loop is the remaining feel check).
 
 ## Next
 
-- Slice P2 (AI commit, tasks 3.1–3.9) or `sdd-verify` for P0+P1.
+- All three slices applied (P0 4/5 — only the user's manual parity battery remains; P1 12/12; P2 9/9). `sdd-verify` for the whole change.
