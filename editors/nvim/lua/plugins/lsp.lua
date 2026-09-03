@@ -90,8 +90,34 @@ end
 
 local function setup_lsp_commands()
   create_lsp_command("LspInfo", function()
+    local clients = vim.lsp.get_clients({ bufnr = 0 })
+    if #clients == 0 then
+      vim.notify(
+        ("No LSP clients attached (filetype %s)"):format(vim.bo.filetype),
+        vim.log.levels.WARN,
+        { title = "LspInfo" }
+      )
+      return
+    end
+
+    local report = {}
+    for _, client in ipairs(clients) do
+      local inlay_hint = client:supports_method("textDocument/inlayHint") and "yes" or "no"
+      report[#report + 1] = ("%s (id=%d)\n  root: %s\n  cmd: %s\n  inlayHint: %s"):format(
+        client.name,
+        client.id,
+        client.config.root_dir or "-",
+        table.concat(client.config.cmd or { "-" }, " "),
+        inlay_hint
+      )
+    end
+
+    vim.notify(table.concat(report, "\n"), vim.log.levels.INFO, { title = "LspInfo" })
+  end, { desc = "Show LSP clients attached to the current buffer" })
+
+  create_lsp_command("LspHealth", function()
     vim.cmd("checkhealth vim.lsp")
-  end, { desc = "Show Neovim LSP health" })
+  end, { desc = "Show Neovim LSP health via checkhealth" })
 
   create_lsp_command("LspLog", function()
     vim.cmd("edit " .. vim.fn.fnameescape(vim.lsp.get_log_path()))
