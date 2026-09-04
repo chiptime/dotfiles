@@ -29,7 +29,10 @@ import {
 	type Store,
 } from './outcomes';
 
-export const ROUTER_MODEL = 'gemini-3-flash';
+// agy renamed its model slugs in the 2026-09 CLI (plain "gemini-3-flash" is no
+// longer accepted); keep the default as a valid current slug and allow an env
+// override so future renames don't require a rebuild of binary + plugin.
+export const ROUTER_MODEL = process.env.AGY_EXPLORE_MODEL ?? 'gemini-3.8-flash-high';
 export const FALLBACK_SUBAGENT = 'sdd-explore-fallback';
 export const TARGET_SUBAGENT = 'sdd-explore';
 const OUTCOMES = new Set(['success', 'quota_unavailable', 'transient_unavailable', 'auth_captcha', 'timeout', 'task_failure', 'artifact_validation_failure']);

@@ -62,7 +62,7 @@ export function depsFor(req: ExploreRequest, workdir: string, over: DepsOverride
 				return { pool: poolForModel(req.model), allowed: true, reason: 'stale_snapshot' };
 			}
 		},
-		run: () => runAgy({ bin, prompt: buildExplorationPrompt(req), workdir, timeoutMs: over.timeoutMs ?? 300_000, model: req.model }),
+		run: () => runAgy({ bin, prompt: buildExplorationPrompt(req), workdir, timeoutMs: over.timeoutMs ?? 600_000, model: req.model }),
 		readArtifact: () => { try { return readFileSync(`${workdir}/exploration.md`, 'utf8'); } catch { return ''; } },
 		persist: (text) => persistExploration({ store: req.store, change: req.change, artifactText: text, openspecRoot: over.openspecRoot ?? `${req.repo}/openspec`, workdir }),
 		porcelain: () => porcelain(req.repo),

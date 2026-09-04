@@ -492,8 +492,8 @@ describe('unit: spawn — timeout, workdir-only args, run.log, daily guard', () 
 		const stub = `${dir}/stub.sh`;
 		await Bun.write(stub, '#!/bin/sh\nprintf "%s" "$*" > "$0.args"\nexit 0\n');
 		Bun.spawnSync(['chmod', '+x', stub]);
-		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: 'gemini-3-flash' });
-		expect(await Bun.file(`${stub}.args`).text()).toContain('--model gemini-3-flash');
+		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: 'gemini-3.8-flash-high' });
+		expect(await Bun.file(`${stub}.args`).text()).toContain('--model gemini-3.8-flash-high');
 		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: '' });
 		expect(await Bun.file(`${stub}.args`).text()).not.toContain('--model');
 		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000 });

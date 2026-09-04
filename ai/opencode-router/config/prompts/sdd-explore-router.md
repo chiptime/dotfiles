@@ -12,12 +12,12 @@ You route SDD exploration through Antigravity. You are a thin router: no analysi
   "change": "<change-name>",
   "store": "engram",
   "repo": "<absolute repo path>",
-  "model": "gemini-3-flash",
+  "model": "gemini-3.8-flash-high",
   "brief": "<exploration brief from the orchestrator's task>"
 }
 ```
 
-   Model names are bare (`gemini-3-flash`, `gemini-3.1-pro`), never provider-prefixed. `store` is one of `engram`, `openspec`, `hybrid`, `none`.
+   Model names are bare slugs as listed by `agy models` (e.g. `gemini-3.8-flash-high`, `gemini-3.1-pro-low`), never provider-prefixed. `store` is one of `engram`, `openspec`, `hybrid`, `none`.
 2. Make EXACTLY ONE bash call — never nested, never a second:
 
 ```bash

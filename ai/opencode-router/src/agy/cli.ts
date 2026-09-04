@@ -55,7 +55,9 @@ export async function runCli(opts: CliOptions): Promise<ExploreResult & { result
 	if (!binResolvable(bin, env)) {
 		return write(buildResult('transient_unavailable', { elapsedMs: 0, reason: 'agy_absent', receipt: NO_RECEIPT(req.store) }));
 	}
-	const res = await runExploration(req, depsFor(req, workdir, { agyBin: bin, quotaFile: opts.quotaFile ?? env.AI_QUOTAS_FILE, openspecRoot: opts.openspecRoot, timeoutMs: opts.timeoutMs }));
+	// AGY_EXPLORE_TIMEOUT_MS is the single budget knob: CLI inner cap and the
+	// plugin's outer wait both derive from it (outer adds a grace buffer).
+	const res = await runExploration(req, depsFor(req, workdir, { agyBin: bin, quotaFile: opts.quotaFile ?? env.AI_QUOTAS_FILE, openspecRoot: opts.openspecRoot, timeoutMs: opts.timeoutMs ?? (Number(env.AGY_EXPLORE_TIMEOUT_MS) || 600_000) }));
 	return write(res);
 }
 
