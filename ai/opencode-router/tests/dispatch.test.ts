@@ -98,7 +98,7 @@ describe('unit: request build — exact CLI schema', () => {
 	});
 	test('model is the router constant; brief is the full prompt', () => {
 		const req = buildExploreRequest(task, '/repo');
-		expect(req.model).toBe('gemini-3-flash');
+		expect(req.model).toBe(process.env.AGY_EXPLORE_MODEL ?? 'gemini-3.8-flash-high');
 		expect(req.schema).toBe('agy-explore/req@1');
 		expect(req.brief).toBe('full prompt text');
 	});
