@@ -42,8 +42,20 @@
   @keyframes spin {
     100% { transform: rotate(360deg); }
   }
-  #ranking { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
+  .last-updated { color: #484f58; font-size: 12px; }
+  #ranking { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
   #ranking .rank-label { color: #8b949e; font-size: 12px; }
+  #closes { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
+  #closes .rank-label { color: #484f58; font-size: 12px; }
+  .closechip { display: inline-flex; align-items: baseline; gap: 5px; border: 1px solid #21262d;
+               border-radius: 999px; padding: 2px 10px; font-size: 11px; color: #8b949e; }
+  .closechip b { font-weight: 600; color: #c9d1d9; }
+  .spark { vertical-align: middle; opacity: .9; margin-left: 4px; }
+  #btn-workday, #btn-moreinfo, #btn-autorefresh { background: none; border: 1px solid #30363d; border-radius: 6px;
+                               color: #8b949e; font-size: 11px; padding: 2px 8px; cursor: pointer; margin-left: 10px; }
+  #btn-workday.on, #btn-moreinfo.on, #btn-autorefresh.on { color: #3fb950; border-color: #3fb950; }
+  /* Extra detail (toca/cierra, notes) stays hidden unless "más info" is on. */
+  body:not(.moreinfo) .xinfo { display: none; }
   .chip { display: inline-flex; align-items: baseline; gap: 6px; border: 1px solid #30363d;
           border-radius: 999px; padding: 4px 12px; font-size: 12px; color: #c9d1d9; }
   .chip b { font-weight: 600; }
@@ -52,6 +64,14 @@
   .chip.best b, .chip.best .w { color: #3fb950; }
   .chip.ahead { border-color: #d29922; }
   .chip.ahead b, .chip.ahead .w { color: #d29922; }
+  .mini { position: relative; display: inline-block; width: 48px; height: 4px;
+          border-radius: 2px; background: #30363d; overflow: hidden; vertical-align: middle; }
+  .mini > i { display: block; height: 100%; border-radius: 2px; }
+  .mini > i.fill.green { background: #3fb950; }
+  .mini > i.fill.amber { background: #d29922; }
+  .mini > i.fill.red { background: #f85149; }
+  .mini > i.tick { position: absolute; top: 0; left: 0; width: 2px; height: 100%;
+                   background: #e6edf3; opacity: .75; }
   #groups { display: flex; flex-direction: row; gap: 20px; align-items: flex-start;
             overflow-x: auto; padding-bottom: 10px; }
   .group { flex: 0 0 auto; width: min(270px, 85vw); }
@@ -68,11 +88,26 @@
   .card.missing { background: transparent; border: 1px dashed #484f58; }
   .card .title { font-weight: 600; font-size: 14px; }
   .badges { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .badge.badge-click { cursor: pointer; user-select: none; }
+  .badge.badge-click::after { content: ' \25B8'; font-size: 10px; opacity: .7; }
+  .badge.badge-click.open::after { content: ' \25BE'; }
+  .reset-detail { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .reset-detail.hidden { display: none; }
+  .reset-detail .badge { opacity: .8; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #30363d; color: #8b949e; }
   .badge.state-error { border-color: #f85149; color: #f85149; background: rgba(248, 81, 73, .1); }
   .badge.state-stale { border-color: #d29922; color: #d29922; }
   .badge.state-done { border-color: #8b949e; color: #8b949e; background: rgba(139, 148, 158, .08); }
+  /* Incident badge (provider status page): subtle colored dot; red text only for critical. */
+  .status-badge { display: inline-flex; align-items: center; gap: 5px; }
+  .status-badge .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+  .status-badge.sev-maintenance .dot { background: #58a6ff; }
+  .status-badge.sev-minor .dot { background: #d29922; }
+  .status-badge.sev-major .dot, .status-badge.sev-critical .dot { background: #f85149; }
+  .status-badge.sev-critical { border-color: #f85149; color: #f85149; }
   .chip.done { opacity: .45; }
+  .chip.stalemark { border-style: dashed; }
+  .note { color: #8b949e; font-size: 11px; margin-top: 4px; word-break: break-word; }
   .group.exhausted .group-title { color: #8b949e; }
   .big { font-size: 30px; font-weight: 700; margin-top: 12px; }
   .bar { margin-top: 8px; height: 4px; border-radius: 2px; background: #30363d; overflow: hidden; position: relative; }
@@ -92,14 +127,16 @@
 <header>
   <h1>AI Quotas</h1>
   <div class="actions">
+    <span id="last-updated" class="last-updated" title="Time of the last successful data load"></span>
     <button id="btn-refresh" onclick="triggerRefresh()">
       <span id="btn-icon">↻</span> <span id="btn-text">Recargar</span>
     </button>
   </div>
 </header>
 <div id="ranking"></div>
+<div id="closes"></div>
 <div id="groups"></div>
-<footer>AI Quotas · local only · <span id="refreshed">—</span></footer>
+<footer>AI Quotas · local only · <span id="refreshed">—</span><button id="btn-moreinfo" onclick="toggleMoreInfo()"></button><button id="btn-workday" onclick="toggleWorkday()"></button><button id="btn-autorefresh" onclick="toggleAutoRefresh()"></button></footer>
 <script>
 'use strict';
 
@@ -108,15 +145,24 @@ const SYMBOLS = { EUR: '€', USD: '$', CNY: '¥' };
 // Provider group order (known pull/file ids first, unknown ones after, by name).
 const ORDER = ['claude', 'zai', 'chatgpt', 'opencode', 'gemini', 'deepseek'];
 
-// Relative subscription capacity in weekly "Claude Pro equivalents"
-// (1 eq = one week of your Claude Pro, the base sub). Tune to your real
-// plans: a 20x plan at 35% weekly has used 7 eq and still has 13 eq free,
-// while the 1x base at 50% has only 0.5 eq free — that is the comparable
-// "how much is left" number. Providers not listed (or 0) are excluded.
+// Relative subscription capacity, used ONLY as a ranking tie-breaker (at
+// equal pace, the bigger sub wastes more money). Hidden from the UI: pace
+// itself needs no weights. Claude = 1, zai = 20x, tune the rest to taste.
 const CAPACITY = { claude: 1, zai: 20, chatgpt: 1, opencode: 1, gemini: 1 };
 
 // Window used for cross-sub comparison (the only one all coding subs share).
 const COMPARISON_LABEL = 'weekly';
+
+// History state (loaded from /api/history on each render).
+let HISTORY = [];
+// Incident state per provider from /api/status (server caches 10 min).
+let STATUS = {};
+// Learned window durations: "provider|label" -> observed ms (median of
+// consecutive reset gaps). Falls back to the tier constants until enough
+// resets have been observed.
+let LEARNED_DUR = {};
+// Workday-aware pace (E13): count only Mon-Fri hours inside windows.
+const workday = { on: localStorage.getItem('workdayPace') === '1' };
 
 // Standard window labels form the main row of a group; everything else
 // (3P variants, generic token limits, balances...) falls into "Otras cuotas".
@@ -140,36 +186,145 @@ function windowTier(label) {
   return 3;
 }
 
-// Fuel-gauge view of one provider in weekly Claude-Pro equivalents (eq),
-// annotated with pace: `toca` is what you SHOULD have consumed by now
-// (elapsed window fraction x capacity); `delta = toca - used`.
-// delta > 0 ("faltan") = under-consuming, burn there; delta < 0 ("sobran")
-// = ahead of pace, slow down. Null when pacing is not computable.
+// One sub's weekly pace: pace = used% / elapsed window % (unit-free — no
+// weights needed to know if you are behind). `cap` comes along only as the
+// ranking tie-breaker. Stale records still count (marked, dashed) so the
+// ranking does not flicker on transient pull blips; `stale` flags them and
+// `age` carries seconds since their fetch. Null when not computable (no
+// reset, no weekly, or window just started: elapsed < 2%).
 function paceView(provider, recs) {
   const cap = CAPACITY[provider];
   if (!cap) return null;
   const w = recs.find(r => String(r.label || '').toLowerCase() === COMPARISON_LABEL);
-  if (!w || w.state !== 'ok' || typeof w.used_percent !== 'number') return null;
-  const used = (w.used_percent / 100) * cap;
+  if (!w || (w.state !== 'ok' && w.state !== 'stale')) return null;
+  if (typeof w.used_percent !== 'number') return null;
   const exp = paceExpected(w);
+  if (exp == null || exp < 0.02) return null;
   return {
-    used, free: cap - used, cap,
-    toca: exp == null ? null : exp * cap,
-    delta: exp == null ? null : exp * cap - used,
+    pace: w.used_percent / 100 / exp, cap,
+    left: new Date(w.resets_at) - Date.now(),
+    usedPct: w.used_percent, tocaPct: exp * 100,
+    stale: w.state === 'stale', age: w.age_seconds || 0,
   };
 }
 
-function fmtEq(v) { return v.toFixed(1).replace(/\.0$/, ''); }
-
 // Expected used fraction [0..1] for a window card, from its tier duration
-// and time left to reset (linear pace). Null when unknown/unpacing-able.
+// (or the learned one) and time left to reset (linear pace). Stale records
+// keep their tick — the data degrades gracefully instead of vanishing.
 const WINDOW_DUR_MS = { 0: 5 * 3600e3, 1: 7 * 86400e3, 2: 30 * 86400e3 };
+function windowDurMs(r) {
+  return LEARNED_DUR[r.provider + '|' + r.label] || WINDOW_DUR_MS[windowTier(r.label)];
+}
 function paceExpected(r) {
-  if (r.state !== 'ok' || !r.resets_at) return null;
-  const dur = WINDOW_DUR_MS[windowTier(r.label)];
+  if ((r.state !== 'ok' && r.state !== 'stale') || !r.resets_at) return null;
+  const dur = windowDurMs(r);
   if (!dur) return null;
-  const left = new Date(r.resets_at) - Date.now();
-  return Math.min(1, Math.max(0, 1 - left / dur));
+  const end = new Date(r.resets_at).getTime();
+  const start = end - dur;
+  const now = Date.now();
+  const frac = workday.on ? workElapsedFraction(start, end, now) : (now - start) / dur;
+  return Math.min(1, Math.max(0, frac));
+}
+
+// Weekday (Mon-Fri) hours between a and b, in ms.
+function workHoursBetween(a, b) {
+  let ms = 0;
+  const d = new Date(a);
+  d.setHours(0, 0, 0, 0);
+  while (d.getTime() < b) {
+    const dayStart = d.getTime();
+    const dayEnd = dayStart + 86400e3;
+    if (d.getDay() !== 0 && d.getDay() !== 6) {
+      ms += Math.max(0, Math.min(b, dayEnd) - Math.max(a, dayStart));
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return ms;
+}
+
+// Elapsed fraction counting only work hours (fallback: wall clock).
+function workElapsedFraction(start, end, now) {
+  const total = workHoursBetween(start, end);
+  if (total <= 0) return (now - start) / (end - start);
+  return Math.min(1, Math.max(0, workHoursBetween(start, Math.min(now, end)) / total));
+}
+
+// Learn real window durations from observed consecutive resets in history.
+function learnDurations(hist) {
+  const resets = new Map();
+  for (const h of hist) {
+    if (!h.resets_at || !h.label) continue;
+    const key = h.provider + '|' + h.label;
+    const t = Date.parse(h.resets_at);
+    if (!isFinite(t)) continue;
+    const arr = resets.get(key) || [];
+    if (!arr.length || arr[arr.length - 1] !== t) arr.push(t);
+    resets.set(key, arr);
+  }
+  const out = {};
+  for (const [key, list] of resets) {
+    const durs = [];
+    for (let i = 1; i < list.length; i++) {
+      const d = list[i] - list[i - 1];
+      if (d > 4 * 3600e3 && d < 35 * 86400e3) durs.push(d); // sane bounds
+    }
+    if (durs.length) {
+      durs.sort((a, b) => a - b);
+      out[key] = durs[Math.floor(durs.length / 2)]; // median
+    }
+  }
+  return out;
+}
+
+// Per provider: final used% of the last COMPLETED weekly window in history.
+function weeklyCloses(hist) {
+  const wins = new Map();
+  for (const h of hist) {
+    if (String(h.label || '').toLowerCase() !== 'weekly' || !h.resets_at) continue;
+    const r = Date.parse(h.resets_at);
+    if (!isFinite(r)) continue;
+    if (!wins.has(h.provider)) wins.set(h.provider, new Map());
+    const w = wins.get(h.provider);
+    const seen = w.get(r) ?? -1;
+    if (typeof h.used_percent === 'number') w.set(r, Math.max(seen, h.used_percent));
+    else if (!w.has(r)) w.set(r, seen);
+  }
+  const now = Date.now();
+  const out = [];
+  for (const [provider, w] of wins) {
+    const done = [...w.entries()].filter(([r]) => r <= now).sort((a, b) => a[0] - b[0]);
+    const last = done[done.length - 1];
+    if (last && last[1] >= 0) out.push({ provider, close: last[1] });
+  }
+  return out;
+}
+
+// Ritmo series for one provider's weekly window, from history snapshots.
+function ritmoSeries(provider, hist, limit = 14) {
+  const out = [];
+  for (const h of hist) {
+    if (h.provider !== provider || String(h.label || '').toLowerCase() !== 'weekly') continue;
+    if (typeof h.used_percent !== 'number' || !h.resets_at || !h.ts) continue;
+    const end = Date.parse(h.resets_at), ts = Date.parse(h.ts);
+    const dur = LEARNED_DUR[provider + '|Weekly'] || 7 * 86400e3;
+    const start = end - dur;
+    const frac = workday.on ? workElapsedFraction(start, end, ts) : (ts - start) / dur;
+    if (frac > 0.02 && frac <= 1) out.push({ ts, ritmo: h.used_percent / 100 / frac });
+  }
+  return out.slice(-limit);
+}
+
+function sparkline(series) {
+  if (series.length < 2) return '';
+  const w = 56, hgt = 14;
+  const max = Math.max(1.2, ...series.map(p => p.ritmo));
+  const y100 = hgt - (1 / max) * hgt;
+  const pts = series.map((p, i) =>
+    (i / (series.length - 1) * w).toFixed(1) + ',' + (hgt - Math.min(1, p.ritmo / max) * hgt).toFixed(1)
+  ).join(' ');
+  return '<svg class="spark" width="' + w + '" height="' + hgt + '" viewBox="0 0 ' + w + ' ' + hgt + '">' +
+    '<line x1="0" y1="' + y100.toFixed(1) + '" x2="' + w + '" y2="' + y100.toFixed(1) + '" stroke="#30363d" stroke-width="1"/>' +
+    '<polyline points="' + pts + '" fill="none" stroke="#58a6ff" stroke-width="1.5"/></svg>';
 }
 
 // Within a provider: main quotas first (hora -> semana -> mes), then
@@ -203,6 +358,73 @@ function until(ms) {
 
 function barClass(p) { return p > 90 ? 'red' : p >= 70 ? 'amber' : 'green'; }
 
+// Human wording per severity (statuspage vocabulary) for badge and tooltip.
+const SEVERITY_LABELS = {
+  minor: 'degraded performance',
+  major: 'partial outage',
+  critical: 'major outage',
+  maintenance: 'under maintenance',
+};
+
+// Incident badge for a provider group: colored dot + short label; the
+// tooltip carries the page's own description. Nothing renders while every
+// component is operational (or the provider has no status mapping), so the
+// dashboard stays calm by default.
+function statusBadge(provider) {
+  const st = STATUS[provider];
+  if (!st || !st.indicator || st.indicator === 'none') return '';
+  const label = SEVERITY_LABELS[st.indicator] || st.indicator;
+  const tip = provider + ' status: ' + label +
+    (st.summary ? ' — ' + st.summary : '') +
+    (st.stale ? ' (stale data)' : '');
+  return '<span class="badge status-badge sev-' + esc(st.indicator) + '" title="' + esc(tip) + '">' +
+    '<i class="dot"></i>' + esc(label) + '</span>';
+}
+
+// Plain expiry date used by reset badges ("20 Sep", viewer's locale, no time).
+function resetExpText(date) {
+  return date.toLocaleDateString([], { day: '2-digit', month: 'short' });
+}
+
+// Earned usage-limit resets badge text: "3 resets", "1 reset · exp 01 Oct".
+// Expiry (a plain date, viewer's locale) is omitted when unknown;
+// "0 resets" only shows when the provider really reports zero.
+function resetsBadgeText(rc) {
+  const n = Number(rc && rc.available) || 0;
+  let text = n + (n === 1 ? ' reset' : ' resets');
+  const exp = rc && rc.expires_at ? new Date(rc.expires_at) : null;
+  if (exp && !isNaN(exp)) {
+    text += ' · exp ' + resetExpText(exp);
+  }
+  return text;
+}
+
+// Muted per-credit badges: each earned reset lists its own expiry
+// ("Full reset · exp 20 Sep"; just "exp 20 Sep" when the provider gives no
+// title). Credits without any title or parsable expiry are skipped.
+function resetCreditBadges(credits) {
+  return (Array.isArray(credits) ? credits : []).map(c => {
+    const exp = c && c.expires_at ? new Date(c.expires_at) : null;
+    const expText = exp && !isNaN(exp) ? resetExpText(exp) : null;
+    const title = c && c.title ? String(c.title) : null;
+    if (!title && !expText) return '';
+    const label = title
+      ? (expText ? title + ' · exp ' + expText : title)
+      : 'exp ' + expText;
+    return '<span class="badge">' + esc(label) + '</span>';
+  }).join('');
+}
+
+// Show/hide the per-credit detail list attached to a reset summary badge.
+// The detail container is the .reset-detail div right after the badge row.
+function toggleResetDetail(badge) {
+  const detail = badge.closest('.badges') && badge.closest('.badges').nextElementSibling;
+  if (!detail || !detail.classList.contains('reset-detail')) return;
+  const open = detail.classList.toggle('hidden');
+  badge.classList.toggle('open', !open);
+  badge.setAttribute('aria-expanded', String(!open));
+}
+
 // A quota is exhausted ("acabada") when its window is ~full (>= 99.5 catches
 // unrounded values like 99.73) or a balance is ~zero.
 function exhausted(r) {
@@ -233,9 +455,24 @@ function card(r, blockedBy) {
   const done = exhausted(r);
   const muted = done || (blockedBy && r.state === 'ok');
   let badges = r.source ? '<span class="badge">' + esc(r.source) + '</span>' : '';
+  let resetDetailHtml = '';
+  if (r.reset_credits) {
+    // Per-credit rows stay hidden behind the summary badge: clicking it
+    // toggles the detail list (rendered right after the badge row).
+    resetDetailHtml = resetCreditBadges(r.reset_credits.credits);
+    const summary = '<span class="badge" title="Earned usage-limit resets available after hitting a cap">' +
+      esc(resetsBadgeText(r.reset_credits)) + '</span>';
+    badges += resetDetailHtml
+      ? '<span class="badge badge-click" role="button" aria-expanded="false" ' +
+        'title="Show per-reset expiry detail" onclick="toggleResetDetail(this)">' +
+        esc(resetsBadgeText(r.reset_credits)) + '</span>'
+      : summary;
+  }
   if (done) badges += '<span class="badge state-done">agotada</span>';
   else if (muted) badges += '<span class="badge state-done">bloqueada · ' + esc(blockedBy) + '</span>';
   let body = '';
+  let note = '';
+  if (r.detail && r.state !== 'error') note = '<div class="note xinfo">' + esc(r.detail) + '</div>';
 
   if (r.state === 'missing') {
     body = '<div class="nodata">sin datos' +
@@ -250,8 +487,27 @@ function card(r, blockedBy) {
     if (r.kind === 'balance') {
       const cur = r.currency || '';
       const sym = SYMBOLS[cur];
-      const amount = (r.limit == null ? 0 : r.limit).toFixed(2);
-      body = '<div class="big">' + (sym ? sym + amount : cur ? cur + ' ' + amount : amount) + '</div>';
+      // Spend-style balances carry used + cap (e.g. Claude extra usage).
+      if (r.used != null && r.limit != null) {
+        const fmt = v => Number(v).toFixed(2);
+        body = '<div class="big">' +
+          (sym ? sym : cur ? cur + ' ' : '') + fmt(r.used) + ' / ' + fmt(r.limit) + '</div>';
+      } else {
+        const amount = (r.limit == null ? 0 : r.limit).toFixed(2);
+        body = '<div class="big">' + (sym ? sym + amount : cur ? cur + ' ' + amount : amount) + '</div>';
+      }
+    } else if (r.unit === 'requests' && r.used != null && r.limit != null) {
+      // Absolute request counts (Z.ai MCP monthly): real prompts, not %.
+      const leftReq = Math.max(0, r.limit - r.used);
+      const pct = r.used_percent;
+      const bar = pct == null ? '' :
+        '<div class="bar"><i class="' + barClass(pct) + '" style="width:' +
+        Math.min(100, Math.max(0, pct)) + '%"></i>' +
+        (paceExpected(r) != null ? '<i class="tick" style="left:' + Math.round(paceExpected(r) * 100) + '%"></i>' : '') +
+        '</div>';
+      body = '<div class="big">' + Math.round(r.used) + ' / ' + Math.round(r.limit) + '</div>' + bar +
+        '<div class="resets">requests · quedan ' + Math.round(leftReq) +
+        (r.resets_at ? ' · resets in ' + until(new Date(r.resets_at) - Date.now()) : '') + '</div>';
     } else {
       const pct = r.used_percent;
       const pctText = pct == null ? '—' : Math.round(pct) + '%';
@@ -268,14 +524,20 @@ function card(r, blockedBy) {
         resets = 'resets in ' + until(t - Date.now()) + ' · ' +
           t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       }
-      if (exp != null) resets += ' · toca ' + Math.round(exp * 100) + '%';
+      if (exp != null) {
+        resets += '<span class="xinfo"> · toca ' + Math.round(exp * 100) + '%' +
+          (pct == null ? '' : ' · cierra ≈ ' + Math.min(999, Math.round(pct / exp)) + '%') +
+          '</span>';
+      }
       body = '<div class="big">' + pctText + '</div>' + bar +
              '<div class="resets">' + resets + '</div>';
     }
   }
 
   return '<div class="card ' + esc(r.state) + (muted ? ' done' : '') + '">' + title +
-         '<div class="badges">' + badges + '</div>' + body + '</div>';
+         '<div class="badges">' + badges + '</div>' +
+         (resetDetailHtml ? '<div class="reset-detail hidden">' + resetDetailHtml + '</div>' : '') +
+         body + note + '</div>';
 }
 
 function group(provider, recs) {
@@ -285,15 +547,16 @@ function group(provider, recs) {
   const blocked = bindingTier(main);
   const name = (recs.find(r => r.display_name) || {}).display_name || provider;
   const pcts = recs.filter(r => typeof r.used_percent === 'number').map(r => r.used_percent);
-  const gauge = paceView(provider, recs);
+  const pace = paceView(provider, recs);
   const sub = recs.length + (recs.length === 1 ? ' cuota' : ' cuotas') +
     (pcts.length ? ' · máx ' + Math.round(Math.max.apply(null, pcts)) + '%' : '') +
-    (gauge ? ' · ' + fmtEq(gauge.used) + '/' + fmtEq(gauge.cap) + ' eq usadas' : '') +
-    (gauge && gauge.toca != null ? ' · toca ' + fmtEq(gauge.toca) : '');
+    (pace ? ' · ritmo ' + Math.min(999, Math.round(pace.pace * 100)) + '%' : '');
 
   let html = '<section class="group' + (blocked ? ' exhausted' : '') + '">' +
     '<div class="group-head"><span class="group-title">' + esc(name) + '</span>' +
+    statusBadge(provider) +
     (blocked ? '<span class="badge state-done">agotada · ' + blocked + '</span>' : '') +
+    sparkline(ritmoSeries(provider, HISTORY)) +
     '<span class="group-sub">' + esc(sub) + '</span></div>';
   // Cascade downward: windows FINER than the blocking tier are unusable too.
   const depth = blocked ? TIER_DEPTH[blocked] : null;
@@ -320,10 +583,24 @@ async function load(forceRefresh = false) {
   }
 
   try {
+    // History powers weekly closes, sparklines and learned durations.
+    try {
+      const histResp = await fetch('/api/history');
+      if (histResp.ok) HISTORY = (await histResp.json()).history || [];
+    } catch { HISTORY = []; }
+    LEARNED_DUR = learnDurations(HISTORY);
+
     const url = forceRefresh ? '/api/refresh' : '/api/quotas';
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
+    // Incident state rides along with the quotas fetch; a /api/status
+    // failure must never break quota rendering (badges just stay hidden).
+    const [data, statusData] = await Promise.all([
+      fetch(url).then(resp => {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      }),
+      fetch('/api/status').then(r => (r.ok ? r.json() : {})).catch(() => ({})),
+    ]);
+    STATUS = statusData.providers || {};
 
     const groups = new Map();
     for (const r of data.records) {
@@ -337,34 +614,68 @@ async function load(forceRefresh = false) {
     const ordered = [...groups.entries()].sort((a, b) =>
       rank(a[1]) - rank(b[1]) || a[0].localeCompare(b[0]));
 
-    // Pace ranking: "faltan X" = you are behind pace, burn that sub first so
-    // every window closes near 100% (even spend across subs). "sobran X" =
-    // ahead of pace. Blocked subs sink to the end and gray out.
+    // Pace ranking: one unit-free number per sub (ritmo = your used % over
+    // the elapsed window %). Most behind first — burn there so every window
+    // closes near 100% (even spend). Clearly-ahead subs turn amber; blocked
+    // ones sink gray. Capacity only breaks ties.
     const scored = ordered
       .map(([provider, recs]) => {
         const pace = paceView(provider, recs);
-        if (!pace || pace.delta == null) return null;
+        if (!pace) return null;
         const name = (recs.find(r => r.display_name) || {}).display_name || provider;
         const main = recs.filter(r => isMainLabel(r.label));
         return { name, ...pace, blocked: bindingTier(main) };
       })
       .filter(Boolean)
-      .sort((a, b) => (a.blocked ? 1 : 0) - (b.blocked ? 1 : 0) || b.delta - a.delta);
+      .sort((a, b) =>
+        (a.blocked ? 1 : 0) - (b.blocked ? 1 : 0) ||
+        a.pace - b.pace ||
+        b.cap - a.cap);
     document.getElementById('ranking').innerHTML = scored.length
-      ? '<span class="rank-label" title="toca = fracción de ventana transcurrida × capacidad. faltan = llevas menos eq de las que tocan: gástalas antes del reset; sobran = vas adelantado.">Ritmo semanal (eq) — gasta las atrasadas:</span>' +
-        scored.map((s, i) =>
-          '<span class="chip' + (s.blocked ? ' done' : s.delta < 0 ? ' ahead' : '') +
-          (!s.blocked && scored.findIndex(x => !x.blocked) === i ? ' best' : '') +
-          '"><b>' + esc(s.name) + '</b><span class="w">' +
-          (s.delta >= 0 ? 'faltan ' + fmtEq(s.delta) : 'sobran ' + fmtEq(-s.delta)) +
-          ' · ' + fmtEq(s.used) + '/' + fmtEq(s.toca) + ' eq' +
-          (s.blocked ? ' · bloqueada (' + s.blocked + ')' : '') + '</span></span>').join('')
+      ? '<span class="rank-label" title="ritmo = tu % usado / % de ventana transcurrida. Menos de 100% vas atrasado: gástala. Más de 100% vas adelantado: frena. A igual ritmo, antes la de más capacidad.">Ritmo semanal — gasta las más atrasadas:</span>' +
+        scored.map((s, i) => {
+          const ritmo = Math.min(999, Math.round(s.pace * 100));
+          const tip = 'llevas ' + Math.round(s.usedPct) + '% · toca ' + Math.round(s.tocaPct) +
+            '% → ritmo ' + ritmo + '% de la velocidad ideal (100% = clavado en la rayita)' +
+            ' · cierre proyectado ' + Math.min(999, Math.round(s.usedPct / s.tocaPct * 100)) + '%' +
+            (s.stale ? ' · dato de hace ' + ago(s.age).replace(/ ago$/, '') : '') +
+            (s.blocked ? ' · bloqueada (' + s.blocked + ')' : '');
+          const mini = '<span class="mini">' +
+            '<i class="fill ' + barClass(s.usedPct) + '" style="width:' +
+            Math.min(100, Math.max(0, s.usedPct)) + '%"></i>' +
+            '<i class="tick" style="left:' + Math.round(Math.min(100, s.tocaPct)) + '%"></i>' +
+            '</span>';
+          return '<span class="chip' + (s.blocked ? ' done' : s.pace > 1.15 ? ' ahead' : '') +
+            (s.stale ? ' stalemark' : '') +
+            (!s.blocked && scored.findIndex(x => !x.blocked) === i ? ' best' : '') +
+            '" title="' + esc(tip) + '"><b>' + esc(s.name) + '</b>' + mini +
+            '<span class="w">ritmo ' + ritmo + '% · quedan ' + until(s.left) +
+            (s.stale ? ' · visto hace ' + ago(s.age).replace(/ ago$/, '') : '') +
+            (s.blocked ? ' · bloqueada (' + s.blocked + ')' : '') + '</span></span>';
+        }).join('')
       : '';
 
     document.getElementById('groups').innerHTML =
       ordered.map(([provider, recs]) => group(provider, recs)).join('');
+
+    // Weekly-close report: how full each sub ended its last completed week.
+    const names = Object.fromEntries(ordered.map(([p, recs]) =>
+      [p, (recs.find(r => r.display_name) || {}).display_name || p]));
+    const closes = weeklyCloses(HISTORY)
+      .map(c => ({ ...c, name: names[c.provider] || c.provider }))
+      .sort((a, b) => b.close - a.close);
+    document.getElementById('closes').innerHTML = closes.length
+      ? '<span class="rank-label">Cierre de la semana anterior:</span>' +
+        closes.map(c => '<span class="closechip"><b>' + esc(c.name) + '</b>' +
+          Math.round(c.close) + '%</span>').join('')
+      : '';
     document.getElementById('refreshed').textContent =
       'actualizado ' + new Date(data.generated_at).toLocaleTimeString();
+    const lastUpdated = document.getElementById('last-updated');
+    if (lastUpdated) {
+      lastUpdated.textContent = 'last updated ' +
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
   } catch (e) {
     document.getElementById('refreshed').textContent = 'error: ' + e.message;
   } finally {
@@ -380,7 +691,78 @@ function triggerRefresh() {
   load(true);
 }
 
-// Initial load (from cache / state dir only, never aggressive polling)
+// E13: workday-aware pace toggle (persisted; re-renders from cached data).
+function toggleWorkday() {
+  workday.on = !workday.on;
+  localStorage.setItem('workdayPace', workday.on ? '1' : '0');
+  syncWorkdayButton();
+  load(false);
+}
+
+function syncWorkdayButton() {
+  const btn = document.getElementById('btn-workday');
+  if (btn) {
+    btn.textContent = 'ritmo laborable: ' + (workday.on ? 'on' : 'off');
+    btn.classList.toggle('on', workday.on);
+    btn.title = 'Al activarlo, el "toca" solo cuenta horas de lunes a viernes dentro de cada ventana.';
+  }
+}
+
+// Compact-by-default detail toggle: hides toca/cierra and notes (pure CSS).
+const moreinfo = { on: localStorage.getItem('moreInfo') === '1' };
+
+function toggleMoreInfo() {
+  moreinfo.on = !moreinfo.on;
+  localStorage.setItem('moreInfo', moreinfo.on ? '1' : '0');
+  syncMoreInfoButton();
+}
+
+function syncMoreInfoButton() {
+  const btn = document.getElementById('btn-moreinfo');
+  if (btn) {
+    btn.textContent = 'más info: ' + (moreinfo.on ? 'on' : 'off');
+    btn.classList.toggle('on', moreinfo.on);
+    btn.title = 'Muestra "toca / cierra ≈" y las notas de detalle (plan level, desgloses, motivos de fallo) en las cards.';
+  }
+  if (document.body) document.body.classList.toggle('moreinfo', moreinfo.on);
+}
+
+// Auto-refresh: reload /api/quotas every minute while enabled (same cached
+// fetch + render path as the manual button, just periodic). Persisted like
+// the other toggles.
+const AUTOREFRESH_MS = 60000;
+const autorefresh = { on: localStorage.getItem('autoRefresh') === '1', timer: null };
+
+function toggleAutoRefresh() {
+  setAutoRefresh(!autorefresh.on);
+}
+
+// Start/stop the periodic reload and persist the choice.
+function setAutoRefresh(on) {
+  autorefresh.on = on;
+  localStorage.setItem('autoRefresh', on ? '1' : '0');
+  if (autorefresh.timer) {
+    clearInterval(autorefresh.timer);
+    autorefresh.timer = null;
+  }
+  if (on) autorefresh.timer = setInterval(() => load(false), AUTOREFRESH_MS);
+  syncAutoRefreshButton();
+}
+
+function syncAutoRefreshButton() {
+  const btn = document.getElementById('btn-autorefresh');
+  if (btn) {
+    btn.textContent = 'auto-refresh: ' + (autorefresh.on ? 'on' : 'off');
+    btn.classList.toggle('on', autorefresh.on);
+    btn.title = 'Recarga los datos automáticamente cada 60 segundos.';
+  }
+}
+
+// Initial load (from cache / state dir only; periodic reloads only when the
+// user turned auto-refresh on)
+syncMoreInfoButton();
+syncWorkdayButton();
+setAutoRefresh(autorefresh.on);
 load(false);
 </script>
 </body>

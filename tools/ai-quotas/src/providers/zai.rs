@@ -3,18 +3,23 @@
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
     error_record, http_agent, missing_record, non_empty_env, ok_record, ProviderRecord, QuotaSource,
 };
-use crate::schema::{Kind, Record, Source};
+use crate::schema::{Kind, Record, ResetCredit, ResetCredits, Source};
 
 pub const PROVIDER_ID: &str = "zai";
 pub const DISPLAY_NAME: &str = "Z.ai Coding Plan MAX";
 const QUOTA_URL: &str = "https://api.z.ai/api/monitor/usage/quota/limit";
+/// Earned "usage limit resets" (customer-package resets), authenticated the
+/// same way as the monitor endpoint.
+const RESETS_URL: &str = "https://api.z.ai/api/biz/customer-package-reset/list?targetType=PERSONAL";
+/// Label of the primary TOKENS_LIMIT row; reset credits ride on this record.
+const FIVE_HOUR_LABEL: &str = "5h window";
 
 /// auth.json entry ids tried in order.
 const AUTH_IDS: &[&str] = &["zai-coding-plan", "zai", "z-ai", "z.ai", "zhipu", "zhipuai"];
@@ -69,7 +74,14 @@ impl QuotaSource for ZaiSource {
             return vec![missing_record(PROVIDER_ID, DISPLAY_NAME, "no credentials")];
         };
         match http_get_quota(&self.agent, &key) {
-            Ok(json) => map_response(&json, Utc::now()),
+            Ok(json) => {
+                let mut records = map_response(&json, Utc::now());
+                // Secondary endpoint (earned usage-limit resets) is
+                // best-effort: any failure there must never degrade the
+                // main quota records.
+                merge_resets(&mut records, http_get_resets(&self.agent, &key));
+                records
+            }
             Err(detail) => vec![error_record(PROVIDER_ID, DISPLAY_NAME, detail)],
         }
     }
@@ -86,6 +98,19 @@ fn http_get_quota(agent: &ureq::Agent, token: &str) -> Result<Value, String> {
         .map_err(|e| format!("quota request failed: {e}"))?
         .into_json::<Value>()
         .map_err(|e| format!("failed to decode quota response: {e}"))
+}
+
+fn http_get_resets(agent: &ureq::Agent, token: &str) -> Result<Value, String> {
+    agent
+        .get(RESETS_URL)
+        // Same verified auth quirk as the monitor API: RAW token, no Bearer.
+        .set("Authorization", token)
+        .set("Accept", "application/json")
+        .set("Accept-Language", "en-US,en")
+        .call()
+        .map_err(|e| format!("resets request failed: {e}"))?
+        .into_json::<Value>()
+        .map_err(|e| format!("failed to decode resets response: {e}"))
 }
 
 /// Pure: resolve the Z.ai key from a parsed auth.json value. Entry ids are
@@ -137,6 +162,37 @@ struct QuotaLimit {
     current_value: Option<f64>,
     #[serde(default)]
     usage: Option<f64>,
+    /// Per-model usage breakdown (observed on TIME_LIMIT rows).
+    #[serde(rename = "usageDetails", default)]
+    usage_details: Vec<UsageDetail>,
+}
+
+#[derive(Deserialize)]
+struct UsageDetail {
+    #[serde(rename = "modelCode")]
+    model_code: Option<String>,
+    #[serde(default)]
+    usage: Option<f64>,
+}
+
+/// One earned reset credit in the customer-package-reset payload. Both
+/// windows ride as plain arrays; unknown fields are ignored.
+#[derive(Deserialize)]
+struct ResetEntry {
+    #[serde(default)]
+    available: bool,
+    /// Naive server-local timestamp, e.g. "2026-10-01 23:59:59".
+    #[serde(rename = "expireTime", default)]
+    expire_time: Option<String>,
+}
+
+/// `data` payload of the customer-package-reset endpoint.
+#[derive(Deserialize)]
+struct ResetListData {
+    #[serde(rename = "fiveHourResets", default)]
+    five_hour_resets: Vec<ResetEntry>,
+    #[serde(rename = "weekResets", default)]
+    week_resets: Vec<ResetEntry>,
 }
 
 /// Pure mapping of a quota API response body into records (no network).
@@ -172,7 +228,7 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
         let is_time_limit = limit.limit_type == "TIME_LIMIT";
         let label = match limit.limit_type.as_str() {
             "TOKENS_LIMIT" => match (limit.unit, limit.number) {
-                (Some(3), Some(5)) => "5h window".to_string(),
+                (Some(3), Some(5)) => FIVE_HOUR_LABEL.to_string(),
                 (Some(6), Some(1)) => "Weekly".to_string(),
                 (unit, number) => format!(
                     "Token usage(unit={},number={})",
@@ -206,7 +262,30 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
         // Live-verified: TIME_LIMIT ("MCP monthly") rows also carry
         // nextResetTime; map it for every limit type when present.
         record.resets_at = limit.next_reset_ms.and_then(DateTime::from_timestamp_millis);
-        out.push(ok_record(record, level_detail.clone()));
+        // Per-model breakdown rides in `detail` so the UI can show it
+        // alongside the absolute request counts.
+        let mut detail = level_detail.clone().unwrap_or_default();
+        let breakdown: Vec<String> = limit
+            .usage_details
+            .iter()
+            .filter_map(|d| {
+                Some(format!(
+                    "{} {}",
+                    d.model_code.as_deref().unwrap_or("?"),
+                    d.usage?
+                ))
+            })
+            .collect();
+        if !breakdown.is_empty() {
+            if !detail.is_empty() {
+                detail.push_str(" · ");
+            }
+            detail.push_str(&breakdown.join(" · "));
+        }
+        out.push(ok_record(
+            record,
+            if detail.is_empty() { None } else { Some(detail) },
+        ));
     }
     out
 }
@@ -215,6 +294,70 @@ fn fmt_code(value: Option<i64>) -> String {
     value
         .map(|n| n.to_string())
         .unwrap_or_else(|| "?".to_string())
+}
+
+/// Pure: parse one naive `expireTime` ("YYYY-MM-DD HH:MM:SS") into a UTC
+/// instant. The z.ai console serves server-local timestamps, observed to
+/// follow Asia/Shanghai (UTC+8) — attach that fixed offset.
+fn parse_expire_time(raw: &str) -> Option<DateTime<Utc>> {
+    let naive = NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S").ok()?;
+    let offset = FixedOffset::east_opt(8 * 3600)?;
+    naive
+        .and_local_timezone(offset)
+        .single()
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
+/// Pure: map a customer-package-reset response into reset credits. Counts
+/// entries with `available == true` across BOTH windows, emits one row per
+/// available entry (each carrying its own expiry), and takes the earliest
+/// expiry among AVAILABLE entries only (derived via the shared helper).
+/// Empty lists are a valid answer (zero resets), an unusable payload yields
+/// `None`.
+pub fn map_resets(json: &Value) -> Option<ResetCredits> {
+    // Same envelope convention as the monitor API: payload under "data",
+    // bare bodies also accepted.
+    let body = json.get("data").unwrap_or(json);
+    let parsed: ResetListData = match serde_json::from_value(body.clone()) {
+        Ok(parsed) => parsed,
+        Err(_) => return None,
+    };
+    let mut available = 0u64;
+    let mut credits = Vec::new();
+    for entry in parsed
+        .five_hour_resets
+        .iter()
+        .chain(parsed.week_resets.iter())
+    {
+        if !entry.available {
+            continue;
+        }
+        available += 1;
+        credits.push(ResetCredit {
+            expires_at: entry.expire_time.as_deref().and_then(parse_expire_time),
+            // The z.ai payload carries no human title per entry.
+            title: None,
+        });
+    }
+    Some(ResetCredits::with_credits(available, None, credits))
+}
+
+/// Best-effort merge of the resets endpoint into already-mapped records:
+/// the credits belong to the primary TOKENS_LIMIT (5h) record. ANY failure
+/// (HTTP error, unusable payload, no 5h record) is swallowed so this
+/// secondary endpoint can never degrade the main quota fetch.
+fn merge_resets(records: &mut [ProviderRecord], resets: Result<Value, String>) {
+    let Some(credits) = resets.ok().and_then(|json| map_resets(&json)) else {
+        return;
+    };
+    for status in records.iter_mut() {
+        if let Some(record) = &mut status.record {
+            if record.label.as_deref() == Some(FIVE_HOUR_LABEL) {
+                record.reset_credits = Some(credits);
+                return;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -281,8 +424,12 @@ mod tests {
             assert_eq!(record.kind, Kind::Window);
             assert_eq!(record.source, Source::Api);
             assert_eq!(record.fetched_at, at());
-            assert_eq!(status.detail.as_deref(), Some("plan level: pro"));
+            assert!(status.detail.as_deref().unwrap().starts_with("plan level: pro"));
         }
+
+        // The TIME_LIMIT row carries its per-model usage breakdown in `detail`.
+        assert!(mcp.detail.as_deref().unwrap().contains("plan level: pro"));
+        assert!(mcp.detail.as_deref().unwrap().contains("search-prime 5678"));
     }
 
     #[test]
@@ -393,5 +540,146 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].state, State::Error);
         assert!(records[0].detail.as_deref().unwrap().contains("invalid quota response"));
+    }
+
+    fn resets_fixture() -> serde_json::Value {
+        // Shape captured from the real customer-package-reset endpoint.
+        serde_json::json!({
+            "code": 200, "msg": "Operation successful", "success": true,
+            "data": {
+                "customerId": 123, "targetType": "PERSONAL",
+                "organizationId": null, "projectId": null,
+                "lastFiveHourResetTime": null, "lastWeekResetTime": null,
+                "fiveHourResets": [],
+                "weekResets": [
+                    {"recordId": 288311, "expireTime": "2026-10-01 23:59:59", "available": true}
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn map_resets_parses_available_with_shanghai_offset() {
+        let credits = map_resets(&resets_fixture()).unwrap();
+        // 2026-10-01 23:59:59 at UTC+8 == 15:59:59 UTC the same day.
+        assert_eq!(
+            credits,
+            ResetCredits {
+                available: 1,
+                applicable: None,
+                expires_at: Some(ts("2026-10-01T15:59:59Z")),
+                credits: vec![ResetCredit {
+                    expires_at: Some(ts("2026-10-01T15:59:59Z")),
+                    title: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn map_resets_counts_both_windows_and_picks_earliest_available() {
+        let json = serde_json::json!({
+            "data": {
+                "fiveHourResets": [
+                    {"recordId": 1, "expireTime": "2026-09-10 08:00:00", "available": true}
+                ],
+                "weekResets": [
+                    {"recordId": 2, "expireTime": "2026-09-05 08:00:00", "available": true},
+                    // Unavailable entries never count, even when earlier.
+                    {"recordId": 3, "expireTime": "2026-08-01 08:00:00", "available": false},
+                    {"recordId": 4, "expireTime": "2026-10-01 23:59:59", "available": true}
+                ]
+            }
+        });
+        let credits = map_resets(&json).unwrap();
+        assert_eq!(credits.available, 3);
+        assert_eq!(credits.expires_at, Some(ts("2026-09-05T00:00:00Z")));
+        // One row per available entry (2 week + 1 five-hour), unavailable
+        // ones excluded; the z.ai payload carries no titles.
+        assert_eq!(credits.credits.len(), 3);
+        assert!(credits.credits.iter().all(|c| c.title.is_none()));
+        assert!(credits
+            .credits
+            .iter()
+            .all(|c| c.expires_at != Some(ts("2026-08-01T00:00:00Z"))));
+    }
+
+    #[test]
+    fn map_resets_empty_lists_are_zero_resets() {
+        let json = serde_json::json!({
+            "data": {"customerId": 1, "fiveHourResets": [], "weekResets": []}
+        });
+        let credits = map_resets(&json).unwrap();
+        assert_eq!(
+            credits,
+            ResetCredits {
+                available: 0,
+                applicable: None,
+                expires_at: None,
+                credits: Vec::new()
+            }
+        );
+    }
+
+    #[test]
+    fn map_resets_all_unavailable_is_zero_with_no_expiry() {
+        let json = serde_json::json!({
+            "data": {
+                "fiveHourResets": [],
+                "weekResets": [{"recordId": 9, "expireTime": "2026-10-01 23:59:59", "available": false}]
+            }
+        });
+        let credits = map_resets(&json).unwrap();
+        assert_eq!(credits.available, 0);
+        assert_eq!(credits.expires_at, None, "expiry only among AVAILABLE entries");
+    }
+
+    #[test]
+    fn map_resets_unparseable_payload_is_none() {
+        assert_eq!(map_resets(&serde_json::json!("garbage")), None);
+        assert_eq!(map_resets(&serde_json::json!({"data": {"weekResets": 42}})), None);
+    }
+
+    #[test]
+    fn merge_resets_attaches_to_five_hour_record_only() {
+        let json = serde_json::json!({
+            "limits": [
+                {"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":24.0},
+                {"type":"TOKENS_LIMIT","unit":6,"number":1,"percentage":52.0}
+            ]
+        });
+        let mut records = map_response(&json, at());
+        merge_resets(&mut records, Ok(resets_fixture()));
+        let five = by_label(&records, FIVE_HOUR_LABEL).record.as_ref().unwrap();
+        assert_eq!(five.reset_credits.as_ref().unwrap().available, 1);
+        let weekly = by_label(&records, "Weekly").record.as_ref().unwrap();
+        assert_eq!(weekly.reset_credits, None);
+    }
+
+    #[test]
+    fn merge_resets_failure_keeps_records_untouched() {
+        let json = serde_json::json!({
+            "limits": [{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":24.0}]
+        });
+        // HTTP failure of the second endpoint: records intact, no credits.
+        let mut records = map_response(&json, at());
+        merge_resets(&mut records, Err("resets request failed: boom".to_string()));
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].state, State::Ok);
+        assert_eq!(records[0].record.as_ref().unwrap().reset_credits, None);
+
+        // Unusable payload: same outcome.
+        let mut records = map_response(&json, at());
+        merge_resets(&mut records, Ok(serde_json::json!("garbage")));
+        assert_eq!(records[0].record.as_ref().unwrap().reset_credits, None);
+
+        // Valid payload but no 5h record to attach to: nothing breaks.
+        let json_no_five = serde_json::json!({
+            "limits": [{"type":"TIME_LIMIT","percentage":12.3,"currentValue":123,"usage":1000}]
+        });
+        let mut records = map_response(&json_no_five, at());
+        merge_resets(&mut records, Ok(resets_fixture()));
+        assert_eq!(records[0].record.as_ref().unwrap().reset_credits, None);
+        assert_eq!(records[0].state, State::Ok);
     }
 }

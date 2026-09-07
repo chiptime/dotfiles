@@ -110,6 +110,7 @@ function npm { lazy_nvm; npm "$@"; }
 function node { lazy_nvm; node "$@"; }
 function npx { lazy_nvm; npx "$@"; }
 function pnpm { lazy_nvm; pnpm "$@"; }
+function pi-web { lazy_nvm; pi-web "$@"; }
 
 
 

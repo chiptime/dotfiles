@@ -347,7 +347,9 @@ local function central_step(direction)
 end
 local function map(lhs, rhs, desc)
   local existing = vim.fn.maparg(lhs, "n", false, true)
-  if type(existing) == "table" and next(existing) then
+  -- sid < 0 marks core-internal mappings (Neovim 0.11+ bracket defaults like [b -> :bprevious);
+  -- those are safe to override. sid >= 0 means a script or command owns the lhs.
+  if type(existing) == "table" and next(existing) and (existing.sid or 0) >= 0 then
     notify("IDE fallback " .. lhs .. " was not installed because an existing mapping owns it.", vim.log.levels.WARN)
     return
   end

@@ -1,0 +1,6 @@
+[Unit]
+Description=AI Quotas - hourly history snapshot (hits the local dashboard)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/curl -fsS --max-time 30 http://localhost:47623/api/quotas -o /dev/null

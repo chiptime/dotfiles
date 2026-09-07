@@ -1,5 +1,5 @@
 //! CLI: `serve` (default) runs the local dashboard, `stamp` writes a record
-//! file, `check` prints status.
+//! file, `check` prints status (TSV by default, JSON array with `--json`).
 
 use std::fs;
 use std::io::Write;
@@ -24,7 +24,7 @@ where
     match command.as_str() {
         "serve" => run_serve(rest),
         "stamp" => run_stamp(rest),
-        "check" => run_check(),
+        "check" => run_check(rest),
         other => {
             eprintln!("error: unknown subcommand '{other}' (expected serve, stamp or check)");
             2
@@ -52,8 +52,9 @@ fn run_serve(rest: Vec<String>) -> i32 {
             manager.fetch_cached()
         }
     });
+    let status = Arc::new(crate::status::StatusPoller::new());
     let bind = format!("127.0.0.1:{port}");
-    match server::serve(&bind, reader::state_dir(), pull) {
+    match server::serve(&bind, reader::state_dir(), pull, status) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {e}");
@@ -82,12 +83,47 @@ fn run_stamp(args: Vec<String>) -> i32 {
     }
 }
 
-fn run_check() -> i32 {
+/// `check [--json]`: merge file + pull statuses, print them, return the exit
+/// code. Default output is TSV; `--json` prints one JSON array to stdout.
+/// Error details always go to stderr (`! provider: detail`), never stdout.
+fn run_check(args: Vec<String>) -> i32 {
+    let mut json = false;
+    for arg in &args {
+        match arg.as_str() {
+            "--json" => json = true,
+            other => {
+                eprintln!("error: unknown argument '{other}' (check takes only --json)");
+                return 2;
+            }
+        }
+    }
     let file_statuses = reader::read_all();
     let pull_statuses = crate::providers::pull_all();
     let statuses = reader::merge_statuses(file_statuses, pull_statuses);
-    for status in &statuses {
-        print_status(status);
+    if json {
+        // Incident snapshots for status-mapped providers (claude/chatgpt):
+        // one poll round; failures leave the new fields null.
+        let status_map = crate::status::StatusPoller::new().fetch();
+        let values: Vec<serde_json::Value> = statuses
+            .iter()
+            .map(|s| check_status_json(s, &status_map))
+            .collect();
+        match serde_json::to_string(&values) {
+            Ok(body) => println!("{body}"),
+            Err(e) => {
+                eprintln!("error: failed to serialize check output: {e}");
+                return 1;
+            }
+        }
+        for status in &statuses {
+            if let Some(detail) = &status.detail {
+                eprintln!("! {}: {}", status.provider, detail);
+            }
+        }
+    } else {
+        for status in &statuses {
+            print_status(status);
+        }
     }
     0
 }
@@ -114,6 +150,35 @@ fn print_status(status: &reader::Status) {
     if let Some(detail) = &status.detail {
         eprintln!("! {}: {}", status.provider, detail);
     }
+}
+
+/// One merged status as a JSON object for `check --json`. Unknown values are
+/// null; `resets_at` keeps the existing internal representation (RFC 3339,
+/// same as `Record`'s chrono serde output). Incident fields ride along for
+/// status-mapped providers and are null when not polled or the poll failed
+/// before any good data existed.
+fn check_status_json(
+    status: &reader::Status,
+    status_map: &std::collections::BTreeMap<String, crate::status::ProviderStatus>,
+) -> serde_json::Value {
+    let (status_indicator, status_summary) =
+        crate::status::check_fields(status_map.get(&status.provider));
+    let record = status.record.as_ref();
+    serde_json::json!({
+        "provider": status.provider,
+        "state": status.state.as_str(),
+        "used_percent": record.and_then(|r| r.used_percent()),
+        "display_name": status
+            .display_name
+            .clone()
+            .or_else(|| reader::known_display_name(&status.provider).map(str::to_string)),
+        "label": record.and_then(|r| r.label.clone()),
+        "resets_at": record.and_then(|r| r.resets_at).map(|t| t.to_rfc3339()),
+        "kind": record.map(|r| r.kind),
+        "detail": status.detail,
+        "status_indicator": status_indicator,
+        "status_summary": status_summary,
+    })
 }
 
 /// Parsed `stamp` arguments.

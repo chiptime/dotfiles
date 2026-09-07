@@ -64,7 +64,8 @@ impl QuotaSource for ClaudeSource {
         let Some(token) = self.resolve_token() else {
             return vec![missing_record(PROVIDER_ID, DISPLAY_NAME, "no credentials")];
         };
-        match http_get_usage(&self.agent, &token) {
+        let agent = &self.agent;
+        match super::fetch_with_retry(|| http_get_usage(agent, &token)) {
             Ok(json) => map_response(&json, Utc::now()),
             Err(detail) => vec![error_record(PROVIDER_ID, DISPLAY_NAME, detail)],
         }
@@ -96,12 +97,40 @@ pub fn extract_claude_token(json: &Value) -> Option<String> {
 struct ClaudeUsageResponse {
     five_hour: Option<ClaudeUsageWindow>,
     seven_day: Option<ClaudeUsageWindow>,
+    /// Extra-usage / spend tracking (real money over the plan's cap).
+    #[serde(default)]
+    spend: Option<ClaudeSpend>,
 }
 
 #[derive(Deserialize)]
 struct ClaudeUsageWindow {
     utilization: Option<f64>,
     resets_at: Option<String>,
+}
+
+/// Money amount as minor units with a decimal exponent (e.g. 1901 @ 2 -> 19.01).
+#[derive(Deserialize)]
+struct ClaudeMoney {
+    amount_minor: i64,
+    #[serde(default)]
+    exponent: Option<u32>,
+    #[serde(default)]
+    currency: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ClaudeSpend {
+    used: Option<ClaudeMoney>,
+    limit: Option<ClaudeMoney>,
+    #[serde(default)]
+    severity: Option<String>,
+    #[serde(default)]
+    disabled_reason: Option<String>,
+}
+
+fn money_value(m: &ClaudeMoney) -> f64 {
+    let exp = m.exponent.unwrap_or(2);
+    m.amount_minor as f64 / 10f64.powi(exp as i32)
 }
 
 pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderRecord> {
@@ -164,6 +193,39 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
         }
     }
 
+    if let Some(spend) = parsed.spend {
+        if let (Some(used), Some(limit)) = (spend.used.as_ref(), spend.limit.as_ref()) {
+            let mut detail = spend
+                .severity
+                .as_deref()
+                .map(|s| format!("severity: {s}"))
+                .unwrap_or_default();
+            if let Some(reason) = spend.disabled_reason.as_deref() {
+                if !detail.is_empty() {
+                    detail.push_str(" · ");
+                }
+                detail.push_str(&format!("disabled: {reason}"));
+            }
+            let mut record = Record::new(
+                PROVIDER_ID.to_string(),
+                Kind::Balance,
+                Source::Api,
+                fetched_at,
+                None,
+            );
+            record.label = Some("Extra usage".to_string());
+            record.display_name = Some(DISPLAY_NAME.to_string());
+            record.used = Some(money_value(used));
+            record.limit = Some(money_value(limit));
+            record.currency = used.currency.clone().or_else(|| Some("EUR".to_string()));
+            record.unit = Some("currency".to_string());
+            out.push(ok_record(
+                record,
+                if detail.is_empty() { None } else { Some(detail) },
+            ));
+        }
+    }
+
     if out.is_empty() {
         vec![error_record(
             PROVIDER_ID,
@@ -217,6 +279,34 @@ mod tests {
             })
             .unwrap();
         assert_eq!(w.record.as_ref().unwrap().used, Some(42.0));
+    }
+
+    #[test]
+    fn maps_spend_extra_usage_into_balance_record() {
+        let fixture = json!({
+            "five_hour": { "utilization": 10.0, "resets_at": "2026-08-27T11:29:59Z" },
+            "spend": {
+                "used": { "amount_minor": 1901, "currency": "EUR", "exponent": 2 },
+                "limit": { "amount_minor": 1700, "currency": "EUR", "exponent": 2 },
+                "percent": 100,
+                "severity": "critical",
+                "disabled_reason": "org_level_disabled_until"
+            }
+        });
+        let now = Utc::now();
+        let records = map_response(&fixture, now);
+        let spend = records
+            .iter()
+            .find(|r| r.record.as_ref().and_then(|rec| rec.label.as_deref()) == Some("Extra usage"))
+            .expect("spend record present");
+        let rec = spend.record.as_ref().unwrap();
+        assert_eq!(rec.kind, Kind::Balance);
+        assert_eq!(rec.used, Some(19.01));
+        assert_eq!(rec.limit, Some(17.0));
+        assert_eq!(rec.currency.as_deref(), Some("EUR"));
+        assert_eq!(rec.resets_at, None); // balances never reset
+        rec.validate().expect("balance without resets_at is valid");
+        assert!(spend.detail.as_deref().unwrap().contains("severity: critical"));
     }
 
     #[test]
