@@ -105,6 +105,10 @@ struct BalanceResponse {
 struct BalanceInfo {
     currency: String,
     total_balance: String,
+    #[serde(default)]
+    granted_balance: Option<String>,
+    #[serde(default)]
+    topped_up_balance: Option<String>,
 }
 
 /// Pure mapping of a balance API response body into records (no network).
@@ -158,7 +162,16 @@ pub fn map_response(json: &serde_json::Value, fetched_at: DateTime<Utc>) -> Vec<
     record.currency = Some(info.currency.clone());
     record.unit = Some("currency".to_string());
     record.display_name = Some(DISPLAY_NAME.to_string());
-    vec![ok_record(record, None)]
+    // Granted vs topped-up split (promotional vs paid-in money).
+    let split: Vec<String> = [
+        info.granted_balance.as_deref().map(|g| format!("granted {g}")),
+        info.topped_up_balance.as_deref().map(|t| format!("topped up {t}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let detail = if split.is_empty() { None } else { Some(split.join(" · ")) };
+    vec![ok_record(record, detail)]
 }
 
 #[cfg(test)]
@@ -195,6 +208,10 @@ mod tests {
         assert_eq!(record.used, None);
         assert_eq!(record.limit, Some(110.0));
         assert_eq!(record.currency.as_deref(), Some("CNY"));
+        assert_eq!(
+            status.detail.as_deref(),
+            Some("granted 10.00 · topped up 100.00")
+        );
         assert_eq!(record.unit.as_deref(), Some("currency"));
         assert_eq!(record.label, None);
         assert_eq!(record.resets_at, None);

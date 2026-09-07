@@ -55,6 +55,20 @@ pub fn missing_record(provider: &str, display_name: &str, detail: &str) -> Provi
     }
 }
 
+/// Run one fallible HTTP fetch; on failure, pause briefly and retry once,
+/// reporting the FIRST error if both attempts fail. Live-verified: pull
+/// blips (claude/chatgpt "Network Error") are transient and clear within
+/// seconds — the retry keeps the last-good data from degrading to Stale.
+pub fn fetch_with_retry<T>(f: impl Fn() -> Result<T, String>) -> Result<T, String> {
+    match f() {
+        Ok(v) => Ok(v),
+        Err(first) => {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            f().map_err(|_| first)
+        }
+    }
+}
+
 /// Build an `Error`-state result (fetch or parse failure).
 pub fn error_record(provider: &str, display_name: &str, detail: String) -> ProviderRecord {
     ProviderRecord {
@@ -250,6 +264,23 @@ fn failure_detail(fetched: &[ProviderRecord]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fetch_with_retry_recovers_transient_failure() {
+        let attempts = std::cell::Cell::new(0);
+        let r = fetch_with_retry(|| {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() == 1 { Err("transient".to_string()) } else { Ok(7) }
+        });
+        assert_eq!(r.unwrap(), 7);
+        assert_eq!(attempts.get(), 2);
+    }
+
+    #[test]
+    fn fetch_with_retry_reports_first_error_when_both_fail() {
+        let r = fetch_with_retry(|| Err::<i32, String>("first".to_string()));
+        assert_eq!(r.unwrap_err(), "first");
+    }
     use std::cell::{Cell, RefCell};
 
     use chrono::Utc;

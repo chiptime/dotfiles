@@ -64,6 +64,54 @@ pub fn default_ttl(source: Source) -> u64 {
     }
 }
 
+/// One earned reset credit with its own expiry. Providers map each entry of
+/// their per-credit endpoints into this row; unknown/irrelevant fields are
+/// dropped at the mapping layer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ResetCredit {
+    /// When this credit expires and becomes unusable, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
+    /// Provider display title, when given (e.g. "Full reset (Weekly + 5 hr)").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// Earned "usage limit resets" surfaced by a provider: one-shot credits that
+/// restore a capped window when spent. Optional extras are omitted from the
+/// JSON entirely when absent, so old state files and readers stay compatible.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ResetCredits {
+    /// Number of earned resets currently usable.
+    pub available: u64,
+    /// Resets applicable to the current (active) cap, when the provider says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicable: Option<u64>,
+    /// Earliest expiry among the available resets, when known. Derived from
+    /// the per-credit rows via [`ResetCredits::with_credits`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
+    /// One row per available credit, each with its own expiry. Old payloads
+    /// predate this list: absent keys parse as empty and empty lists are
+    /// omitted from serialized JSON.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credits: Vec<ResetCredit>,
+}
+
+impl ResetCredits {
+    /// Build reset credits from a per-credit list, deriving `expires_at` as
+    /// the earliest credit expiry (None when no credit carries one) so every
+    /// provider stays consistent.
+    pub fn with_credits(available: u64, applicable: Option<u64>, credits: Vec<ResetCredit>) -> Self {
+        Self {
+            available,
+            applicable,
+            expires_at: credits.iter().filter_map(|c| c.expires_at).min(),
+            credits,
+        }
+    }
+}
+
 /// A single quota record.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Record {
@@ -76,6 +124,8 @@ pub struct Record {
     pub display_name: Option<String>,
     pub currency: Option<String>,
     pub resets_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_credits: Option<ResetCredits>,
     pub fetched_at: DateTime<Utc>,
     pub ttl_seconds: Option<u64>,
     pub source: Source,
@@ -104,6 +154,7 @@ impl Record {
             display_name: None,
             currency: None,
             resets_at: None,
+            reset_credits: None,
         }
     }
 
@@ -162,6 +213,8 @@ impl<'de> Deserialize<'de> for Record {
             currency: Option<String>,
             #[serde(default)]
             resets_at: Option<DateTime<Utc>>,
+            #[serde(default)]
+            reset_credits: Option<ResetCredits>,
             fetched_at: DateTime<Utc>,
             #[serde(default)]
             ttl_seconds: Option<u64>,
@@ -179,6 +232,7 @@ impl<'de> Deserialize<'de> for Record {
             display_name: raw.display_name,
             currency: raw.currency,
             resets_at: raw.resets_at,
+            reset_credits: raw.reset_credits,
             fetched_at: raw.fetched_at,
             ttl_seconds: Some(raw.ttl_seconds.unwrap_or_else(|| default_ttl(raw.source))),
             source: raw.source,
@@ -318,5 +372,92 @@ mod tests {
         r.used = Some(3.0);
         r.limit = None;
         assert!(r.used_percent().is_none());
+    }
+
+    #[test]
+    fn reset_credits_default_to_none_and_old_files_parse() {
+        // Legacy state file without the field: fully backward compatible.
+        let r: Record = serde_json::from_str(SAMPLE).unwrap();
+        assert_eq!(r.reset_credits, None);
+
+        let r = Record::new("p".into(), Kind::Window, Source::Api, Utc::now(), None);
+        assert_eq!(r.reset_credits, None);
+    }
+
+    #[test]
+    fn reset_credits_round_trip_and_skip_absent_extras() {
+        let mut r = Record::new("p".into(), Kind::Window, Source::Api, Utc::now(), None);
+        r.reset_credits = Some(ResetCredits {
+            available: 3,
+            applicable: None,
+            expires_at: None,
+            credits: Vec::new(),
+        });
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["reset_credits"]["available"], 3);
+        assert!(json["reset_credits"].get("applicable").is_none());
+        assert!(json["reset_credits"].get("expires_at").is_none());
+        assert!(json["reset_credits"].get("credits").is_none());
+
+        let back: Record = serde_json::from_value(json).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn reset_credits_legacy_json_without_credits_parses() {
+        // State written before per-credit rows existed: the missing key
+        // deserializes to an empty list and serializes back omitted.
+        let legacy = r#"{"available":2,"applicable":1,"expires_at":"2026-09-20T23:34:55Z"}"#;
+        let credits: ResetCredits = serde_json::from_str(legacy).unwrap();
+        assert_eq!(credits.available, 2);
+        assert!(credits.credits.is_empty());
+        let json = serde_json::to_value(&credits).unwrap();
+        assert!(json.get("credits").is_none(), "empty credits key omitted");
+    }
+
+    #[test]
+    fn with_credits_derives_earliest_expiry() {
+        let credit = |days: i64| ResetCredit {
+            expires_at: Some(Utc::now() + chrono::Duration::days(days)),
+            title: Some(format!("reset +{days}d")),
+        };
+        let earliest = credit(5);
+        let credits = ResetCredits::with_credits(2, Some(1), vec![credit(30), earliest.clone(), credit(12)]);
+        assert_eq!(credits.available, 2);
+        assert_eq!(credits.applicable, Some(1));
+        assert_eq!(credits.expires_at, earliest.expires_at, "earliest wins");
+
+        // No credit carries an expiry -> no derived one either.
+        let plain = ResetCredits::with_credits(1, None, vec![ResetCredit::default()]);
+        assert_eq!(plain.expires_at, None);
+
+        // Empty list behaves like the counts-only shape.
+        let empty = ResetCredits::with_credits(0, None, Vec::new());
+        assert_eq!(empty.expires_at, None);
+        assert!(empty.credits.is_empty());
+    }
+
+    #[test]
+    fn reset_credits_with_credits_round_trips() {
+        let credits = ResetCredits::with_credits(
+            1,
+            None,
+            vec![ResetCredit {
+                expires_at: Some(Utc::now()),
+                title: Some("Full reset (Weekly + 5 hr)".into()),
+            }],
+        );
+        let json = serde_json::to_value(&credits).unwrap();
+        assert_eq!(json["credits"].as_array().unwrap().len(), 1);
+        assert_eq!(json["credits"][0]["title"], "Full reset (Weekly + 5 hr)");
+        let back: ResetCredits = serde_json::from_value(json).unwrap();
+        assert_eq!(back, credits);
+    }
+
+    #[test]
+    fn reset_credits_absent_key_skipped_on_serialize() {
+        let r = Record::new("p".into(), Kind::Window, Source::Api, Utc::now(), None);
+        let json = serde_json::to_value(&r).unwrap();
+        assert!(json.get("reset_credits").is_none(), "no key when None");
     }
 }
