@@ -14,7 +14,7 @@ use serde_json::{json, Map, Value};
 
 use crate::reader::{self, Status};
 use crate::status::StatusPoller;
-use crate::{balancer, history};
+use crate::{balancer, costs, history};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 pub const DEFAULT_PORT: u16 = 47_623;
@@ -24,7 +24,7 @@ pub const DEFAULT_PORT: u16 = 47_623;
 pub type PullFn = Arc<dyn Fn(bool) -> Vec<Status> + Send + Sync>;
 
 /// Bind and serve forever. Returns an error only when binding fails.
-pub fn serve(bind_addr: &str, dir: PathBuf, pull: PullFn, status: Arc<StatusPoller>) -> Result<(), String> {
+pub fn serve(bind_addr: &str, dir: PathBuf, pull: PullFn, status: Arc<StatusPoller>, costs: Arc<costs::CostScanner>) -> Result<(), String> {
     let server = tiny_http::Server::http(bind_addr)
         .map_err(|e| format!("failed to bind {bind_addr}: {e}"))?;
     println!("ai-quotas listening on http://{}", server.server_addr());
@@ -57,11 +57,17 @@ pub fn serve(bind_addr: &str, dir: PathBuf, pull: PullFn, status: Arc<StatusPoll
             "no"
         },
     );
-    run_loop(server, dir, pull, status)
+    run_loop(server, dir, pull, status, costs)
 }
 
 /// Accept loop: one thread per request, panics isolated per request.
-pub fn run_loop(server: tiny_http::Server, dir: PathBuf, pull: PullFn, status: Arc<StatusPoller>) -> ! {
+pub fn run_loop(
+    server: tiny_http::Server,
+    dir: PathBuf,
+    pull: PullFn,
+    status: Arc<StatusPoller>,
+    costs: Arc<costs::CostScanner>,
+) -> ! {
     let server = Arc::new(server);
     let dir = Arc::new(dir);
     loop {
@@ -72,16 +78,17 @@ pub fn run_loop(server: tiny_http::Server, dir: PathBuf, pull: PullFn, status: A
         let dir = Arc::clone(&dir);
         let pull = Arc::clone(&pull);
         let status = Arc::clone(&status);
-        std::thread::spawn(move || handle(request, &dir, &pull, &status));
+        let costs = Arc::clone(&costs);
+        std::thread::spawn(move || handle(request, &dir, &pull, &status, &costs));
     }
 }
 
 /// Handle one request: route inside `catch_unwind`, always answer something.
-fn handle(request: tiny_http::Request, dir: &Path, pull: &PullFn, status: &StatusPoller) {
+fn handle(request: tiny_http::Request, dir: &Path, pull: &PullFn, status: &StatusPoller, costs: &costs::CostScanner) {
     let (code, content_type, body) = {
         let dir = dir.to_path_buf();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            route(&request, &dir, pull, status)
+            route(&request, &dir, pull, status, costs)
         }));
         match result {
             Ok(response) => response,
@@ -102,7 +109,7 @@ fn handle(request: tiny_http::Request, dir: &Path, pull: &PullFn, status: &Statu
 }
 
 /// Pure routing: (status, content type, body).
-fn route(request: &tiny_http::Request, dir: &Path, pull: &PullFn, status: &StatusPoller) -> (u16, String, String) {
+fn route(request: &tiny_http::Request, dir: &Path, pull: &PullFn, status: &StatusPoller, costs: &costs::CostScanner) -> (u16, String, String) {
     let raw_url = request.url();
     let path = raw_url.split('?').next().unwrap_or("/");
     let is_refresh = raw_url.contains("refresh=1") || raw_url.contains("refresh=true") || path == "/api/refresh";
@@ -111,6 +118,7 @@ fn route(request: &tiny_http::Request, dir: &Path, pull: &PullFn, status: &Statu
         "/api/health" => (200, "application/json".into(), "{\"status\":\"ok\"}".into()),
         "/api/quotas" | "/api/refresh" => (200, "application/json".into(), quotas_body(dir, pull, is_refresh)),
         "/api/status" => (200, "application/json".into(), status_body(status)),
+        "/api/costs" => (200, "application/json".into(), costs_body(costs)),
         "/api/history" => (200, "application/json".into(), history_body(dir)),
         "/api/balancer/recommend" => match query_param(raw_url, "model").filter(|m| !m.is_empty()) {
             Some(model) => (200, "application/json".into(), balancer_recommend_body(dir, pull, &model)),
@@ -146,6 +154,17 @@ fn status_body(status: &StatusPoller) -> String {
         .map(|(provider, snapshot)| (provider.clone(), snapshot.to_json()))
         .collect();
     serde_json::to_string(&json!({ "providers": providers }))
+        .unwrap_or_else(|_| "{\"providers\":{}}".to_string())
+}
+
+/// `/api/costs` payload: local-scan spend estimate per provider (codex,
+/// claude) from the TTL-cached `CostScanner`. Never 500s: scan and pricing
+/// failures degrade to token-only or empty providers.
+fn costs_body(costs: &costs::CostScanner) -> String {
+    let scan = costs.fetch();
+    // Visibility policy: only OpenCode spend is exposed to the dashboard;
+    // Claude/Codex scans stay internal (gated via AI_QUOTAS_COSTS for CLI).
+    serde_json::to_string(&scan.to_json_only(&[costs::OPENCODE]))
         .unwrap_or_else(|_| "{\"providers\":{}}".to_string())
 }
 
@@ -349,6 +368,19 @@ mod tests {
         Arc::new(StatusPoller::with_fetcher(Box::new(|_| vec![])))
     }
 
+    /// Network-free cost scanner for route tests: no roots, failing pricing
+    /// fetch, throwaway cache dir.
+    fn empty_cost_scanner() -> Arc<costs::CostScanner> {
+        let cache = std::env::temp_dir().join(format!(
+            "ai-quotas-test-costs-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        Arc::new(costs::CostScanner::with_roots(std::collections::BTreeMap::new(), cache))
+    }
+
     fn fresh_claude_json() -> String {
         format!(
             r#"{{"provider":"claude","kind":"window","used":62,"limit":100,"unit":"requests","label":"5h window","display_name":"Claude Pro","fetched_at":"{}","source":"manual"}}"#,
@@ -505,7 +537,7 @@ mod tests {
         let base = format!("http://{}", server.server_addr().to_ip().unwrap());
         let pull: PullFn = Arc::new(|_force| vec![missing_record("deepseek", "DeepSeek API", "no credentials")]);
         let state_dir = dir.path().to_path_buf();
-        std::thread::spawn(move || run_loop(server, state_dir, pull, empty_status_poller()));
+        std::thread::spawn(move || run_loop(server, state_dir, pull, empty_status_poller(), empty_cost_scanner()));
 
         // health
         let health: Value = ureq::get(&format!("{base}/api/health"))
@@ -557,7 +589,7 @@ mod tests {
         let base = format!("http://{}", server.server_addr().to_ip().unwrap());
         let pull: PullFn = Arc::new(|_force| vec![]);
         let state_dir = dir.path().to_path_buf();
-        std::thread::spawn(move || run_loop(server, state_dir, pull, empty_status_poller()));
+        std::thread::spawn(move || run_loop(server, state_dir, pull, empty_status_poller(), empty_cost_scanner()));
 
         // Unknown model or missing config: either way advice fails open (R1/R9).
         let advice: Value = ureq::get(&format!("{base}/api/balancer/recommend?model=x"))
@@ -651,7 +683,7 @@ mod tests {
         let base = format!("http://{}", server.server_addr().to_ip().unwrap());
         let pull: PullFn = Arc::new(|_force| vec![]);
         let state_dir = dir.path().to_path_buf();
-        std::thread::spawn(move || run_loop(server, state_dir, pull, status));
+        std::thread::spawn(move || run_loop(server, state_dir, pull, status, empty_cost_scanner()));
 
         let response = ureq::get(&format!("{base}/api/status")).call().unwrap();
         assert_eq!(response.status(), 200);
@@ -681,7 +713,7 @@ mod tests {
         let base = format!("http://{}", server.server_addr().to_ip().unwrap());
         let pull: PullFn = Arc::new(|_force| vec![]);
         let state_dir = dir.path().to_path_buf();
-        std::thread::spawn(move || run_loop(server, state_dir, pull, status));
+        std::thread::spawn(move || run_loop(server, state_dir, pull, status, empty_cost_scanner()));
 
         // No network must never become a 500: a well-formed envelope with
         // null indicators and the failure text as summary.

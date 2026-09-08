@@ -25,8 +25,9 @@ where
         "serve" => run_serve(rest),
         "stamp" => run_stamp(rest),
         "check" => run_check(rest),
+        "costs" => run_costs(rest),
         other => {
-            eprintln!("error: unknown subcommand '{other}' (expected serve, stamp or check)");
+            eprintln!("error: unknown subcommand '{other}' (expected serve, stamp, check or costs)");
             2
         }
     }
@@ -53,8 +54,9 @@ fn run_serve(rest: Vec<String>) -> i32 {
         }
     });
     let status = Arc::new(crate::status::StatusPoller::new());
+    let costs = Arc::new(crate::costs::CostScanner::from_env());
     let bind = format!("127.0.0.1:{port}");
-    match server::serve(&bind, reader::state_dir(), pull, status) {
+    match server::serve(&bind, reader::state_dir(), pull, status, costs) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {e}");
@@ -101,12 +103,30 @@ fn run_check(args: Vec<String>) -> i32 {
     let pull_statuses = crate::providers::pull_all();
     let statuses = reader::merge_statuses(file_statuses, pull_statuses);
     if json {
-        // Incident snapshots for status-mapped providers (claude/chatgpt):
-        // one poll round; failures leave the new fields null.
+        // Incident snapshots for status-mapped providers (claude/chatgpt/
+        // opencode): one poll round; failures leave the new fields null.
         let status_map = crate::status::StatusPoller::new().fetch();
+        // Cost estimates ride along on every --json run: OpenCode always
+        // (public by policy), Claude/Codex only with AI_QUOTAS_COSTS=1.
+        let include_costs = std::env::var("AI_QUOTAS_COSTS").ok().as_deref() == Some("1");
+        let cost_scan = Some(crate::costs::CostScanner::from_env().fetch());
+        let cost_of = |provider: &str| -> (serde_json::Value, serde_json::Value) {
+            match (&cost_scan, provider) {
+                (Some(scan), "opencode") => scan.check_fields(crate::costs::OPENCODE),
+                (Some(scan), "claude") if include_costs => scan.check_fields(crate::costs::CLAUDE),
+                (Some(scan), "chatgpt") if include_costs => scan.check_fields(crate::costs::CODEX),
+                _ => (serde_json::Value::Null, serde_json::Value::Null),
+            }
+        };
         let values: Vec<serde_json::Value> = statuses
             .iter()
-            .map(|s| check_status_json(s, &status_map))
+            .map(|s| {
+                let mut v = check_status_json(s, &status_map);
+                let (today, mtd) = cost_of(&s.provider);
+                v["cost_today_usd"] = today;
+                v["cost_month_to_date_usd"] = mtd;
+                v
+            })
             .collect();
         match serde_json::to_string(&values) {
             Ok(body) => println!("{body}"),
@@ -124,6 +144,30 @@ fn run_check(args: Vec<String>) -> i32 {
         for status in &statuses {
             print_status(status);
         }
+    }
+    0
+}
+
+/// `costs`: run the local cost scan and print a small table
+/// (provider / today / month-to-date). Scan and pricing failures degrade to
+/// token-only rows; the scan itself never hard-fails.
+fn run_costs(args: Vec<String>) -> i32 {
+    if !args.is_empty() {
+        eprintln!("error: costs takes no arguments");
+        return 2;
+    }
+    let scan = crate::costs::CostScanner::from_env().fetch();
+    println!("provider\ttoday_usd\tmonth_to_date_usd");
+    for provider in [crate::costs::OPENCODE, crate::costs::CODEX, crate::costs::CLAUDE] {
+        let (today, mtd) = scan.check_fields(provider);
+        let fmt = |v: &serde_json::Value| match v {
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => "-".to_string(),
+        };
+        println!("{}\t{}\t{}", provider, fmt(&today), fmt(&mtd));
+    }
+    if let Some(error) = &scan.pricing_error {
+        eprintln!("! pricing: {error}");
     }
     0
 }
