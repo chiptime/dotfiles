@@ -1,7 +1,8 @@
 /**
  * Typed outcome contracts for the agy exploration backend (v1). Raw agy
  * exit codes are NOT trusted alone; classification combines spawn error,
- * timeout, run.log markers, exit code, and artifact presence.
+ * timeout, the typed JSON envelope (--output-format json), run.log markers,
+ * exit code, and artifact presence.
  *
  * classifyRun precedence (first match wins):
  * 1. spawnError ENOENT            → transient_unavailable (agy_absent)
@@ -10,16 +11,25 @@
  *    clean exit is the authoritative success signal; log-pattern regexes gate
  *    only runs that miss this rule (failed runs)
  * 4. AUTH_RE matches log          → auth_captcha (auth_or_captcha)
- * 5. exitCode !== 0 (or null) AND QUOTA_RE matches log
+ * 5. failed run AND envelope.status === 'ERROR' with the print-wait timeout
+ *    signature in envelope.error → timeout (agy_print_wait_timeout) — the
+ *    typed JSON envelope is the FIRST failed-run signal, ahead of the
+ *    plain-text regex; any other envelope ERROR falls through to 6–9
+ * 6. exitCode !== 0 (or null) AND PRINT_WAIT_TIMEOUT_RE matches log
+ *                                → timeout (agy_print_wait_timeout) — kept as
+ *    the plain-text fallback for runs without a parseable envelope
+ * 7. exitCode !== 0 (or null) AND QUOTA_RE matches log
  *                                → quota_unavailable (quota_exhausted)
- * 6. exitCode !== 0 (or null) AND TRANSIENT_RE matches log
+ * 8. exitCode !== 0 (or null) AND TRANSIENT_RE matches log
  *                                → transient_unavailable (provider_outage)
  *    Exit-code corroboration: the log is agy's COMBINED stdout+stderr, so
  *    quota/transient words can appear as noise on clean runs. They only
  *    count as unavailability (fallback) when the process exit code agrees.
- * 7. exitCode !== 0               → task_failure (nonzero_exit)
- * 8. artifactBytes missing/0      → artifact_validation_failure (artifact_missing_or_empty)
+ * 9. exitCode !== 0               → task_failure (nonzero_exit)
+ * 10. artifactBytes missing/0      → artifact_validation_failure (artifact_missing_or_empty)
  */
+import { type AgyEnvelope, type AgyUsage } from './spawn';
+
 export type Outcome =
 	| 'success'
 	| 'quota_unavailable'
@@ -53,6 +63,10 @@ export interface ExploreResult {
 	sha256?: string;
 	elapsedMs: number;
 	receipt: Receipt;
+	/** agy conversation id from the JSON envelope (recovery handle); present only after a real run. */
+	conversationId?: string;
+	/** Token accounting from the JSON envelope; present only after a real run. */
+	usage?: AgyUsage;
 }
 /** What the runner observed about one agy invocation. */
 export interface RunSignal {
@@ -63,6 +77,8 @@ export interface RunSignal {
 	timedOut?: boolean;
 	/** Size in bytes of the expected artifact; 0/undefined means missing. */
 	artifactBytes?: number;
+	/** Parsed `--output-format json` envelope, when agy printed one. */
+	envelope?: AgyEnvelope;
 }
 export interface Classification {
 	outcome: Outcome;
@@ -78,13 +94,15 @@ export function isFallbackAllowed(outcome: Outcome): boolean {
 }
 
 /**
- * Deterministic exit/log → Outcome mapping. First match wins across the 8
- * rules documented on this module: ENOENT, timeout, artifact-backed success
- * (exit 0 + artifact present — immune to log patterns), AUTH gate, then the
- * QUOTA/TRANSIENT regex gates for FAILED runs only (nonzero/null exit —
- * combined-output log noise on a clean exit is not unavailability), nonzero
- * exit, and empty artifact. Within failed runs, the agy print-wait signature
- * (agy's own client deadline) gates first and maps to timeout, not task_failure.
+ * Deterministic exit/log/envelope → Outcome mapping. First match wins across
+ * the 10 rules documented on this module: ENOENT, timeout, artifact-backed
+ * success (exit 0 + artifact present — immune to log patterns), AUTH gate,
+ * then, within FAILED runs, the typed JSON envelope's ERROR status gates
+ * first (its print-wait timeout signature maps to timeout, not task_failure),
+ * followed by the plain-text print-wait regex fallback, the QUOTA/TRANSIENT
+ * regex gates for FAILED runs only (nonzero/null exit — combined-output log
+ * noise on a clean exit is not unavailability), nonzero exit, and empty
+ * artifact.
  */
 export function classifyRun(signal: RunSignal): Classification {
 	const log = signal.log ?? '';
@@ -93,8 +111,16 @@ export function classifyRun(signal: RunSignal): Classification {
 	if (signal.exitCode === 0 && signal.artifactBytes) return { outcome: 'success', reason: 'ok' };
 	if (AUTH_RE.test(log)) return { outcome: 'auth_captcha', reason: 'auth_or_captcha' };
 	if (signal.exitCode !== 0) {
-		// agy's print client exits nonzero with this exact line when its own wait
-		// deadline fires; it is a timeout, not a task failure — treat it as recoverable.
+		// The typed JSON envelope (--output-format json) is the first failed-run
+		// signal: its ERROR status with agy's own print-wait deadline signature is
+		// a timeout, not a task failure — treat it as recoverable. Any other
+		// envelope ERROR falls through to the regex gates below, which still run
+		// against the log.
+		if (signal.envelope?.status === 'ERROR' && /timeout waiting for response/i.test(signal.envelope.error ?? '')) {
+			return { outcome: 'timeout', reason: 'agy_print_wait_timeout' };
+		}
+		// Plain-text fallback for runs without a parseable envelope: agy's print
+		// client exits nonzero with this exact line when its own wait deadline fires.
 		if (PRINT_WAIT_TIMEOUT_RE.test(log)) return { outcome: 'timeout', reason: 'agy_print_wait_timeout' };
 		if (QUOTA_RE.test(log)) return { outcome: 'quota_unavailable', reason: 'quota_exhausted' };
 		if (TRANSIENT_RE.test(log)) return { outcome: 'transient_unavailable', reason: 'provider_outage' };
@@ -106,7 +132,7 @@ export function classifyRun(signal: RunSignal): Classification {
 /** Build a typed result; fallbackAllowed is always derived from the outcome. */
 export function buildResult(
 	outcome: Outcome,
-	fields: { elapsedMs: number; reason?: string; artifactPath?: string; sha256?: string; receipt: Receipt },
+	fields: { elapsedMs: number; reason?: string; artifactPath?: string; sha256?: string; receipt: Receipt; conversationId?: string; usage?: AgyUsage },
 ): ExploreResult {
 	return {
 		schema: EXPLORE_RESULT_SCHEMA,
@@ -117,6 +143,8 @@ export function buildResult(
 		sha256: fields.sha256,
 		elapsedMs: fields.elapsedMs,
 		receipt: fields.receipt,
+		conversationId: fields.conversationId,
+		usage: fields.usage,
 	};
 }
 

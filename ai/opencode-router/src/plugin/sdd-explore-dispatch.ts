@@ -64,9 +64,9 @@ const SDDExploreDispatchPlugin: Plugin = async ({ directory, worktree, client })
 				agyBin: env.AGY_BIN ?? "agy",
 				reqDir: env.AGY_EXPLORE_REQ_DIR ?? "/tmp/opencode/agy",
 				// Outer wait = inner cap + 30s grace, both keyed off the same env
-				// knob (CLI reads it too); default 600s lets flash-high finish
+				// knob (CLI reads it too); default 1200s lets flash-high finish
 				// dense briefs (heaviest measured run: 173s at old plain flash).
-				timeoutMs: (Number(env.AGY_EXPLORE_TIMEOUT_MS ?? 0) || 600_000) + 30_000,
+				timeoutMs: (Number(env.AGY_EXPLORE_TIMEOUT_MS ?? 0) || 1_200_000) + 30_000,
 				exists: existsSync,
 				mkdir: (p) => mkdirSync(p, { recursive: true }),
 				writeFile: (p, text) => writeFileSync(p, text),

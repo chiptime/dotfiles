@@ -57,7 +57,9 @@ export async function runCli(opts: CliOptions): Promise<ExploreResult & { result
 	}
 	// AGY_EXPLORE_TIMEOUT_MS is the single budget knob: CLI inner cap and the
 	// plugin's outer wait both derive from it (outer adds a grace buffer).
-	const res = await runExploration(req, depsFor(req, workdir, { agyBin: bin, quotaFile: opts.quotaFile ?? env.AI_QUOTAS_FILE, openspecRoot: opts.openspecRoot, timeoutMs: opts.timeoutMs ?? (Number(env.AGY_EXPLORE_TIMEOUT_MS) || 600_000) }));
+	// Default 1200s (20 min): flash-high's heaviest measured run was 173s, but
+	// dense briefs with long print waits deserve the full window.
+	const res = await runExploration(req, depsFor(req, workdir, { agyBin: bin, quotaFile: opts.quotaFile ?? env.AI_QUOTAS_FILE, openspecRoot: opts.openspecRoot, timeoutMs: opts.timeoutMs ?? (Number(env.AGY_EXPLORE_TIMEOUT_MS) || 1_200_000) }));
 	return write(res);
 }
 
