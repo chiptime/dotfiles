@@ -87,6 +87,8 @@
   .card.done { opacity: .45; filter: grayscale(1); }
   .card.missing { background: transparent; border: 1px dashed #484f58; }
   .card .title { font-weight: 600; font-size: 14px; }
+  .qrow-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .qval { font-weight: 700; }
   .badges { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .badge.badge-click { cursor: pointer; user-select: none; }
   .badge.badge-click::after { content: ' \25B8'; font-size: 10px; opacity: .7; }
@@ -120,6 +122,24 @@
   .resets { color: #8b949e; font-size: 12px; margin-top: 8px; }
   .detail { color: #f85149; font-size: 12px; margin-top: 8px; word-break: break-word; }
   .nodata { color: #8b949e; margin-top: 12px; }
+  /* Cost panel (OpenCode spend): full-width card under the provider groups. */
+  .cost-panel { margin-top: 26px; width: 100%; max-width: 920px; }
+  .cost-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cost-days { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin-top: 10px; }
+  .cost-days i { flex: 1 1 auto; min-width: 2px; background: #4fb6c3; opacity: .85;
+                 border-radius: 2px 2px 0 0; cursor: default; }
+  .cost-days i.zero { background: #21262d; }
+  .prov-row { margin-top: 10px; }
+  .prov-head { cursor: pointer; }
+  .prov-head:hover .title { color: #58a6ff; }
+  .cdetail { margin: 6px 0 2px 12px; border-left: 2px solid #21262d; padding-left: 10px; }
+  .cdetail.hidden { display: none; }
+  .range-btn { background: none; border: 1px solid #30363d; border-radius: 999px;
+               color: #8b949e; font-size: 11px; padding: 2px 10px; cursor: pointer; margin-left: 6px; }
+  .range-btn.on { color: #3fb950; border-color: #3fb950; }
+  .split-line { color: #8b949e; font-size: 11px; margin-top: 8px; }
+  .split-line b.pagado { color: #f85149; }
+  .split-line b.cubierto { color: #3fb950; }
   footer { margin-top: 28px; color: #484f58; font-size: 12px; }
 </style>
 </head>
@@ -136,6 +156,7 @@
 <div id="ranking"></div>
 <div id="closes"></div>
 <div id="groups"></div>
+<div id="costs"></div>
 <footer>AI Quotas · local only · <span id="refreshed">—</span><button id="btn-moreinfo" onclick="toggleMoreInfo()"></button><button id="btn-workday" onclick="toggleWorkday()"></button><button id="btn-autorefresh" onclick="toggleAutoRefresh()"></button></footer>
 <script>
 'use strict';
@@ -157,6 +178,7 @@ const COMPARISON_LABEL = 'weekly';
 let HISTORY = [];
 // Incident state per provider from /api/status (server caches 10 min).
 let STATUS = {};
+let COSTS = {};
 // Learned window durations: "provider|label" -> observed ms (median of
 // consecutive reset gaps). Falls back to the tier constants until enough
 // resets have been observed.
@@ -593,14 +615,17 @@ async function load(forceRefresh = false) {
     const url = forceRefresh ? '/api/refresh' : '/api/quotas';
     // Incident state rides along with the quotas fetch; a /api/status
     // failure must never break quota rendering (badges just stay hidden).
-    const [data, statusData] = await Promise.all([
+    const [data, statusData, costsData] = await Promise.all([
       fetch(url).then(resp => {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         return resp.json();
       }),
       fetch('/api/status').then(r => (r.ok ? r.json() : {})).catch(() => ({})),
+      // A /api/costs failure must never break quota rendering.
+      fetch('/api/costs').then(r => (r.ok ? r.json() : {})).catch(() => ({})),
     ]);
     STATUS = statusData.providers || {};
+    COSTS = costsData;
 
     const groups = new Map();
     for (const r of data.records) {
@@ -669,6 +694,8 @@ async function load(forceRefresh = false) {
         closes.map(c => '<span class="closechip"><b>' + esc(c.name) + '</b>' +
           Math.round(c.close) + '%</span>').join('')
       : '';
+    renderCosts(data.records);
+
     document.getElementById('refreshed').textContent =
       'actualizado ' + new Date(data.generated_at).toLocaleTimeString();
     const lastUpdated = document.getElementById('last-updated');
@@ -685,6 +712,156 @@ async function load(forceRefresh = false) {
       btnText.textContent = 'Recargar';
     }
   }
+}
+
+// Adaptive precision: sub-cent usage must not render as "$0.00".
+function fmtUsd(v) {
+  if (v == null) return '\u2014';
+  if (v >= 1) return '$' + v.toFixed(2);
+  if (v >= 0.01) return '$' + v.toFixed(3);
+  return '$' + v.toFixed(4);
+}
+
+// Human names for provider slugs (cost breakdown rows).
+const PROV_NAMES = {
+  anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', deepseek: 'DeepSeek',
+  'zai-coding-plan': 'Z.ai (plan)', 'opencode-go': 'OpenCode Go', opencode: 'OpenCode',
+};
+
+// OpenCode spend panel (inspired by OpenRouter / Anthropic Console usage
+// views): range selector, big totals with paid/covered split, daily bars,
+// provider accordions with per-model detail. The server exposes ONLY
+// opencode rows: {d, m, billed, covered} in USD.
+const costRange = { sel: localStorage.getItem('costRange') || 'month' };
+
+function costRangeBounds(kind) {
+  const now = new Date();
+  const iso = d => d.toISOString().slice(0, 10);
+  if (kind === '30d') {
+    const from = new Date(now); from.setDate(now.getDate() - 29);
+    return [iso(from), null];
+  }
+  if (kind === 'prev') {
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const to = new Date(now.getFullYear(), now.getMonth(), 0);
+    return [iso(from), iso(to)];
+  }
+  if (kind === 'all') return [null, null];
+  return [iso(new Date(now.getFullYear(), now.getMonth(), 1)), null];
+}
+
+function setCostRange(sel) {
+  costRange.sel = sel;
+  localStorage.setItem('costRange', sel);
+  load(false);
+}
+
+function toggleCostDetail(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
+}
+
+function renderCosts(records) {
+  const el = document.getElementById('costs');
+  const oc = (COSTS && COSTS.providers && COSTS.providers.opencode) || null;
+  if (!oc) { el.innerHTML = ''; return; }
+
+  const [from, to] = costRangeBounds(costRange.sel);
+  const rows = (oc.rows || []).filter(r => (!from || r.d >= from) && (!to || r.d <= to));
+
+  // Totals: paid (billed) vs covered by subscriptions (valued at catalog).
+  let paid = 0, covered = 0;
+  const byProv = new Map(), byModel = new Map(), byDay = new Map();
+  for (const r of rows) {
+    const total = (r.billed || 0) + (r.covered || 0);
+    paid += r.billed || 0;
+    covered += r.covered || 0;
+    const prov = r.m.includes('/') ? r.m.slice(0, r.m.indexOf('/')) : r.m;
+    if (!byProv.has(prov)) byProv.set(prov, { paid: 0, covered: 0 });
+    const p = byProv.get(prov); p.paid += r.billed || 0; p.covered += r.covered || 0;
+    if (!byModel.has(r.m)) byModel.set(r.m, { paid: 0, covered: 0 });
+    const m = byModel.get(r.m); m.paid += r.billed || 0; m.covered += r.covered || 0;
+    byDay.set(r.d, (byDay.get(r.d) || 0) + total);
+  }
+  const total = paid + covered;
+  const monthTotal = Math.max(0.0001, total);
+
+  // Daily bars.
+  const dayEntries = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const maxDay = Math.max(0.0001, ...dayEntries.map(([, v]) => v));
+  const bars = dayEntries.map(([day, v]) => {
+    const h = Math.max(3, Math.round(v / maxDay * 56));
+    const label = new Date(day + 'T12:00:00').toLocaleDateString([], { day: '2-digit', month: 'short' });
+    return '<i style="height:' + h + 'px" title="' + esc(label) + ' — ' + fmtUsd(v) + '"></i>';
+  }).join('');
+
+  // Provider accordion rows (sorted by total desc).
+  const provRows = [...byProv.entries()].sort((a, b) =>
+    (b[1].paid + b[1].covered) - (a[1].paid + a[1].covered)).map(([prov, s], i) => {
+    const sub = s.paid + s.covered;
+    const share = Math.round(sub / monthTotal * 100);
+    const name = PROV_NAMES[prov] || prov;
+    const split = s.paid > 0
+      ? fmtUsd(sub) + ' · ' + share + '%'
+      : fmtUsd(sub) + ' · ' + share + '% (plan)';
+    const modelRows = [...byModel.entries()]
+      .filter(([m]) => (m.includes('/') ? m.slice(0, m.indexOf('/')) : m) === prov)
+      .sort((a, b) => (b[1].paid + b[1].covered) - (a[1].paid + a[1].covered))
+      .map(([m, s2]) => {
+        const modelName = m.includes('/') ? m.slice(m.indexOf('/') + 1) : m;
+        const tag = s2.paid > 0 && s2.covered > 0 ? 'pagada ' + fmtUsd(s2.paid) + ' · cubierta ' + fmtUsd(s2.covered)
+          : s2.paid > 0 ? 'pagada' : 'cubierto por plan';
+        return '<div class="note">' + esc(modelName) + ' — ' + fmtUsd(s2.paid + s2.covered) +
+          ' <span style="opacity:.7">(' + tag + ')</span></div>';
+      }).join('');
+    return '<div class="prov-row">' +
+      '<div class="qrow-top prov-head" onclick="toggleCostDetail(\'pcd-' + i + '\')">' +
+        '<span class="title">' + esc(name) + ' ▸</span>' +
+        '<strong class="qval">' + split + '</strong></div>' +
+      '<div class="bar"><i class="green" style="width:' + Math.min(100, share) + '%"></i></div>' +
+      '<div id="pcd-' + i + '" class="cdetail hidden">' + modelRows + '</div>' +
+      '</div>';
+  }).join('');
+
+  // Real out-of-pocket: extra-credit consumption billed on top of the sub.
+  let realLine = '';
+  const extra = (records || []).find(r => r.provider === 'claude' && r.kind === 'balance');
+  if (extra && extra.used != null && extra.limit != null) {
+    const sym = SYMBOLS[extra.currency] || extra.currency || '';
+    realLine = '<div class="prov-row"><div class="qrow-top">' +
+      '<span class="title">Gasto real — créditos extra Claude</span>' +
+      '<strong class="qval">' + sym + Number(extra.used).toFixed(2) + ' / ' +
+      Number(extra.limit).toFixed(2) + '</strong></div>' +
+      '<div class="bar"><i class="red" style="width:' +
+      Math.min(100, extra.used / extra.limit * 100) + '%"></i></div></div>';
+  }
+
+  const btn = (id, label) => '<button class="range-btn' + (costRange.sel === id ? ' on' : '') +
+    '" onclick="setCostRange(\'' + id + '\')">' + label + '</button>';
+
+  el.innerHTML =
+    '<section class="group cost-panel">' +
+      '<div class="group-head"><span class="group-title">Coste OpenCode</span>' +
+      '<span class="group-sub">valor de catálogo models.dev</span>' +
+      '<span style="margin-left:auto">' +
+        btn('month', 'este mes') + btn('prev', 'mes pasado') +
+        btn('30d', '30 días') + btn('all', 'todo') +
+      '</span></div>' +
+      '<div class="card">' +
+        '<div class="cost-grid">' +
+          '<div><div class="qrow-top"><span class="title">total del rango</span>' +
+            '<strong class="qval" style="font-size:20px">' + fmtUsd(total) + '</strong></div>' +
+            '<div class="split-line">pagado <b class="pagado">' + fmtUsd(paid) + '</b>' +
+            ' · cubierto por subs <b class="cubierto">' + fmtUsd(covered) + '</b></div>' +
+            '<div class="cost-days">' + (bars || '<i class="zero" style="height:3px"></i>') + '</div></div>' +
+          '<div><div class="qrow-top"><span class="title">hoy</span>' +
+            '<strong class="qval" style="font-size:20px">' + fmtUsd(oc.today_usd) + '</strong></div>' +
+            '<div class="note" style="margin-top:10px">click en un proveedor para ver el desglose por modelo. ' +
+            'El uso de tus planes se valora a catálogo pero no es dinero pagado.</div></div>' +
+        '</div>' +
+        provRows + realLine +
+      '</div>' +
+    '</section>';
 }
 
 function triggerRefresh() {
@@ -730,7 +907,10 @@ function syncMoreInfoButton() {
 // Auto-refresh: reload /api/quotas every minute while enabled (same cached
 // fetch + render path as the manual button, just periodic). Persisted like
 // the other toggles.
-const AUTOREFRESH_MS = 60000;
+// Randomized cadence (10-30 min) so the dashboard never hammers the API
+// on a predictable beat; each cycle schedules the next one.
+const AUTOREFRESH_MIN_MS = 10 * 60_000;
+const AUTOREFRESH_MAX_MS = 30 * 60_000;
 const autorefresh = { on: localStorage.getItem('autoRefresh') === '1', timer: null };
 
 function toggleAutoRefresh() {
@@ -742,11 +922,21 @@ function setAutoRefresh(on) {
   autorefresh.on = on;
   localStorage.setItem('autoRefresh', on ? '1' : '0');
   if (autorefresh.timer) {
-    clearInterval(autorefresh.timer);
+    clearTimeout(autorefresh.timer);
     autorefresh.timer = null;
   }
-  if (on) autorefresh.timer = setInterval(() => load(false), AUTOREFRESH_MS);
+  if (on) scheduleAutoRefresh();
   syncAutoRefreshButton();
+}
+
+function nextAutoRefreshDelay() {
+  return AUTOREFRESH_MIN_MS + Math.random() * (AUTOREFRESH_MAX_MS - AUTOREFRESH_MIN_MS);
+}
+
+function scheduleAutoRefresh() {
+  autorefresh.timer = setTimeout(() => {
+    load(false).finally(scheduleAutoRefresh);
+  }, nextAutoRefreshDelay());
 }
 
 function syncAutoRefreshButton() {
@@ -754,7 +944,7 @@ function syncAutoRefreshButton() {
   if (btn) {
     btn.textContent = 'auto-refresh: ' + (autorefresh.on ? 'on' : 'off');
     btn.classList.toggle('on', autorefresh.on);
-    btn.title = 'Recarga los datos automáticamente cada 60 segundos.';
+    btn.title = 'Recarga los datos automáticamente cada 10-30 minutos (intervalo aleatorio).';
   }
 }
 
