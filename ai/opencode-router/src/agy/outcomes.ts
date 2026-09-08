@@ -71,6 +71,7 @@ export interface Classification {
 const AUTH_RE = /captcha|sign.?in|log.?in required|unauthenticated|forbidden|\b401\b|invalid credentials|authentication/i;
 const QUOTA_RE = /quota|rate.?limit|\b429\b|resource.?exhausted|too many requests/i;
 const TRANSIENT_RE = /unavailable|outage|overloaded|connection\s+(?:refused|reset|failed)|network\s+error|\b5\d\d\b|internal error|server error/i;
+const PRINT_WAIT_TIMEOUT_RE = /timeout waiting for response/i;
 /** Fallback to the native executor is allowed ONLY for approved unavailability. */
 export function isFallbackAllowed(outcome: Outcome): boolean {
 	return outcome === 'quota_unavailable' || outcome === 'transient_unavailable' || outcome === 'timeout';
@@ -82,7 +83,8 @@ export function isFallbackAllowed(outcome: Outcome): boolean {
  * (exit 0 + artifact present — immune to log patterns), AUTH gate, then the
  * QUOTA/TRANSIENT regex gates for FAILED runs only (nonzero/null exit —
  * combined-output log noise on a clean exit is not unavailability), nonzero
- * exit, and empty artifact.
+ * exit, and empty artifact. Within failed runs, the agy print-wait signature
+ * (agy's own client deadline) gates first and maps to timeout, not task_failure.
  */
 export function classifyRun(signal: RunSignal): Classification {
 	const log = signal.log ?? '';
@@ -91,6 +93,9 @@ export function classifyRun(signal: RunSignal): Classification {
 	if (signal.exitCode === 0 && signal.artifactBytes) return { outcome: 'success', reason: 'ok' };
 	if (AUTH_RE.test(log)) return { outcome: 'auth_captcha', reason: 'auth_or_captcha' };
 	if (signal.exitCode !== 0) {
+		// agy's print client exits nonzero with this exact line when its own wait
+		// deadline fires; it is a timeout, not a task failure — treat it as recoverable.
+		if (PRINT_WAIT_TIMEOUT_RE.test(log)) return { outcome: 'timeout', reason: 'agy_print_wait_timeout' };
 		if (QUOTA_RE.test(log)) return { outcome: 'quota_unavailable', reason: 'quota_exhausted' };
 		if (TRANSIENT_RE.test(log)) return { outcome: 'transient_unavailable', reason: 'provider_outage' };
 		return { outcome: 'task_failure', reason: 'nonzero_exit' };

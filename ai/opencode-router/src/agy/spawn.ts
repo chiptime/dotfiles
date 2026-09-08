@@ -24,14 +24,27 @@ export interface SpawnRun {
 	spawnError?: string;
 }
 
+/**
+ * Build the agy print-mode argv. NOTE: no --add-dir beyond the workdir ever;
+ * agy runs with skip-permissions so any added dir would be writable.
+ */
+export function buildAgyArgs(opts: SpawnOptions): string[] {
+	const args = ['--print', opts.prompt, '--add-dir', opts.workdir, '--dangerously-skip-permissions'];
+	// agy's print-mode client wait defaults to 5m0s; without an explicit value long
+	// explorations die at 300s while our budgets (600s CLI / 630s plugin) never fire.
+	// Derive the flag from timeoutMs so it fires slightly BEFORE our spawnSync
+	// timeout, which stays strictly larger and remains the outer killer.
+	const secs = Math.max(1, Math.floor((opts.timeoutMs - 10_000) / 1000));
+	args.push('--print-timeout', `${secs}s`);
+	if (opts.model) args.push('--model', opts.model);
+	return args;
+}
+
 /** Run agy with ONLY the workdir exposed; capture combined output to run.log. */
 export function runAgy(opts: SpawnOptions): SpawnRun {
 	mkdirSync(opts.workdir, { recursive: true });
 	const start = Date.now();
-	// NOTE: no --add-dir ever; agy runs with skip-permissions so any added dir would be writable.
-	const args = ['--print', opts.prompt, '--add-dir', opts.workdir, '--dangerously-skip-permissions'];
-	if (opts.model) args.push('--model', opts.model);
-	const proc = spawnSync(opts.bin, args, {
+	const proc = spawnSync(opts.bin, buildAgyArgs(opts), {
 		cwd: opts.workdir,
 		timeout: opts.timeoutMs,
 		encoding: 'utf8',

@@ -33,7 +33,7 @@ import {
 } from '../src/agy/quota';
 import { detectMutation, lintSections, REQUIRED_SECTIONS, validateExploration } from '../src/agy/validate';
 import { persistExploration } from '../src/agy/persist';
-import { countRecentConversations, runAgy, type SpawnRun } from '../src/agy/spawn';
+import { buildAgyArgs, countRecentConversations, runAgy, type SpawnRun } from '../src/agy/spawn';
 import { buildExplorationPrompt, depsFor, runExploration, type BackendDeps } from '../src/agy/backend';
 import { runCli, type CliOptions } from '../src/agy/cli';
 import { appendMetrics, parseMetrics, recordFromResult, type MetricsRecord } from '../src/agy/metrics';
@@ -78,6 +78,7 @@ describe('unit: outcomes — classify run signals', () => {
 		['exit-code corroboration: quota word on clean exit is NOT unavailability', { exitCode: 0, artifactBytes: 0, log: '429 quota exceeded' }, 'artifact_validation_failure', 'artifact_missing_or_empty'],
 		['exit-code corroboration: transient word on clean exit is NOT unavailability', { exitCode: 0, artifactBytes: 0, log: 'server error 503, service overloaded, connection refused' }, 'artifact_validation_failure', 'artifact_missing_or_empty'],
 		['outage log + nonzero exit maps to transient_unavailable', { exitCode: 1, log: 'server error 503, service overloaded, connection refused' }, 'transient_unavailable', 'provider_outage'],
+		['agy print-wait timeout line + nonzero exit maps to timeout', { exitCode: 1, log: 'Error: timeout waiting for response' }, 'timeout', 'agy_print_wait_timeout'],
 		['other nonzero exit maps to task_failure', { exitCode: 2, log: 'usage: agy <prompt>' }, 'task_failure', 'nonzero_exit'],
 		['empty artifact maps to artifact_validation_failure', { exitCode: 0, log: 'finished cleanly', artifactBytes: 0 }, 'artifact_validation_failure', 'artifact_missing_or_empty'],
 		['clean run with artifact maps to success', { exitCode: 0, log: 'wrote exploration.md', artifactBytes: 412 }, 'success', 'ok'],
@@ -102,6 +103,18 @@ describe('unit: outcomes — classify run signals', () => {
 
 	test('timeout takes precedence over log markers', () => {
 		expect(classifyRun({ exitCode: 124, log: 'quota exceeded', timedOut: true }).outcome).toBe('timeout');
+	});
+
+	test('agy print-wait signature outranks quota/transient markers on a failed run', () => {
+		const cls = classifyRun({ exitCode: 1, log: 'Error: timeout waiting for response (429 quota exceeded)' });
+		expect(cls).toEqual({ outcome: 'timeout', reason: 'agy_print_wait_timeout' });
+	});
+
+	test('agy print-wait timeout is recoverable: buildResult derives fallbackAllowed=true', () => {
+		const cls = classifyRun({ exitCode: 1, log: 'Error: timeout waiting for response' });
+		const res = buildResult(cls.outcome, { elapsedMs: 0, reason: cls.reason, receipt: { store: 'none', wroteOpenspec: false, engramRequired: false } });
+		expect(res.outcome).toBe('timeout');
+		expect(res.fallbackAllowed).toBe(true);
 	});
 
 	test('exit-code corroboration: quota/transient log noise on a clean exit never allows fallback', () => {
@@ -516,6 +529,31 @@ describe('unit: spawn — timeout, workdir-only args, run.log, daily guard', () 
 		const now = new Date();
 		expect(countRecentConversations(dir, now)).toBe(2);
 		expect(countRecentConversations(`${dir}/missing`, now)).toBe(0);
+	});
+});
+
+describe('unit: spawn — buildAgyArgs derives the print-wait deadline', () => {
+	test('600s budget yields --print-timeout 590s (fires before our spawnSync timeout)', () => {
+		const args = buildAgyArgs({ bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 600_000 });
+		const i = args.indexOf('--print-timeout');
+		expect(i).toBeGreaterThan(-1);
+		expect(args[i + 1]).toBe('590s');
+	});
+	test('tiny budgets clamp to the 1s floor', () => {
+		const args = buildAgyArgs({ bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 5000 });
+		const i = args.indexOf('--print-timeout');
+		expect(args[i + 1]).toBe('1s');
+	});
+	test('flag order: after --dangerously-skip-permissions, alongside the optional --model pair', () => {
+		expect(buildAgyArgs({ bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 630_000, model: 'm1' })).toEqual([
+			'--print', 'p', '--add-dir', '/w', '--dangerously-skip-permissions', '--print-timeout', '620s', '--model', 'm1',
+		]);
+		expect(buildAgyArgs({ bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 600_000 })).not.toContain('--model');
+	});
+	test('print-timeout never echoes the raw spawn timeout', () => {
+		const args = buildAgyArgs({ bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 600_000 });
+		expect(args.join(' ')).not.toContain('600000');
+		expect(args.join(' ')).not.toContain('--print-timeout 600s');
 	});
 });
 
