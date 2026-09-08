@@ -1,5 +1,6 @@
 mod balancer;
 mod cli;
+mod costs;
 mod history;
 mod providers;
 mod reader;
