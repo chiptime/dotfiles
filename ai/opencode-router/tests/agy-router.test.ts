@@ -33,7 +33,7 @@ import {
 } from '../src/agy/quota';
 import { detectMutation, lintSections, REQUIRED_SECTIONS, validateExploration } from '../src/agy/validate';
 import { persistExploration } from '../src/agy/persist';
-import { buildAgyArgs, countRecentConversations, runAgy, type SpawnRun } from '../src/agy/spawn';
+import { buildAgyArgs, countRecentConversations, parseAgyEnvelope, runAgy, type SpawnRun } from '../src/agy/spawn';
 import { buildExplorationPrompt, depsFor, runExploration, type BackendDeps } from '../src/agy/backend';
 import { runCli, type CliOptions } from '../src/agy/cli';
 import { appendMetrics, parseMetrics, recordFromResult, type MetricsRecord } from '../src/agy/metrics';
@@ -126,6 +126,34 @@ describe('unit: outcomes — classify run signals', () => {
 		expect(isFallbackAllowed(classifyRun({ exitCode: 1, log: '429 quota exceeded' }).outcome)).toBe(true);
 		expect(isFallbackAllowed(classifyRun({ exitCode: 1, log: '503 service unavailable' }).outcome)).toBe(true);
 	});
+
+	test('envelope ERROR + timeout error wins even when the log regex ALSO matches', () => {
+		const cls = classifyRun({
+			exitCode: 1,
+			log: 'Error: timeout waiting for response',
+			envelope: { status: 'ERROR', error: 'timeout waiting for response', conversation_id: 'conv-1' },
+		});
+		expect(cls).toEqual({ outcome: 'timeout', reason: 'agy_print_wait_timeout' });
+	});
+
+	test('envelope ERROR + timeout error classifies with NO log marker at all', () => {
+		const cls = classifyRun({ exitCode: 1, log: '', envelope: { status: 'ERROR', error: 'timeout waiting for response' } });
+		expect(cls).toEqual({ outcome: 'timeout', reason: 'agy_print_wait_timeout' });
+	});
+
+	test('envelope ERROR with a non-timeout error + clean log falls to task_failure', () => {
+		const cls = classifyRun({ exitCode: 1, log: '', envelope: { status: 'ERROR', error: 'model refused the task' } });
+		expect(cls).toEqual({ outcome: 'task_failure', reason: 'nonzero_exit' });
+	});
+
+	test('envelope ERROR still yields to AUTH markers in the log', () => {
+		const cls = classifyRun({ exitCode: 1, log: 'captcha challenge; authentication required', envelope: { status: 'ERROR', error: 'captcha required' } });
+		expect(cls).toEqual({ outcome: 'auth_captcha', reason: 'auth_or_captcha' });
+	});
+
+	test('envelope SUCCESS never shortcuts the artifact-backed success rule', () => {
+		expect(classifyRun({ exitCode: 0, artifactBytes: 0, log: '', envelope: { status: 'SUCCESS' } })).toEqual({ outcome: 'artifact_validation_failure', reason: 'artifact_missing_or_empty' });
+	});
 });
 
 describe('unit: outcomes — fallback policy', () => {
@@ -164,6 +192,25 @@ describe('unit: outcomes — typed result builder and schemas', () => {
 			receipt: { store: 'openspec', wroteOpenspec: true, engramRequired: false },
 		});
 		expect(res.fallbackAllowed).toBe(false);
+	});
+
+	test('buildResult passes conversationId and usage through to the typed result', () => {
+		const usage = { input_tokens: 1, output_tokens: 2, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 3 };
+		const res = buildResult('timeout', {
+			elapsedMs: 5,
+			reason: 'agy_print_wait_timeout',
+			receipt: { store: 'none', wroteOpenspec: false, engramRequired: false },
+			conversationId: 'conv-9',
+			usage,
+		});
+		expect(res.conversationId).toBe('conv-9');
+		expect(res.usage).toEqual(usage);
+	});
+
+	test('buildResult omits envelope observability when not provided', () => {
+		const res = buildResult('task_failure', { elapsedMs: 0, reason: 'invalid_request', receipt: { store: 'none', wroteOpenspec: false, engramRequired: false } });
+		expect(res.conversationId).toBeUndefined();
+		expect(res.usage).toBeUndefined();
 	});
 
 	test('schema constants are exactly the v1 literals', () => {
@@ -544,9 +591,9 @@ describe('unit: spawn — buildAgyArgs derives the print-wait deadline', () => {
 		const i = args.indexOf('--print-timeout');
 		expect(args[i + 1]).toBe('1s');
 	});
-	test('flag order: after --dangerously-skip-permissions, alongside the optional --model pair', () => {
+	test('flag order: after --dangerously-skip-permissions, value flags together, optional --model pair last', () => {
 		expect(buildAgyArgs({ bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 630_000, model: 'm1' })).toEqual([
-			'--print', 'p', '--add-dir', '/w', '--dangerously-skip-permissions', '--print-timeout', '620s', '--model', 'm1',
+			'--print', 'p', '--add-dir', '/w', '--dangerously-skip-permissions', '--print-timeout', '620s', '--output-format', 'json', '--model', 'm1',
 		]);
 		expect(buildAgyArgs({ bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 600_000 })).not.toContain('--model');
 	});
@@ -554,6 +601,38 @@ describe('unit: spawn — buildAgyArgs derives the print-wait deadline', () => {
 		const args = buildAgyArgs({ bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 600_000 });
 		expect(args.join(' ')).not.toContain('600000');
 		expect(args.join(' ')).not.toContain('--print-timeout 600s');
+	});
+});
+
+describe('unit: spawn — agy JSON envelope parsing (--output-format json)', () => {
+	const envelope = {
+		conversation_id: '0f7c1b2e-1111-4aaa-9bbb-2c2c2c2c2c2c',
+		status: 'ERROR',
+		response: '',
+		error: 'timeout waiting for response',
+		duration_seconds: 12,
+		num_turns: 3,
+		usage: { input_tokens: 10, output_tokens: 20, thinking_tokens: 0, cache_read_tokens: 5, total_tokens: 30 },
+	};
+	test('valid envelope object parses', () => {
+		expect(parseAgyEnvelope(JSON.stringify(envelope))).toEqual(envelope);
+	});
+	test('trailing newline tolerated', () => {
+		expect(parseAgyEnvelope(`${JSON.stringify(envelope)}\n`)).toEqual(envelope);
+	});
+	test('multi-line stdout parses the LAST non-empty line', () => {
+		expect(parseAgyEnvelope(`agy: warming up\nnotice: something else\n${JSON.stringify(envelope)}`)).toEqual(envelope);
+	});
+	test('object without a string status field yields null', () => {
+		expect(parseAgyEnvelope('{"conversation_id":"x","usage":{"total_tokens":1}}')).toBeNull();
+		expect(parseAgyEnvelope('{"status":42}')).toBeNull();
+	});
+	test('garbage yields null', () => {
+		expect(parseAgyEnvelope('not json at all')).toBeNull();
+	});
+	test('empty stdout yields null', () => {
+		expect(parseAgyEnvelope('')).toBeNull();
+		expect(parseAgyEnvelope('  \n \n')).toBeNull();
 	});
 });
 
@@ -623,6 +702,33 @@ describe('unit: backend — provider-neutral runExploration seam', () => {
 		expect(res.fallbackAllowed).toBe(true);
 		expect(ran).toBe(0);
 		expect((d as any).persistCalledRef()).toBe(0);
+	});
+
+	test('envelope observability: conversationId and usage surface on the success result', async () => {
+		const runWithEnvelope: SpawnRun = { ...okRun, envelope: { status: 'SUCCESS', conversation_id: 'conv-1', usage: { input_tokens: 1, output_tokens: 2, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 3 } } };
+		const d = deps({ run: () => runWithEnvelope });
+		const res = await runExploration(req, d);
+		expect(res.outcome).toBe('success');
+		expect(res.conversationId).toBe('conv-1');
+		expect(res.usage?.total_tokens).toBe(3);
+	});
+
+	test('envelope observability: conversationId surfaces on a failed-run result too', async () => {
+		const runWithEnvelope: SpawnRun = { ...okRun, exitCode: 1, envelope: { status: 'ERROR', error: 'timeout waiting for response', conversation_id: 'conv-2' } };
+		const d = deps({ run: () => runWithEnvelope });
+		const res = await runExploration(req, d);
+		expect(res.outcome).toBe('timeout');
+		expect(res.reason).toBe('agy_print_wait_timeout');
+		expect(res.conversationId).toBe('conv-2');
+	});
+
+	test('quota gate early return attaches no envelope observability (no run happened)', async () => {
+		const runWithEnvelope: SpawnRun = { ...okRun, envelope: { status: 'SUCCESS', conversation_id: 'conv-never' } };
+		const d = deps({ decide: () => ({ pool: 'gemini' as const, allowed: false, reason: 'threshold_exhausted' }), run: () => runWithEnvelope });
+		const res = await runExploration(req, d);
+		expect(res.outcome).toBe('quota_unavailable');
+		expect(res.conversationId).toBeUndefined();
+		expect(res.usage).toBeUndefined();
 	});
 });
 

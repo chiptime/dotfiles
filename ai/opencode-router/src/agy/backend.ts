@@ -7,7 +7,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { buildResult, classifyRun, type ExploreRequest, type ExploreResult, type Receipt } from './outcomes';
 import { decidePool, parseSnapshot, parseSnapshotDir, poolForModel, type PoolDecision } from './quota';
-import { runAgy, type SpawnRun } from './spawn';
+import { runAgy, type AgyUsage, type SpawnRun } from './spawn';
 import { persistExploration, type PersistOutcome } from './persist';
 import { porcelain, REQUIRED_SECTIONS, validateExploration } from './validate';
 
@@ -78,11 +78,16 @@ export async function runExploration(req: ExploreRequest, deps?: BackendDeps): P
 	const before = d.porcelain();
 	const run = d.run();
 	const artifactText = run.exitCode === 0 ? d.readArtifact() : '';
-	const signal = { exitCode: run.exitCode, timedOut: run.timedOut, log: run.log, spawnError: run.spawnError, artifactBytes: Buffer.byteLength(artifactText) };
+	const signal = { exitCode: run.exitCode, timedOut: run.timedOut, log: run.log, spawnError: run.spawnError, artifactBytes: Buffer.byteLength(artifactText), envelope: run.envelope };
 	const cls = classifyRun(signal);
-	if (cls.outcome !== 'success') return buildResult(cls.outcome, { elapsedMs: run.elapsedMs, reason: cls.reason, receipt: emptyReceipt });
+	// Observability from agy's JSON envelope, attached only when present and
+	// only on results that follow a real run (the quota gate never runs agy).
+	const observed: { conversationId?: string; usage?: AgyUsage } = {};
+	if (run.envelope?.conversation_id !== undefined) observed.conversationId = run.envelope.conversation_id;
+	if (run.envelope?.usage !== undefined) observed.usage = run.envelope.usage;
+	if (cls.outcome !== 'success') return buildResult(cls.outcome, { elapsedMs: run.elapsedMs, reason: cls.reason, receipt: emptyReceipt, ...observed });
 	const v = validateExploration({ artifactText, porcelainBefore: before, porcelainAfter: d.porcelain() });
-	if (!v.ok) return buildResult('artifact_validation_failure', { elapsedMs: run.elapsedMs, reason: v.problems.join(';'), receipt: emptyReceipt });
+	if (!v.ok) return buildResult('artifact_validation_failure', { elapsedMs: run.elapsedMs, reason: v.problems.join(';'), receipt: emptyReceipt, ...observed });
 	const p = d.persist(artifactText);
-	return buildResult('success', { elapsedMs: run.elapsedMs, reason: 'ok', artifactPath: p.artifactDest, sha256: p.sha256, receipt: p.receipt });
+	return buildResult('success', { elapsedMs: run.elapsedMs, reason: 'ok', artifactPath: p.artifactDest, sha256: p.sha256, receipt: p.receipt, ...observed });
 }
