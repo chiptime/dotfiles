@@ -16,11 +16,28 @@ use serde_json::{json, Map, Value};
 
 use crate::providers::{fetch_with_retry, http_agent, CACHE_TTL};
 
-/// Provider id -> status page base URL. One row covers a new provider end to
-/// end (polling, `/api/status`, `check --json` fields, dashboard badges).
-const STATUS_PAGES: &[(&str, &str)] = &[
-    ("claude", "https://status.claude.com"),
-    ("chatgpt", "https://status.openai.com"),
+/// Provider incident source. `Statuspage` is the classic statuspage.io
+/// contract (GET summary.json); `OneUptime` is OneUptime's public status
+/// page API (POST overview with an empty JSON body), e.g. opencode's page
+/// at status.opencode.de.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusKind {
+    Statuspage,
+    OneUptime,
+}
+
+/// Provider id -> (status source URL, kind). One row covers a new provider
+/// end to end (polling, `/api/status`, `check --json` fields, dashboard
+/// badges). For OneUptime the URL is the full overview endpoint including
+/// the status page id.
+const STATUS_PAGES: &[(&str, &str, StatusKind)] = &[
+    ("claude", "https://status.claude.com", StatusKind::Statuspage),
+    ("chatgpt", "https://status.openai.com", StatusKind::Statuspage),
+    (
+        "opencode",
+        "https://status.opencode.de/status-page-api/overview/ce699e7e-a8d9-4d47-b1c0-5f9fcec9c2bc",
+        StatusKind::OneUptime,
+    ),
 ];
 
 /// Incident severity, ordered calmest -> worst (`Ord` drives the
@@ -75,6 +92,32 @@ pub fn map_component_status(raw: &str) -> Option<Severity> {
     }
 }
 
+/// Map a OneUptime monitor/overall status name. Their public vocabulary is
+/// Operational (priority 1), Degraded (2), Offline (3); `full_outage`-style
+/// names are folded into the same scale. Unknown -> None (conservative).
+pub fn map_oneuptime_status(raw: &str) -> Option<Severity> {
+    match raw {
+        "Operational" => Some(Severity::None),
+        "Degraded" => Some(Severity::Minor),
+        "Offline" => Some(Severity::Critical),
+        _ => None,
+    }
+}
+
+/// Map a OneUptime incident severity name ("Minor Incident", ...).
+pub fn map_oneuptime_incident_severity(raw: &str) -> Option<Severity> {
+    let lowered = raw.to_ascii_lowercase();
+    if lowered.starts_with("minor") {
+        Some(Severity::Minor)
+    } else if lowered.starts_with("major") {
+        Some(Severity::Major)
+    } else if lowered.starts_with("critical") {
+        Some(Severity::Critical)
+    } else {
+        None
+    }
+}
+
 /// One provider's incident snapshot, as served by `/api/status` and read by
 /// `check --json`.
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +158,83 @@ impl ProviderStatus {
         }
         Value::Object(obj)
     }
+}
+
+/// Pure: map a OneUptime overview payload into a snapshot. Overall severity
+/// is the worst of (overall status, active incident severities); unknown
+/// names never affect severity but are preserved in `detail`.
+pub fn map_oneuptime_overview(body: &str, fetched_at: DateTime<Utc>) -> Result<ProviderStatus, String> {
+    let page: Value = serde_json::from_str(body)
+        .map_err(|e| format!("invalid OneUptime overview: {e}"))?;
+    if !page.get("overallStatus").is_some_and(Value::is_object) {
+        return Err("OneUptime overview missing overallStatus object".into());
+    }
+
+    let overall = page.get("overallStatus");
+    let overall_name = overall
+        .and_then(|s| s.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let operational = overall
+        .and_then(|s| s.get("isOperationalState"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let mut worst: Option<Severity> = map_oneuptime_status(overall_name);
+    let mut unknown: Vec<String> = Vec::new();
+    if map_oneuptime_status(overall_name).is_none() && !overall_name.is_empty() {
+        unknown.push(format!("overall: {overall_name}"));
+    }
+
+    let mut active: Vec<String> = Vec::new();
+    if let Some(incidents) = page.get("activeIncidents").and_then(Value::as_array) {
+        for incident in incidents {
+            let title = incident
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("incident");
+            let severity = incident
+                .get("incidentSeverity")
+                .and_then(|s| s.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            match map_oneuptime_incident_severity(severity) {
+                Some(sev) => {
+                    if worst.is_none_or(|w| sev > w) {
+                        worst = Some(sev);
+                    }
+                }
+                None => unknown.push(format!("{title}: {severity}")),
+            }
+            active.push(title.to_string());
+        }
+    }
+
+    // Worst input wins: an active incident escalates even when the overall
+    // status still reads Operational. Unknown overall + no incidents falls
+    // back conservatively (calm when operational, Minor otherwise).
+    let indicator = worst.unwrap_or(if operational { Severity::None } else { Severity::Minor });
+    let mut summary = if overall_name.is_empty() {
+        "unknown".to_string()
+    } else {
+        overall_name.to_string()
+    };
+    if !active.is_empty() {
+        summary.push_str(&format!(" — active: {}", active.join("; ")));
+    }
+
+    Ok(ProviderStatus {
+        indicator: Some(indicator),
+        summary,
+        updated_at: fetched_at,
+        stale: false,
+        error: None,
+        detail: if unknown.is_empty() {
+            None
+        } else {
+            Some(format!("unknown status: {}", unknown.join("; ")))
+        },
+    })
 }
 
 /// `(status_indicator, status_summary)` pair for `check --json`: both null
@@ -339,20 +459,29 @@ fn fresh(state: &CacheState, ttl: Duration) -> Option<BTreeMap<String, ProviderS
     (at.elapsed() < ttl).then(|| cached.clone())
 }
 
-/// GET `<base>/api/v2/summary.json` with the shared 10s-timeout agent and
-/// retry-once pattern, then map the body. Any failure is a plain `String`.
-fn fetch_one(agent: &ureq::Agent, base: &str) -> Result<ProviderStatus, String> {
-    let url = format!("{base}/api/v2/summary.json");
-    fetch_with_retry(|| {
-        agent
-            .get(&url)
+/// Fetch and map one provider's page (retry-once). Dispatches on the
+/// source kind: statuspage.io GET summary.json vs OneUptime POST overview.
+fn fetch_one(agent: &ureq::Agent, base: &str, kind: StatusKind) -> Result<ProviderStatus, String> {
+    let body = fetch_with_retry(|| match kind {
+        StatusKind::Statuspage => agent
+            .get(&format!("{base}/api/v2/summary.json"))
             .set("Accept", "application/json")
             .call()
             .map_err(|e| format!("status request failed: {e}"))?
             .into_string()
-            .map_err(|e| format!("failed to read status response: {e}"))
-    })
-    .and_then(|body| map_summary(&body, Utc::now()))
+            .map_err(|e| format!("failed to read status response: {e}")),
+        StatusKind::OneUptime => agent
+            .post(base)
+            .set("Content-Type", "application/json")
+            .send_string("{}")
+            .map_err(|e| format!("status request failed: {e}"))?
+            .into_string()
+            .map_err(|e| format!("failed to read status response: {e}")),
+    })?;
+    match kind {
+        StatusKind::Statuspage => map_summary(&body, Utc::now()),
+        StatusKind::OneUptime => map_oneuptime_overview(&body, Utc::now()),
+    }
 }
 
 /// Fetch every mapped provider's page (one retry-once round each).
@@ -361,7 +490,7 @@ fn default_fetch_all(
 ) -> Vec<(&'static str, Result<ProviderStatus, String>)> {
     STATUS_PAGES
         .iter()
-        .map(|&(provider, base)| (provider, fetch_one(agent, base)))
+        .map(|&(provider, source, kind)| (provider, fetch_one(agent, source, kind)))
         .collect()
 }
 
@@ -574,6 +703,50 @@ mod tests {
 
         let (ind, sum) = check_fields(None);
         assert!(ind.is_null() && sum.is_null());
+    }
+
+    #[test]
+    fn oneuptime_overview_maps_operational_and_incidents() {
+        let ok = r#"{"overallStatus":{"name":"Operational","isOperationalState":true,"priority":1},"activeIncidents":[]}"#;
+        let s = map_oneuptime_overview(ok, Utc::now()).unwrap();
+        assert_eq!(s.indicator, Some(Severity::None));
+        assert_eq!(s.summary, "Operational");
+        assert!(s.detail.is_none());
+
+        // Active incident escalates the rollup; titles ride in the summary.
+        let incident = r#"{"overallStatus":{"name":"Operational","isOperationalState":true},"activeIncidents":[{"title":"DevGuard API is offline","incidentSeverity":{"name":"Major Incident"}}]}"#;
+        let s = map_oneuptime_overview(incident, Utc::now()).unwrap();
+        assert_eq!(s.indicator, Some(Severity::Major));
+        assert!(s.summary.contains("DevGuard API is offline"));
+
+        // Non-operational overall with no incidents: overall name drives it.
+        let degraded = r#"{"overallStatus":{"name":"Degraded","isOperationalState":false},"activeIncidents":[]}"#;
+        let s = map_oneuptime_overview(degraded, Utc::now()).unwrap();
+        assert_eq!(s.indicator, Some(Severity::Minor));
+
+        let offline = r#"{"overallStatus":{"name":"Offline","isOperationalState":false},"activeIncidents":[]}"#;
+        let s = map_oneuptime_overview(offline, Utc::now()).unwrap();
+        assert_eq!(s.indicator, Some(Severity::Critical));
+
+        // Unknown overall name: conservative severity, raw string in detail.
+        let alien = r#"{"overallStatus":{"name":"Warp Zone","isOperationalState":false},"activeIncidents":[]}"#;
+        let s = map_oneuptime_overview(alien, Utc::now()).unwrap();
+        assert_eq!(s.indicator, Some(Severity::Minor), "non-operational defaults to Minor");
+        assert!(s.detail.unwrap().contains("Warp Zone"));
+
+        assert!(map_oneuptime_overview("123", Utc::now()).is_err());
+    }
+
+    #[test]
+    fn oneuptime_vocab_mapping_is_exact() {
+        assert_eq!(map_oneuptime_status("Operational"), Some(Severity::None));
+        assert_eq!(map_oneuptime_status("Degraded"), Some(Severity::Minor));
+        assert_eq!(map_oneuptime_status("Offline"), Some(Severity::Critical));
+        assert_eq!(map_oneuptime_status("aliens"), None);
+        assert_eq!(map_oneuptime_incident_severity("Minor Incident"), Some(Severity::Minor));
+        assert_eq!(map_oneuptime_incident_severity("Major Incident"), Some(Severity::Major));
+        assert_eq!(map_oneuptime_incident_severity("Critical Incident"), Some(Severity::Critical));
+        assert_eq!(map_oneuptime_incident_severity("Informational"), None);
     }
 
     /// Thread-safe call counter: FetchAll requires Send + Sync.
