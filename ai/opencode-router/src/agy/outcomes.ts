@@ -130,6 +130,14 @@ export function classifyRun(signal: RunSignal): Classification {
 	if (signal.stalled) return { outcome: 'timeout', reason: 'stall_detected' };
 	if (signal.timedOut || signal.exitCode === 124) return { outcome: 'timeout', reason: 'timeout' };
 	if (signal.exitCode === 0 && signal.artifactBytes) return { outcome: 'success', reason: 'ok' };
+	// Mid-turn print-wait cut (live 2026-09-09): agy exits 0, reports status
+	// SUCCESS with an EMPTY response, and marks stderr with this line while
+	// the artifact never lands. The marker is the deadline signature — a
+	// recoverable timeout for both exit codes, checked only after the
+	// artifact-backed success rule so a delivered artifact always wins.
+	if (/\[agy\] print timeout after \S+ with turn in progress/i.test(log)) {
+		return { outcome: 'timeout', reason: 'agy_print_wait_timeout' };
+	}
 	if (AUTH_RE.test(log)) return { outcome: 'auth_captcha', reason: 'auth_or_captcha' };
 	if (signal.exitCode !== 0) {
 		// The typed JSON envelope (--output-format json) is the first failed-run
@@ -146,6 +154,14 @@ export function classifyRun(signal: RunSignal): Classification {
 		if (QUOTA_RE.test(log)) return { outcome: 'quota_unavailable', reason: 'quota_exhausted' };
 		if (TRANSIENT_RE.test(log)) return { outcome: 'transient_unavailable', reason: 'provider_outage' };
 		return { outcome: 'task_failure', reason: 'nonzero_exit' };
+	}
+	// agy sometimes exits 0 even when its own print-wait deadline fired
+	// mid-turn (observed live: exit 0 + ERROR envelope + no artifact, while
+	// pre-turn timeouts exit nonzero). The typed envelope is authoritative:
+	// that is a recoverable timeout, not a task failure, so it must reach
+	// the resume/fallback path instead of artifact_validation_failure.
+	if (signal.envelope?.status === 'ERROR' && PRINT_WAIT_TIMEOUT_RE.test(signal.envelope.error ?? '')) {
+		return { outcome: 'timeout', reason: 'agy_print_wait_timeout' };
 	}
 	if (!signal.artifactBytes) return { outcome: 'artifact_validation_failure', reason: 'artifact_missing_or_empty' };
 	return { outcome: 'success', reason: 'ok' };

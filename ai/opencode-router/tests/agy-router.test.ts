@@ -485,7 +485,7 @@ describe('unit: validate (threat) — repo mutation blocks, persists nothing', (
 		expect(v.ok).toBe(false);
 		expect(v.problems).toEqual(['repo_mutated']);
 		const c = classifyRun({ exitCode: 0, log: 'ok', artifactBytes: 100 });
-		const blocked = !v.ok ? ({ outcome: 'artifact_validation_failure', reason: 'repo_mutated' } as const) : c;
+		const blocked = v.ok ? c : ({ outcome: 'artifact_validation_failure', reason: 'repo_mutated' } as const);
 		expect(isFallbackAllowed(blocked.outcome)).toBe(false);
 	});
 	test('missing sections also fail validation without blocking fallback rules', () => {
@@ -802,7 +802,9 @@ describe('unit: backend — resume-once after a first-run timeout with a convers
 				calls.push(call);
 				return runs.length > 1 ? runs.shift()! : runs[0]!;
 			},
-			readArtifact: () => validArtifact,
+			// Attempt 1 of the exit-0 regression leaves NO artifact (that is the
+			// live signature); only the resumed attempt produces one.
+			readArtifact: () => (calls.length <= 1 ? '' : validArtifact),
 			persist: () => ({ receipt: { store: 'openspec', wroteOpenspec: true, engramRequired: false }, receiptPath: '/w/receipt.json', artifactDest: '/w/exploration.md', sha256: 'abc' }),
 			porcelain: () => 'P',
 		};
@@ -836,6 +838,32 @@ describe('unit: backend — resume-once after a first-run timeout with a convers
 		expect(calls).toHaveLength(1);
 		expect(calls[0]).toBeUndefined();
 		expect(res.outcome).toBe('timeout');
+	});
+	test('classifyRun: mid-turn print-wait stderr marker → recoverable timeout for both exit codes', () => {
+		// Live variant 3 (2026-09-09): exit 0 + status SUCCESS + empty response +
+		// '[agy] print timeout after Ns with turn in progress' on stderr.
+		const marker = '[agy] print timeout after 15s with turn in progress; returning partial output\n';
+		expect(classifyRun({ exitCode: 0, log: marker, artifactBytes: 0 })).toEqual({ outcome: 'timeout', reason: 'agy_print_wait_timeout' });
+		expect(classifyRun({ exitCode: 1, log: marker, artifactBytes: 0 })).toEqual({ outcome: 'timeout', reason: 'agy_print_wait_timeout' });
+		// A delivered artifact always wins over the marker.
+		expect(classifyRun({ exitCode: 0, log: marker, artifactBytes: 12 })).toEqual({ outcome: 'success', reason: 'ok' });
+	});
+	test('exit 0 + ERROR envelope print-wait timeout (mid-turn variant) + conversationId → resume fires', async () => {
+		// Live regression (2026-09-09): agy can exit 0 when its print-wait deadline
+		// aborts mid-turn; without the envelope gate in classifyRun this landed in
+		// artifact_validation_failure — no fallback, no resume, work discarded.
+		expect(classifyRun({ exitCode: 0, log: '', artifactBytes: 0, envelope: { status: 'ERROR', error: 'timeout waiting for response' } })).toEqual({
+			outcome: 'timeout',
+			reason: 'agy_print_wait_timeout',
+		});
+		const calls: Call[] = [];
+		const first: SpawnRun = { exitCode: 0, timedOut: false, log: '', elapsedMs: 5, conversationId: 'conv-4', envelope: { status: 'ERROR', error: 'timeout waiting for response' } };
+		const second: SpawnRun = { exitCode: 0, timedOut: false, log: 'resumed', elapsedMs: 5 };
+		const res = await runExploration(req, recordingDeps([first, second], calls));
+		expect(calls).toHaveLength(2);
+		expect(calls[1]?.resumeConversationId).toBe('conv-4');
+		expect(calls[1]?.prompt).toBe(RESUME_PROMPT);
+		expect(res.outcome).toBe('success');
 	});
 });
 
