@@ -23,5 +23,9 @@
     #   ln -f ~/.dotfiles/ai/agents/opencode/skills/antigravity-explore/SKILL.md \
     #     ~/.config/opencode/skills/antigravity-explore/SKILL.md
     # (re-run after editors that write-replace, which break the link)
-    ~/.config/ai-stack/opencode-router.json: ai/opencode-router/opencode-router.json
+    # Rendered router config is NOT dotbot-managed: ai/opencode-router/build.sh
+    # deploys a REAL copy to ~/.config/ai-stack/opencode-router.json. Do NOT
+    # restore a symlink here: on 2026-09-08 an in-place runtime rewrite (ad-hoc
+    # model-fix) wrote through the symlink into the tracked rendered file,
+    # reformatting it and injecting a top-level "model" field. Copies only.
     ~/.local/bin/opencode-web: ai/opencode-router/bin/opencode-web.sh
