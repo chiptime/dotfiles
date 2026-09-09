@@ -6,7 +6,8 @@
  * contract, rendered-config integrity, and CLI smoke runs against a temp HOME.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { appendFileSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, realpathSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { mkdtemp } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
@@ -38,6 +39,7 @@ import { detectMutation, lintSections, REQUIRED_SECTIONS, validateExploration } 
 import { persistExploration } from '../src/agy/persist';
 import { buildAgyArgs, countRecentConversations, DEFAULT_STALL_MS, parseAgyEnvelope, parseStreamLine, runAgy, type SpawnRun } from '../src/agy/spawn';
 import { buildExplorationPrompt, depsFor, RESUME_PROMPT, runExploration, type BackendDeps } from '../src/agy/backend';
+import { blockedEnvelope, successEnvelope, type ExploreResult, type ParsedTask } from '../src/agy/dispatch-core';
 import { runCli, type CliOptions } from '../src/agy/cli';
 import { appendMetrics, parseMetrics, recordFromResult, type MetricsRecord } from '../src/agy/metrics';
 import { savingsReport, summarize } from '../src/agy/report';
@@ -223,6 +225,21 @@ describe('unit: outcomes — typed result builder and schemas', () => {
 		const res = buildResult('task_failure', { elapsedMs: 0, reason: 'invalid_request', receipt: { store: 'none', wroteOpenspec: false, engramRequired: false } });
 		expect(res.conversationId).toBeUndefined();
 		expect(res.usage).toBeUndefined();
+	});
+
+	test('buildResult passes stream progress through to the typed result', () => {
+		const res = buildResult('success', {
+			elapsedMs: 5,
+			reason: 'ok',
+			receipt: { store: 'openspec', wroteOpenspec: true, engramRequired: false },
+			progress: { events: 3, lastEvent: 'result', numTurns: 2 },
+		});
+		expect(res.progress).toEqual({ events: 3, lastEvent: 'result', numTurns: 2 });
+	});
+
+	test('buildResult omits stream progress when not provided', () => {
+		const res = buildResult('task_failure', { elapsedMs: 0, reason: 'invalid_request', receipt: { store: 'none', wroteOpenspec: false, engramRequired: false } });
+		expect(res.progress).toBeUndefined();
 	});
 
 	test('schema constants are exactly the v1 literals', () => {
@@ -671,17 +688,17 @@ describe('unit: spawn — stream-json NDJSON line extraction (pure)', () => {
 	const initLine = JSON.stringify({ event: 'init', conversation_id: '0f7c1111-2222-4aaa-9bbb-2c2c2c2c2c2c', init: { cwd: '/w', tools: [] } });
 	const envelope = { conversation_id: '0f7c1111-2222-4aaa-9bbb-2c2c2c2c2c2c', status: 'SUCCESS', response: 'done', num_turns: 1 };
 	const resultLine = JSON.stringify({ event: 'result', result: envelope });
-	test('init line yields the early recovery conversationId', () => {
-		expect(parseStreamLine(initLine)).toEqual({ conversationId: '0f7c1111-2222-4aaa-9bbb-2c2c2c2c2c2c' });
+	test('init line yields the early recovery conversationId and its event type', () => {
+		expect(parseStreamLine(initLine)).toEqual({ conversationId: '0f7c1111-2222-4aaa-9bbb-2c2c2c2c2c2c', event: 'init' });
 	});
 	test('result line yields the envelope under the same validation as parseAgyEnvelope', () => {
-		expect(parseStreamLine(resultLine)).toEqual({ envelope });
-		expect(parseStreamLine(JSON.stringify({ event: 'result', result: { no_status: true } }))).toEqual({});
-		expect(parseStreamLine(JSON.stringify({ event: 'result', result: { status: 42 } }))).toEqual({});
+		expect(parseStreamLine(resultLine)).toEqual({ envelope, event: 'result' });
+		expect(parseStreamLine(JSON.stringify({ event: 'result', result: { no_status: true } }))).toEqual({ event: 'result' });
+		expect(parseStreamLine(JSON.stringify({ event: 'result', result: { status: 42 } }))).toEqual({ event: 'result' });
 	});
-	test('non-JSON, step_update, and empty lines are tolerated (nothing captured)', () => {
+	test('non-JSON and empty lines are tolerated (nothing captured); step_update yields only its event type', () => {
 		expect(parseStreamLine('agy: warning noise')).toEqual({});
-		expect(parseStreamLine('{"event":"step_update","step_update":{"state":"ACTIVE"}}')).toEqual({});
+		expect(parseStreamLine('{"event":"step_update","step_update":{"state":"ACTIVE"}}')).toEqual({ event: 'step_update' });
 		expect(parseStreamLine('')).toEqual({});
 	});
 });
@@ -748,6 +765,29 @@ describe('unit: spawn — async stream runner: stall watchdog, hard cap, init/re
 		expect(r.stalled).toBe(true);
 		expect(r.conversationId).toBe('conv-real');
 		expect(await Bun.file(`${dir}/run.log`).text()).toContain('conv-real');
+	});
+	test('progress: counts parsed NDJSON event lines and remembers the last event type', async () => {
+		const dir = await mkdtemp('/tmp/agy-progress-');
+		const child = fakeChild();
+		const p = runAgy({ bin: 'agy', prompt: 'p', workdir: dir, timeoutMs: 30_000, stallMs: 0, spawnImpl: asSpawn(child) });
+		child.stdout.push(ndjson({ event: 'init', conversation_id: 'conv-progress' }));
+		child.stdout.push(ndjson({ event: 'step_update', step_update: { state: 'ACTIVE' } }));
+		child.stdout.push(Buffer.from('noise line, not json\n'));
+		child.stdout.push(ndjson({ event: 'result', result: { status: 'SUCCESS', num_turns: 2 } }));
+		setTimeout(() => child.emit('close', 0, null), 10);
+		const r = await p;
+		expect(r.progress).toEqual({ events: 3, lastEvent: 'result' });
+		expect(r.envelope).toEqual({ status: 'SUCCESS', num_turns: 2 });
+		expect(r.conversationId).toBe('conv-progress');
+	});
+	test('progress: absent when no NDJSON event lines arrive (spawn error / silent child)', async () => {
+		const dir = await mkdtemp('/tmp/agy-progress-none-');
+		const child = fakeChild();
+		const p = runAgy({ bin: 'agy', prompt: 'p', workdir: dir, timeoutMs: 30_000, stallMs: 0, spawnImpl: asSpawn(child) });
+		child.stderr?.push(Buffer.from('boom\n'));
+		setTimeout(() => child.emit('close', 1, null), 10);
+		const r = await p;
+		expect(r.progress).toBeUndefined();
 	});
 });
 
@@ -892,6 +932,59 @@ describe('unit: backend — provider-neutral runExploration seam', () => {
 		expect(res.outcome).toBe('quota_unavailable');
 		expect(res.conversationId).toBeUndefined();
 		expect(res.usage).toBeUndefined();
+	});
+
+	test('stream progress surfaces on the success result, numTurns joined from the envelope', async () => {
+		const runWithProgress: SpawnRun = { ...okRun, progress: { events: 4, lastEvent: 'result' }, envelope: { status: 'SUCCESS', num_turns: 3 } };
+		const d = deps({ run: () => runWithProgress });
+		const res = await runExploration(req, d);
+		expect(res.outcome).toBe('success');
+		expect(res.progress).toEqual({ events: 4, lastEvent: 'result', numTurns: 3 });
+	});
+
+	test('stream progress surfaces on a failed-run result too', async () => {
+		const runWithProgress: SpawnRun = { ...okRun, exitCode: 1, progress: { events: 2, lastEvent: 'step_update' } };
+		const d = deps({ run: () => runWithProgress });
+		const res = await runExploration(req, d);
+		expect(res.outcome).toBe('task_failure');
+		expect(res.progress).toEqual({ events: 2, lastEvent: 'step_update' });
+	});
+
+	test('quota gate early return attaches no stream progress (no run happened)', async () => {
+		const runWithProgress: SpawnRun = { ...okRun, progress: { events: 9, lastEvent: 'result' } };
+		const d = deps({ decide: () => ({ pool: 'gemini' as const, allowed: false, reason: 'threshold_exhausted' }), run: () => runWithProgress });
+		const res = await runExploration(req, d);
+		expect(res.outcome).toBe('quota_unavailable');
+		expect(res.progress).toBeUndefined();
+	});
+});
+
+describe('unit: dispatch-core — stream-progress line in the envelopes', () => {
+	const task: ParsedTask = { change: 'chg-progress', store: 'openspec', brief: 'b' };
+	const base: ExploreResult = { schema: EXPLORE_RESULT_SCHEMA, outcome: 'success', fallbackAllowed: false, elapsedMs: 42, receipt: { store: 'openspec', wroteOpenspec: false, engramRequired: false } };
+	test('successEnvelope emits the Progress line between Summary and Artifacts, with turns', () => {
+		const env = successEnvelope({ ...base, progress: { events: 3, lastEvent: 'result', numTurns: 2 } }, task);
+		const lines = env.split('\n');
+		const summary = lines.findIndex((l) => l.startsWith('**Summary**'));
+		const progress = lines.findIndex((l) => l.startsWith('**Progress**'));
+		const artifacts = lines.findIndex((l) => l.startsWith('**Artifacts**'));
+		expect(progress).toBe(summary + 1);
+		expect(artifacts).toBe(progress + 1);
+		expect(lines[progress]).toBe('**Progress**: 3 agy events (last: result), 2 turns');
+	});
+	test('blockedEnvelope emits the Progress line; turns clause omitted without numTurns', () => {
+		const env = blockedEnvelope({ ...base, outcome: 'auth_captcha', reason: 'auth_or_captcha', progress: { events: 5, lastEvent: 'step_update' } }, task);
+		const lines = env.split('\n');
+		const summary = lines.findIndex((l) => l.startsWith('**Summary**'));
+		const progress = lines.findIndex((l) => l.startsWith('**Progress**'));
+		const artifacts = lines.findIndex((l) => l.startsWith('**Artifacts**'));
+		expect(progress).toBe(summary + 1);
+		expect(artifacts).toBe(progress + 1);
+		expect(lines[progress]).toBe('**Progress**: 5 agy events (last: step_update)');
+	});
+	test('envelopes stay byte-identical when the run reported no progress', () => {
+		expect(successEnvelope({ ...base }, task)).not.toContain('**Progress**');
+		expect(blockedEnvelope({ ...base, outcome: 'auth_captcha', reason: 'auth_or_captcha' }, task)).not.toContain('**Progress**');
 	});
 });
 

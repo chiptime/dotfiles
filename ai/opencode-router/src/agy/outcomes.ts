@@ -70,6 +70,16 @@ export interface ExploreResult {
 	conversationId?: string;
 	/** Token accounting from the JSON envelope; present only after a real run. */
 	usage?: AgyUsage;
+	/** Stream progress from the async runner; present only after a real run. numTurns comes from the envelope when present. */
+	progress?: RunProgress;
+	/** Workdir result.json path the CLI appends to its stdout envelope; never set by buildResult itself. */
+	resultPath?: string;
+}
+/** Stream progress surfaced to the orchestrator: NDJSON event count, last event type, and agy's turn count when known. */
+export interface RunProgress {
+	events: number;
+	lastEvent?: string;
+	numTurns?: number;
 }
 /** What the runner observed about one agy invocation. */
 export interface RunSignal {
@@ -84,6 +94,8 @@ export interface RunSignal {
 	artifactBytes?: number;
 	/** Parsed `--output-format json` envelope, when agy printed one. */
 	envelope?: AgyEnvelope;
+	/** Stream progress observed by the async runner; present only after real streamed output. */
+	progress?: RunProgress;
 }
 export interface Classification {
 	outcome: Outcome;
@@ -141,7 +153,7 @@ export function classifyRun(signal: RunSignal): Classification {
 /** Build a typed result; fallbackAllowed is always derived from the outcome. */
 export function buildResult(
 	outcome: Outcome,
-	fields: { elapsedMs: number; reason?: string; artifactPath?: string; sha256?: string; receipt: Receipt; conversationId?: string; usage?: AgyUsage },
+	fields: { elapsedMs: number; reason?: string; artifactPath?: string; sha256?: string; receipt: Receipt; conversationId?: string; usage?: AgyUsage; progress?: RunProgress },
 ): ExploreResult {
 	return {
 		schema: EXPLORE_RESULT_SCHEMA,
@@ -154,6 +166,7 @@ export function buildResult(
 		receipt: fields.receipt,
 		conversationId: fields.conversationId,
 		usage: fields.usage,
+		progress: fields.progress,
 	};
 }
 

@@ -35,6 +35,8 @@ export interface SpawnRun {
 	stalled?: boolean;
 	/** agy conversation id from the stream-json `init` event; captured early so it survives timeouts/kills. */
 	conversationId?: string;
+	/** Stream progress: count of parsed NDJSON event lines and the last event type; present only when at least one event line arrived. */
+	progress?: { events: number; lastEvent?: string };
 }
 
 /** Token accounting reported by agy's envelope. */
@@ -89,10 +91,11 @@ export function parseAgyEnvelope(stdout: string): AgyEnvelope | null {
  * Classify ONE `--output-format stream-json` NDJSON line (pure, tolerant).
  * - `init` event  → conversationId (the early recovery handle).
  * - `result` event → the final envelope, validated exactly like parseAgyEnvelope.
+ * - any line with a string `event` → that event type, for progress surfacing.
  * A bare envelope line (object with string `status`, no `event`) also yields
  * the envelope, for tolerance against agy quirks. Non-JSON lines → {}.
  */
-export function parseStreamLine(line: string): { conversationId?: string; envelope?: AgyEnvelope } {
+export function parseStreamLine(line: string): { conversationId?: string; envelope?: AgyEnvelope; event?: string } {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(line);
@@ -101,7 +104,8 @@ export function parseStreamLine(line: string): { conversationId?: string; envelo
 	}
 	if (typeof parsed !== 'object' || parsed === null) return {};
 	const rec = parsed as Record<string, unknown>;
-	const out: { conversationId?: string; envelope?: AgyEnvelope } = {};
+	const out: { conversationId?: string; envelope?: AgyEnvelope; event?: string } = {};
+	if (typeof rec.event === 'string') out.event = rec.event;
 	if (rec.event === 'init' && typeof rec.conversation_id === 'string') out.conversationId = rec.conversation_id;
 	if (rec.event === 'result') out.envelope = asAgyEnvelope(rec.result) ?? undefined;
 	if (rec.event === undefined) out.envelope = asAgyEnvelope(parsed) ?? undefined;
@@ -173,6 +177,8 @@ export async function runAgyStream(opts: StreamSpawnOptions): Promise<SpawnRun> 
 		let log = '';
 		let envelope: AgyEnvelope | undefined;
 		let conversationId: string | undefined;
+		let eventCount = 0;
+		let lastEvent: string | undefined;
 		let exitCode: number | null = null;
 		let timedOut = false;
 		let stalled = false;
@@ -220,6 +226,7 @@ export async function runAgyStream(opts: StreamSpawnOptions): Promise<SpawnRun> 
 				elapsedMs: Date.now() - start,
 				envelope,
 				conversationId,
+				progress: eventCount > 0 ? { events: eventCount, lastEvent } : undefined,
 				stalled: stalled || undefined,
 				spawnError,
 			});
@@ -233,6 +240,10 @@ export async function runAgyStream(opts: StreamSpawnOptions): Promise<SpawnRun> 
 			armStall();
 			append(`${line}\n`);
 			const got = parseStreamLine(line);
+			if (got.event !== undefined) {
+				eventCount++;
+				lastEvent = got.event;
+			}
 			if (got.conversationId !== undefined) conversationId = got.conversationId;
 			if (got.envelope !== undefined) envelope = got.envelope;
 		});
