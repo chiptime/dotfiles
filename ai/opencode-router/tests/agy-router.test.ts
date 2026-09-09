@@ -9,6 +9,9 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { appendFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { mkdtemp } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import { spawn } from 'node:child_process';
 import {
 	EXPLORE_REQUEST_SCHEMA,
 	EXPLORE_RESULT_SCHEMA,
@@ -33,8 +36,8 @@ import {
 } from '../src/agy/quota';
 import { detectMutation, lintSections, REQUIRED_SECTIONS, validateExploration } from '../src/agy/validate';
 import { persistExploration } from '../src/agy/persist';
-import { buildAgyArgs, countRecentConversations, parseAgyEnvelope, runAgy, type SpawnRun } from '../src/agy/spawn';
-import { buildExplorationPrompt, depsFor, runExploration, type BackendDeps } from '../src/agy/backend';
+import { buildAgyArgs, countRecentConversations, DEFAULT_STALL_MS, parseAgyEnvelope, parseStreamLine, runAgy, type SpawnRun } from '../src/agy/spawn';
+import { buildExplorationPrompt, depsFor, RESUME_PROMPT, runExploration, type BackendDeps } from '../src/agy/backend';
 import { runCli, type CliOptions } from '../src/agy/cli';
 import { appendMetrics, parseMetrics, recordFromResult, type MetricsRecord } from '../src/agy/metrics';
 import { savingsReport, summarize } from '../src/agy/report';
@@ -73,6 +76,7 @@ describe('unit: outcomes — classify run signals', () => {
 		['missing binary maps to transient agy_absent', { exitCode: null, spawnError: 'ENOENT' }, 'transient_unavailable', 'agy_absent'],
 		['timeout flag maps to timeout', { exitCode: null, timedOut: true }, 'timeout', 'timeout'],
 		['exit 124 from timeout(1) maps to timeout', { exitCode: 124, log: '' }, 'timeout', 'timeout'],
+		['stall watchdog kill maps to timeout/stall_detected', { exitCode: null, stalled: true }, 'timeout', 'stall_detected'],
 		['auth/captcha log maps to auth_captcha', { exitCode: 1, log: 'agent hit a CAPTCHA wall; authentication required' }, 'auth_captcha', 'auth_or_captcha'],
 		['quota log + nonzero exit maps to quota_unavailable', { exitCode: 1, log: '429 quota exceeded: RESOURCE_EXHAUSTED' }, 'quota_unavailable', 'quota_exhausted'],
 		['exit-code corroboration: quota word on clean exit is NOT unavailability', { exitCode: 0, artifactBytes: 0, log: '429 quota exceeded' }, 'artifact_validation_failure', 'artifact_missing_or_empty'],
@@ -103,6 +107,14 @@ describe('unit: outcomes — classify run signals', () => {
 
 	test('timeout takes precedence over log markers', () => {
 		expect(classifyRun({ exitCode: 124, log: 'quota exceeded', timedOut: true }).outcome).toBe('timeout');
+	});
+
+	test('stall_detected outranks the plain timeout reason when both flags fire', () => {
+		expect(classifyRun({ exitCode: null, timedOut: true, stalled: true })).toEqual({ outcome: 'timeout', reason: 'stall_detected' });
+	});
+
+	test('stall_detected keeps the recoverable-timeout fallback semantics', () => {
+		expect(isFallbackAllowed(classifyRun({ exitCode: null, stalled: true }).outcome)).toBe(true);
 	});
 
 	test('agy print-wait signature outranks quota/transient markers on a failed run', () => {
@@ -518,7 +530,7 @@ describe('unit: spawn — timeout, workdir-only args, run.log, daily guard', () 
 		const stub = `${dir}/stub.sh`;
 		await Bun.write(stub, '#!/bin/sh\necho "agy says hi"\nprintf "%s" "$*" > args.txt\nexit 0\n');
 		Bun.spawnSync(['chmod', '+x', stub]);
-		const r = runAgy({ bin: stub, prompt: 'do it', workdir: dir, timeoutMs: 5000 });
+		const r = await runAgy({ bin: stub, prompt: 'do it', workdir: dir, timeoutMs: 5000 });
 		expect(r.exitCode).toBe(0);
 		expect(r.timedOut).toBe(false);
 		expect(r.log).toContain('agy says hi');
@@ -530,7 +542,7 @@ describe('unit: spawn — timeout, workdir-only args, run.log, daily guard', () 
 		const stub = `${dir}/stub.sh`;
 		await Bun.write(stub, '#!/bin/sh\nprintf "%s" "$*" > "$0.args"\ncat "$0.args" > /dev/null\nexit 0\n');
 		Bun.spawnSync(['chmod', '+x', stub]);
-		runAgy({ bin: stub, prompt: 'explore briefly', workdir: dir, timeoutMs: 5000 });
+		await runAgy({ bin: stub, prompt: 'explore briefly', workdir: dir, timeoutMs: 5000 });
 		const passed = await Bun.file(`${stub}.args`).text();
 		expect(passed).toContain('explore briefly');
 		// Containment invariant: every --add-dir target must be the workdir itself; the repo (or any other dir) is never exposed.
@@ -543,7 +555,7 @@ describe('unit: spawn — timeout, workdir-only args, run.log, daily guard', () 
 		const stub = `${dir}/slow.sh`;
 		await Bun.write(stub, '#!/bin/sh\nsleep 5\n');
 		Bun.spawnSync(['chmod', '+x', stub]);
-		const r = runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 150 });
+		const r = await runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 150 });
 		expect(r.timedOut).toBe(true);
 		expect(r.exitCode).not.toBe(0);
 	});
@@ -552,11 +564,11 @@ describe('unit: spawn — timeout, workdir-only args, run.log, daily guard', () 
 		const stub = `${dir}/stub.sh`;
 		await Bun.write(stub, '#!/bin/sh\nprintf "%s" "$*" > "$0.args"\nexit 0\n');
 		Bun.spawnSync(['chmod', '+x', stub]);
-		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: 'gemini-3.8-flash-high' });
+		await runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: 'gemini-3.8-flash-high' });
 		expect(await Bun.file(`${stub}.args`).text()).toContain('--model gemini-3.8-flash-high');
-		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: '' });
+		await runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000, model: '' });
 		expect(await Bun.file(`${stub}.args`).text()).not.toContain('--model');
-		runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000 });
+		await runAgy({ bin: stub, prompt: 'x', workdir: dir, timeoutMs: 5000 });
 		expect(await Bun.file(`${stub}.args`).text()).not.toContain('--model');
 	});
 	test('depsFor wiring: req.model reaches the agy argv via run()', async () => {
@@ -565,7 +577,7 @@ describe('unit: spawn — timeout, workdir-only args, run.log, daily guard', () 
 		await Bun.write(stub, '#!/bin/sh\nprintf "%s" "$*" > "$0.args"\nexit 0\n');
 		Bun.spawnSync(['chmod', '+x', stub]);
 		const req = { schema: 'agy-explore/req@1' as const, change: 'model-pass', store: 'openspec' as const, repo: '/r', brief: 'b', model: 'gemini-3.1-pro' };
-		depsFor(req, dir, { agyBin: stub, timeoutMs: 5000 }).run();
+		await depsFor(req, dir, { agyBin: stub, timeoutMs: 5000 }).run();
 		expect(await Bun.file(`${stub}.args`).text()).toContain('--model gemini-3.1-pro');
 	});
 	test('daily guard counts only conversation DBs from today', async () => {
@@ -633,6 +645,157 @@ describe('unit: spawn — agy JSON envelope parsing (--output-format json)', () 
 	test('empty stdout yields null', () => {
 		expect(parseAgyEnvelope('')).toBeNull();
 		expect(parseAgyEnvelope('  \n \n')).toBeNull();
+	});
+});
+
+describe('unit: spawn — buildAgyArgs output formats (json + stream-json) and resume flag', () => {
+	const base = { bin: 'agy', prompt: 'p', workdir: '/w', timeoutMs: 600_000 };
+	test('json format (default) keeps the committed argv shape', () => {
+		expect(buildAgyArgs(base)).toEqual(['--print', 'p', '--add-dir', '/w', '--dangerously-skip-permissions', '--print-timeout', '590s', '--output-format', 'json']);
+	});
+	test('stream-json variant swaps ONLY the output format', () => {
+		expect(buildAgyArgs(base, 'stream-json')).toEqual(['--print', 'p', '--add-dir', '/w', '--dangerously-skip-permissions', '--print-timeout', '590s', '--output-format', 'stream-json']);
+	});
+	test('--conversation resume pair appended only when a resume id is provided', () => {
+		expect(buildAgyArgs({ ...base, resumeConversationId: 'conv-7' }, 'stream-json')).toEqual([
+			'--print', 'p', '--add-dir', '/w', '--dangerously-skip-permissions', '--print-timeout', '590s', '--output-format', 'stream-json', '--conversation', 'conv-7',
+		]);
+		expect(buildAgyArgs(base, 'stream-json')).not.toContain('--conversation');
+	});
+	test('stall default is 10 minutes (evidence: real runs stream intermediate events)', () => {
+		expect(DEFAULT_STALL_MS).toBe(600_000);
+	});
+});
+
+describe('unit: spawn — stream-json NDJSON line extraction (pure)', () => {
+	const initLine = JSON.stringify({ event: 'init', conversation_id: '0f7c1111-2222-4aaa-9bbb-2c2c2c2c2c2c', init: { cwd: '/w', tools: [] } });
+	const envelope = { conversation_id: '0f7c1111-2222-4aaa-9bbb-2c2c2c2c2c2c', status: 'SUCCESS', response: 'done', num_turns: 1 };
+	const resultLine = JSON.stringify({ event: 'result', result: envelope });
+	test('init line yields the early recovery conversationId', () => {
+		expect(parseStreamLine(initLine)).toEqual({ conversationId: '0f7c1111-2222-4aaa-9bbb-2c2c2c2c2c2c' });
+	});
+	test('result line yields the envelope under the same validation as parseAgyEnvelope', () => {
+		expect(parseStreamLine(resultLine)).toEqual({ envelope });
+		expect(parseStreamLine(JSON.stringify({ event: 'result', result: { no_status: true } }))).toEqual({});
+		expect(parseStreamLine(JSON.stringify({ event: 'result', result: { status: 42 } }))).toEqual({});
+	});
+	test('non-JSON, step_update, and empty lines are tolerated (nothing captured)', () => {
+		expect(parseStreamLine('agy: warning noise')).toEqual({});
+		expect(parseStreamLine('{"event":"step_update","step_update":{"state":"ACTIVE"}}')).toEqual({});
+		expect(parseStreamLine('')).toEqual({});
+	});
+});
+
+describe('unit: spawn — async stream runner: stall watchdog, hard cap, init/result capture', () => {
+	/** Minimal ChildProcess stand-in: readline wraps a real Readable; kill() fakes the close event. */
+	function fakeChild() {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const child: any = new EventEmitter();
+		child.stdout = new Readable({ read() {} });
+		child.stderr = new Readable({ read() {} });
+		child.killed = false;
+		child.kill = () => {
+			child.killed = true;
+			queueMicrotask(() => child.emit('close', null, 'SIGTERM'));
+			return true;
+		};
+		return child;
+	}
+	const ndjson = (obj: unknown) => Buffer.from(`${JSON.stringify(obj)}\n`);
+	const asSpawn = (child: unknown) => (() => child) as unknown as typeof spawn;
+
+	test('stall watchdog: init captured, silence beyond stallMs kills with stalled=true, run.log keeps progress', async () => {
+		const dir = await mkdtemp('/tmp/agy-stall-');
+		const child = fakeChild();
+		const p = runAgy({ bin: 'agy', prompt: 'p', workdir: dir, timeoutMs: 30_000, stallMs: 60, spawnImpl: asSpawn(child) });
+		child.stdout.push(ndjson({ event: 'init', conversation_id: 'conv-stall' }));
+		const r = await p;
+		expect(r.stalled).toBe(true);
+		expect(r.conversationId).toBe('conv-stall');
+		expect(r.timedOut).toBe(false);
+		expect(r.exitCode).toBeNull();
+		expect(await Bun.file(`${dir}/run.log`).text()).toContain('"event":"init"');
+	});
+	test('hard cap: timeoutMs kill wins when the watchdog is disabled (stallMs 0 is legal)', async () => {
+		const dir = await mkdtemp('/tmp/agy-cap-');
+		const child = fakeChild();
+		const r = await runAgy({ bin: 'agy', prompt: 'p', workdir: dir, timeoutMs: 80, stallMs: 0, spawnImpl: asSpawn(child) });
+		expect(r.timedOut).toBe(true);
+		expect(r.stalled).toBeUndefined();
+	});
+	test('result event parsed into the envelope; non-JSON lines skipped but logged', async () => {
+		const dir = await mkdtemp('/tmp/agy-result-');
+		const child = fakeChild();
+		const envelope = { conversation_id: 'conv-9', status: 'SUCCESS', response: 'ok' };
+		const p = runAgy({ bin: 'agy', prompt: 'p', workdir: dir, timeoutMs: 30_000, stallMs: 0, spawnImpl: asSpawn(child) });
+		child.stdout.push(Buffer.from('noise line, not json\n'));
+		child.stdout.push(ndjson({ event: 'init', conversation_id: 'conv-9' }));
+		child.stdout.push(ndjson({ event: 'result', result: envelope }));
+		// Let readline drain the pushed lines BEFORE the process "exits".
+		setTimeout(() => child.emit('close', 0, null), 10);
+		const r = await p;
+		expect(r.exitCode).toBe(0);
+		expect(r.conversationId).toBe('conv-9');
+		expect(r.envelope).toEqual(envelope);
+		expect((await Bun.file(`${dir}/run.log`).text()).split('\n')).toContain('noise line, not json');
+	});
+	test('REAL spawn: slow stub killed by the watchdog still leaves its init line in run.log', async () => {
+		const dir = await mkdtemp('/tmp/agy-stall-real-');
+		const stub = `${dir}/stub.sh`;
+		await Bun.write(stub, '#!/bin/sh\nprintf \'%s\\n\' \'{"event":"init","conversation_id":"conv-real"}\'\nsleep 5\n');
+		Bun.spawnSync(['chmod', '+x', stub]);
+		const r = await runAgy({ bin: stub, prompt: 'p', workdir: dir, timeoutMs: 30_000, stallMs: 300 });
+		expect(r.stalled).toBe(true);
+		expect(r.conversationId).toBe('conv-real');
+		expect(await Bun.file(`${dir}/run.log`).text()).toContain('conv-real');
+	});
+});
+
+describe('unit: backend — resume-once after a first-run timeout with a conversation id', () => {
+	const validArtifact = ['## Exploration: x', '### Current State', '### Affected Areas', '### Approaches', '### Recommendation', '### Risks', '### Ready for Proposal'].join('\n');
+	const req = { schema: 'agy-explore/req@1' as const, change: 'c1', store: 'openspec' as const, repo: '/repo', brief: 'b', model: 'Gemini 3.7 Flash (High)' };
+	type Call = { resumeConversationId?: string; prompt?: string } | undefined;
+	function recordingDeps(runs: SpawnRun[], calls: Call[]): BackendDeps {
+		return {
+			decide: () => ({ pool: 'gemini' as const, allowed: true, reason: 'within_threshold' }),
+			run: (call) => {
+				calls.push(call);
+				return runs.length > 1 ? runs.shift()! : runs[0]!;
+			},
+			readArtifact: () => validArtifact,
+			persist: () => ({ receipt: { store: 'openspec', wroteOpenspec: true, engramRequired: false }, receiptPath: '/w/receipt.json', artifactDest: '/w/exploration.md', sha256: 'abc' }),
+			porcelain: () => 'P',
+		};
+	}
+	test('first run timeout + conversationId → exactly ONE resume with the continuation prompt; its result wins', async () => {
+		const calls: Call[] = [];
+		const first: SpawnRun = { exitCode: null, timedOut: true, log: '', elapsedMs: 5, conversationId: 'conv-1' };
+		const second: SpawnRun = { exitCode: 0, timedOut: false, log: 'resumed and finished', elapsedMs: 5 };
+		const res = await runExploration(req, recordingDeps([first, second], calls));
+		expect(calls).toHaveLength(2);
+		expect(calls[0]).toBeUndefined();
+		expect(calls[1]?.resumeConversationId).toBe('conv-1');
+		expect(calls[1]?.prompt).toBe(RESUME_PROMPT);
+		expect(calls[1]?.prompt).toContain('./exploration.md');
+		expect(res.outcome).toBe('success');
+		expect(res.reason).toBe('ok');
+	});
+	test('resume that also times out → final timeout, no third attempt', async () => {
+		const calls: Call[] = [];
+		const first: SpawnRun = { exitCode: null, timedOut: true, log: '', elapsedMs: 5, conversationId: 'conv-2' };
+		const second: SpawnRun = { exitCode: null, timedOut: true, log: '', elapsedMs: 5, conversationId: 'conv-2' };
+		const res = await runExploration(req, recordingDeps([first, second], calls));
+		expect(calls).toHaveLength(2);
+		expect(res.outcome).toBe('timeout');
+		expect(res.reason).toBe('timeout');
+	});
+	test('first run timeout WITHOUT a conversation id → no resume attempt', async () => {
+		const calls: Call[] = [];
+		const first: SpawnRun = { exitCode: null, timedOut: true, log: '', elapsedMs: 5 };
+		const res = await runExploration(req, recordingDeps([first], calls));
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toBeUndefined();
+		expect(res.outcome).toBe('timeout');
 	});
 });
 
