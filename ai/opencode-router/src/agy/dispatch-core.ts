@@ -29,6 +29,9 @@ import {
 	type Store,
 } from './outcomes';
 
+// Re-export for plugin/test consumers (tests import ExploreResult from here).
+export type { ExploreResult };
+
 // agy renamed its model slugs in the 2026-09 CLI (plain "gemini-3-flash" is no
 // longer accepted); keep the default as a valid current slug and allow an env
 // override so future renames don't require a rebuild of binary + plugin.
@@ -158,6 +161,12 @@ function workdirArtifact(result: ExploreResult & { resultPath?: string }): strin
 	return result.resultPath === undefined ? undefined : `${result.resultPath.replace(/[^/]+$/, '')}exploration.md`;
 }
 
+/** One-line stream-progress note, inserted between Summary and Artifacts when the run reported progress. */
+function progressLine(progress: NonNullable<ExploreResult['progress']>): string {
+	const turns = progress.numTurns ? `, ${progress.numTurns} turns` : '';
+	return `**Progress**: ${progress.events} agy events (last: ${progress.lastEvent ?? 'unknown'})${turns}`;
+}
+
 export function successEnvelope(result: ExploreResult & { resultPath?: string }, task: ParsedTask): string {
 	const artifact = workdirArtifact(result);
 	const artifactLines: string[] = [];
@@ -175,6 +184,7 @@ export function successEnvelope(result: ExploreResult & { resultPath?: string },
 		'',
 		`**Status**: success`,
 		`**Summary**: Exploration for change \`${task.change}\` completed by the agy backend in ${result.elapsedMs}ms (outcome success, store ${task.store}).`,
+		...(result.progress ? [progressLine(result.progress)] : []),
 		`**Artifacts**: ${artifactLines.join(' | ')}`,
 		`**Next**: sdd-propose`,
 		`**Risks**: ${risks}`,
@@ -193,6 +203,7 @@ export function blockedEnvelope(result: ExploreResult & { resultPath?: string },
 		'',
 		`**Status**: blocked`,
 		`**Summary**: agy-explore returned outcome \`${result.outcome}\` (reason: \`${result.reason ?? 'unknown'}\`) for change \`${task.change}\`; fallback is not allowed for this outcome class.`,
+		...(result.progress ? [progressLine(result.progress)] : []),
 		`**Artifacts**: none`,
 		`**Next**: none`,
 		`**Risks**: Typed outcome \`${result.outcome}\` with reason \`${result.reason ?? 'unknown'}\` — see the result JSON below.`,

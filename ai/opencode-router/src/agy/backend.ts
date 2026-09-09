@@ -5,7 +5,7 @@
  */
 import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { buildResult, classifyRun, type ExploreRequest, type ExploreResult, type Receipt } from './outcomes';
+import { buildResult, classifyRun, type ExploreRequest, type ExploreResult, type Receipt, type RunProgress } from './outcomes';
 import { decidePool, parseSnapshot, parseSnapshotDir, poolForModel, type PoolDecision } from './quota';
 import { runAgy, DEFAULT_STALL_MS, type AgyUsage, type SpawnRun } from './spawn';
 import { persistExploration, type PersistOutcome } from './persist';
@@ -109,7 +109,7 @@ export async function runExploration(req: ExploreRequest, deps?: BackendDeps): P
 	const before = d.porcelain();
 	const readArtifactFor = (r: SpawnRun) => (r.exitCode === 0 ? d.readArtifact() : '');
 	const classifyAttempt = (r: SpawnRun, artifactText: string) =>
-		classifyRun({ exitCode: r.exitCode, timedOut: r.timedOut, stalled: r.stalled, log: r.log, spawnError: r.spawnError, artifactBytes: Buffer.byteLength(artifactText), envelope: r.envelope });
+		classifyRun({ exitCode: r.exitCode, timedOut: r.timedOut, stalled: r.stalled, log: r.log, spawnError: r.spawnError, artifactBytes: Buffer.byteLength(artifactText), envelope: r.envelope, progress: r.progress });
 	const run = await d.run();
 	const artifactText = readArtifactFor(run);
 	const cls = classifyAttempt(run, artifactText);
@@ -126,13 +126,18 @@ export async function runExploration(req: ExploreRequest, deps?: BackendDeps): P
 		finalArtifact = readArtifactFor(finalRun);
 		finalCls = classifyAttempt(finalRun, finalArtifact);
 	}
-	// Observability from agy's envelope, attached only when present and only on
-	// results that follow a real run (the quota gate never runs agy). The init
-	// conversation id (stream runner) wins over the envelope's own field.
-	const observed: { conversationId?: string; usage?: AgyUsage } = {};
+	// Observability from agy's envelope and stream, attached only when present
+	// and only on results that follow a real run (the quota gate never runs
+	// agy). The init conversation id (stream runner) wins over the envelope's
+	// own field; numTurns is joined from the envelope onto the stream progress.
+	const observed: { conversationId?: string; usage?: AgyUsage; progress?: RunProgress } = {};
 	const conversationId = finalRun.conversationId ?? finalRun.envelope?.conversation_id;
 	if (conversationId !== undefined) observed.conversationId = conversationId;
 	if (finalRun.envelope?.usage !== undefined) observed.usage = finalRun.envelope.usage;
+	if (finalRun.progress !== undefined) {
+		observed.progress = { ...finalRun.progress };
+		if (finalRun.envelope?.num_turns !== undefined) observed.progress.numTurns = finalRun.envelope.num_turns;
+	}
 	if (finalCls.outcome !== 'success') return buildResult(finalCls.outcome, { elapsedMs: finalRun.elapsedMs, reason: finalCls.reason, receipt: emptyReceipt, ...observed });
 	const v = validateExploration({ artifactText: finalArtifact, porcelainBefore: before, porcelainAfter: d.porcelain() });
 	if (!v.ok) return buildResult('artifact_validation_failure', { elapsedMs: finalRun.elapsedMs, reason: v.problems.join(';'), receipt: emptyReceipt, ...observed });

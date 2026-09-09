@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ADVICE_SCHEMA, decide, formatNotice, type BalancerAdvice, type DecideInput, type ShownState } from '../src/balancer/core';
-import plugin, { adviseOnce, type AdvisorDeps, type AdvisorState } from '../src/plugin/quota-balancer';
+import plugin, { adviseOnce, type AdvisorDeps, type AdvisorState, type FetchLike } from '../src/plugin/quota-balancer';
 
 const TIERS = {
 	frontier: { 'anthropic/claude-opus-5': 'claude', 'zai/glm-4.7': 'zai' },
@@ -78,10 +78,10 @@ describe('adapter: adviseOnce — transport fail-open, toast failure, dedupe (R6
 		await expect(adviseOnce('anthropic/claude-opus-5', { lastShown: null }, deps({ showToast: async () => { throw new Error('headless'); } }))).resolves.toBeUndefined();
 	});
 	test('timeout / refused / HTTP 500 / oversized / malformed body: no throw, no toast', async () => {
-		const hangUntilAbort: typeof fetch = (_u, o) => new Promise((_r, rej) => o?.signal?.addEventListener('abort', () => rej(new Error('aborted'))));
-		const cases: Array<[string, typeof fetch]> = [
+		const hangUntilAbort: FetchLike = (_u, o) => new Promise((_r, rej) => o?.signal?.addEventListener('abort', () => rej(new Error('aborted'))));
+		const cases: Array<[string, FetchLike]> = [
 			['timeout', hangUntilAbort],
-			['refused', (async () => { throw new Error('ECONNREFUSED'); }) as typeof fetch],
+			['refused', (async () => { throw new Error('ECONNREFUSED'); }) as FetchLike],
 			['http-500', async () => jsonRes('internal error', 500)],
 			['oversized', async () => jsonRes('x'.repeat(70_000))],
 			['malformed-body', async () => jsonRes('not json at all')],
@@ -106,7 +106,7 @@ describe('adapter: chat.message hook — read-only seam through the real factory
 		writeFileSync(join(dir, 'balancer.json'), JSON.stringify({ notice_interval: 900, tiers: TIERS }));
 		const toasts: string[] = [];
 		const realFetch = globalThis.fetch;
-		globalThis.fetch = (async () => jsonRes(JSON.stringify(advice()))) as typeof fetch;
+		globalThis.fetch = (async () => jsonRes(JSON.stringify(advice()))) as unknown as typeof fetch;
 		process.env.AI_QUOTAS_BALANCER_CONFIG = join(dir, 'balancer.json');
 		process.env.QUOTA_BALANCER_FORCE_NATIVE_FILE = join(dir, 'force-native');
 		try {

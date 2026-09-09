@@ -12,9 +12,16 @@ import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { DEFAULT_NOTICE_INTERVAL_MS, decide, type ShownState, type TierMap } from "../balancer/core"
 
+/**
+ * Narrow callable surface of fetch. Bun's global `fetch` carries a required
+ * `preconnect` namespace property (`typeof fetch`) that the advisor never
+ * uses; typing deps against the plain callable keeps fakes honest.
+ */
+export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+
 export interface AdvisorDeps {
 	env: Record<string, string>
-	fetchImpl: typeof fetch
+	fetchImpl: FetchLike
 	exists: (path: string) => boolean
 	readText: (path: string) => string | null
 	showToast: (message: string) => Promise<void>
