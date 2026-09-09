@@ -1182,6 +1182,31 @@ describe('contract: rendered config integrity (dotfiles mode)', () => {
 		expect('model' in committed.agent['sdd-explore']).toBe(false);
 		expect(committed.agent['sdd-explore'].prompt).toContain('agy-explore --input');
 	});
+	test('dotbot never re-exposes the tracked rendered config as a symlink', async () => {
+		// Regression guard (2026-09-08 mutation): ~/.config/ai-stack/opencode-router.json
+		// was a dotbot symlink to the tracked rendered file, so an in-place runtime
+		// rewrite (ad-hoc model-fix) wrote THROUGH the link into the repo. Deployment
+		// is a real copy by build.sh; the symlinks manifest must never link it again.
+		const conf = Bun.file(`${ROOT}/../../symlinks/conf.yaml`);
+		if (!(await conf.exists())) return; // partial checkout: nothing to guard
+		const active = (await conf.text())
+			.split('\n')
+			.map((l) => l.trim())
+			.filter((l) => l.length > 0 && !l.startsWith('#') && l.includes(':'));
+		const offender = active.find((l) => l.includes('opencode-router/opencode-router.json'));
+		expect(offender).toBeUndefined();
+	});
+	test('live runtime config is never a symlink resolving into this repo', () => {
+		// Machine-state check: skips silently when the runtime path does not exist
+		// (fresh machines/CI); fails when a symlink points back into the dotfiles
+		// tree, which would re-open the 2026-09-08 write-through mutation vector.
+		const runtime = `${process.env.HOME ?? homedir()}/.config/ai-stack/opencode-router.json`;
+		if (!existsSync(runtime)) return;
+		if (!lstatSync(runtime).isSymbolicLink()) return; // real copy: safe
+		const repoRoot = realpathSync(`${ROOT}/../..`);
+		const resolved = realpathSync(runtime);
+		expect(resolved.startsWith(`${repoRoot}/`)).toBe(false);
+	});
 });
 
 describe('smoke: CLI end-to-end via bun run (router bash call path), force-native, quota immutability', () => {
