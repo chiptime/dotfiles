@@ -18,10 +18,9 @@ const SEARCH_TERM = "que";
 
 /** New-client search box with aria/placeholder fallbacks for older renders. */
 const SEARCH_BOX =
-	'input#search-box-input, input[aria-label*="earch" i], input[placeholder*="earch" i"]';
-/** Any node Teams renders a timestamp into (results list items). */
-const TIMESTAMP_NODE =
-	"time, [data-testid*='timestamp' i], [aria-label*='hora' i], [aria-label*='time' i]";
+	'input#search-box-input, input[aria-label*="earch" i], input[placeholder*="earch" i]';
+/** Search results render as treegrid rows; one row per matching message. */
+const RESULTS_ROW = '[role="treegrid"] [role="row"]';
 
 export interface TeamsPageOptions {
 	/** Chromium binary the poller resolved from the Playwright cache. */
@@ -45,9 +44,22 @@ export class TeamsSearchPage implements TeamsSearchAdapter {
 	async search(): Promise<{ rawTimestamp: string }[]> {
 		const page = await this.openFilteredResults();
 		try {
-			const raw = await page.locator(TIMESTAMP_NODE).allTextContents();
-			const stamps = raw.map((text) => text.trim()).filter((text) => text !== "");
-			return stamps.map((rawTimestamp) => ({ rawTimestamp }));
+			// One search-result row per message; the author+time gridcell carries
+			// the timestamp text (no <time> elements in the search results DOM).
+			const rows = page.locator(RESULTS_ROW);
+			const count = await rows.count();
+			const out: { rawTimestamp: string }[] = [];
+			for (let i = 0; i < count; i++) {
+				const header = await rows
+					.nth(i)
+					.locator('[role="gridcell"]')
+					.first()
+					.textContent()
+					.catch(() => null);
+				const match = (header ?? "").match(/(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+				if (match) out.push({ rawTimestamp: match[1] });
+			}
+			return out;
 		} finally {
 			await page.close();
 		}
@@ -78,7 +90,8 @@ export class TeamsSearchPage implements TeamsSearchAdapter {
 		// Login gate: an unauthenticated session never renders the search box.
 		await searchBox.waitFor({ state: "visible" });
 		await searchBox.fill(SEARCH_TERM);
-		await searchBox.press("Enter");
+		// Teams re-renders the input on typing; a page-level Enter survives detachment.
+		await page.keyboard.press("Enter");
 
 		const dateFilter = page.getByRole("button", { name: /^(date|fecha)/i });
 		await dateFilter.click();
@@ -89,8 +102,11 @@ export class TeamsSearchPage implements TeamsSearchAdapter {
 
 		// Results pane must render before timestamps are read; an empty-but-
 		// rendered list is a legitimate quiet day, a missing pane is a DOM change.
-		await page.locator('[role="list"], [data-testid*="result" i]').first().waitFor({
-			state: "visible",
+		// New-client search renders results in a treegrid that starts hidden
+		// until results populate — "attached" is the reliable readiness signal,
+		// and textContent() reads hidden rows fine.
+		await page.locator('[role="list"], [role="treegrid"], [data-testid*="result" i]').first().waitFor({
+			state: "attached",
 		});
 		return page;
 	}
