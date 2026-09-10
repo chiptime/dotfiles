@@ -1,0 +1,72 @@
+# OpenSpec SDD configuration — .dotfiles
+# Created by sdd-init on 2026-09-10 (hybrid mode: OpenSpec files + Engram observations).
+schema: spec-driven
+
+context: |
+  Personal dotfiles repo (remote chiptime/dotfiles): zsh, tmux, neovim, AI tooling.
+  Convention (dotfiles-context): persistent artifacts are born in ~/.dotfiles and
+  mapped/symlinked to real paths — never the reverse.
+  In-scope nested projects: ai/opencode-router (TypeScript 7 strict on Bun 1.3.x),
+  tools/ai-quotas (Rust 2021). modules/dotly is a vendored submodule — out of SDD scope.
+  Commits: conventional commits, no AI attribution; review budget 400 changed lines per PR.
+
+strict_tdd: false
+strict_tdd_reason: |
+  No explicit workspace-level test command covers every in-scope project:
+  ai/opencode-router runs `bun test` and tools/ai-quotas runs `cargo test`
+  independently; there is no root Makefile/package.json test target. Project-local
+  commands are preserved below and MUST NOT be synthesized into one workspace
+  command. Per-change TDD is still requested when a project-local runner exists
+  (e.g. upcoming teams-to-tasks poller -> bun test).
+
+testing:
+  detected: 2026-09-10
+  closest_node_runner: "bun test (repo convention in ai/opencode-router); `node --test` on node v25.9.0 is the zero-dep fallback"
+  projects:
+    - path: ai/opencode-router
+      stack: TypeScript 7 (strict) on Bun 1.3.13
+      test_command: "cd ai/opencode-router && bun test"
+      framework: bun:test
+      coverage_command: "cd ai/opencode-router && bun test --coverage"
+      typecheck_command: "cd ai/opencode-router && bunx tsc --noEmit"
+      linter_command: ""
+      formatter_command: ""
+    - path: tools/ai-quotas
+      stack: Rust 2021 (serde, ureq, rusqlite, tiny_http)
+      test_command: "cd tools/ai-quotas && cargo test"
+      framework: cargo test (inline #[cfg(test)] units + tempfile dev-dep)
+      coverage_command: ""
+      typecheck_command: ""
+      linter_command: "cd tools/ai-quotas && cargo clippy"
+      formatter_command: "cd tools/ai-quotas && cargo fmt"
+    - path: "(planned, not yet created) teams-to-tasks poller"
+      stack: Node.js script (Playwright, persistent browser profile)
+      test_command: "bun test (repo convention — create with the change)"
+      framework: bun:test
+      coverage_command: ""
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes (dotfiles changes can break the daily-driver shell/editor)
+    - Respect the 400 changed lines per PR review budget; plan chained PRs beyond it
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Document architecture decisions with rationale
+    - Follow dotfiles-context: new persistent artifacts are born in this repo and mapped to real paths
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns of the touched project
+      - Never commit generated/runtime state (see .gitignore: .atl/, .pi, node_modules/, .playwright-mcp/)
+    tdd: false
+    test_command: "cd ai/opencode-router && bun test  # adjust per touched project; no workspace-level runner exists"
+  verify:
+    test_command: "cd ai/opencode-router && bun test  # adjust per touched project"
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
