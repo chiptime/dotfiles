@@ -14,6 +14,6 @@
 		"isolatedModules": true,
 		"verbatimModuleSyntax": false
 	},
-	"include": ["src/**/*.ts", "tests/**/*.ts"],
+	"include": ["src/**/*.ts", "tests/**/*.ts", "poller.ts"],
 	"exclude": ["node_modules"]
 }
