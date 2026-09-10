@@ -1,0 +1,15 @@
+{
+	"name": "teams-to-tasks",
+	"private": true,
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"playwright-core": "1.63.0-alpha-2026-08-31"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"typescript": "^7.0.2"
+	}
+}
