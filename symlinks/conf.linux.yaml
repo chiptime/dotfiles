@@ -10,3 +10,7 @@
     $HOME/bin/jmeter: /mnt/d/Bruno/Code/tools/jmeter/bin/jmeter
     ~/.dotfiles/shell/private-env.sh: /mnt/d/Bruno/wsl/dotfiles/.dotfiles/shell/private-env.sh
     ~/.config/containers/storage.conf: os/linux/containers/storage.conf
+    ~/.config/opencode/skills/teams-to-tasks: ai/agents/opencode/skills/teams-to-tasks
+    ~/.config/opencode/skills/notion-personal-backlog: ai/agents/opencode/skills/notion-personal-backlog
+    ~/.config/opencode/skills/dotfiles-context: ai/agents/opencode/skills/dotfiles-context
+    ~/.config/opencode/scripts/teams-to-tasks-cron.sh: ai/teams-to-tasks/cron.sh

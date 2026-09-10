@@ -1,0 +1,15 @@
+{
+  "mcp": {
+    "playwright_teams": {
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@latest",
+        "--user-data-dir",
+        "$HOME/.local/share/opencode/playwright-teams-profile"
+      ],
+      "enabled": true,
+      "type": "local"
+    }
+  }
+}
