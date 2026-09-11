@@ -1,0 +1,152 @@
+{
+  "provider": {
+    "agy": {
+      "models": {
+        "default": {
+          "name": "default"
+        },
+        "gemini-3.8-flash": {
+          "name": "gemini-3.8-flash",
+          "variants": {
+            "high": {
+              "agyModelId": "gemini-3.8-flash-high"
+            },
+            "medium": {
+              "agyModelId": "gemini-3.8-flash-medium"
+            },
+            "low": {
+              "agyModelId": "gemini-3.8-flash-low"
+            }
+          }
+        },
+        "gemini-3.7-flash": {
+          "name": "gemini-3.7-flash",
+          "variants": {
+            "high": {
+              "agyModelId": "gemini-3.7-flash-high"
+            },
+            "medium": {
+              "agyModelId": "gemini-3.7-flash-medium"
+            },
+            "low": {
+              "agyModelId": "gemini-3.7-flash-low"
+            }
+          }
+        },
+        "gemini-3.6-flash": {
+          "name": "gemini-3.6-flash",
+          "variants": {
+            "high": {
+              "agyModelId": "gemini-3.6-flash-high"
+            },
+            "medium": {
+              "agyModelId": "gemini-3.6-flash-medium"
+            },
+            "low": {
+              "agyModelId": "gemini-3.6-flash-low"
+            }
+          }
+        },
+        "gemini-3.1-pro": {
+          "name": "gemini-3.1-pro",
+          "variants": {
+            "high": {
+              "agyModelId": "gemini-3.1-pro-high"
+            },
+            "low": {
+              "agyModelId": "gemini-3.1-pro-low"
+            }
+          }
+        },
+        "claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6 (Thinking)"
+        },
+        "claude-opus-4-6-thinking": {
+          "name": "Claude Opus 4.6 (Thinking)"
+        },
+        "gpt-oss-120b": {
+          "name": "gpt-oss-120b",
+          "variants": {
+            "medium": {
+              "agyModelId": "gpt-oss-120b-medium"
+            }
+          }
+        }
+      },
+      "options": {
+        "models": {
+          "default": {
+            "name": "default"
+          },
+          "gemini-3.8-flash": {
+            "name": "gemini-3.8-flash",
+            "variants": {
+              "high": {
+                "agyModelId": "gemini-3.8-flash-high"
+              },
+              "medium": {
+                "agyModelId": "gemini-3.8-flash-medium"
+              },
+              "low": {
+                "agyModelId": "gemini-3.8-flash-low"
+              }
+            }
+          },
+          "gemini-3.7-flash": {
+            "name": "gemini-3.7-flash",
+            "variants": {
+              "high": {
+                "agyModelId": "gemini-3.7-flash-high"
+              },
+              "medium": {
+                "agyModelId": "gemini-3.7-flash-medium"
+              },
+              "low": {
+                "agyModelId": "gemini-3.7-flash-low"
+              }
+            }
+          },
+          "gemini-3.6-flash": {
+            "name": "gemini-3.6-flash",
+            "variants": {
+              "high": {
+                "agyModelId": "gemini-3.6-flash-high"
+              },
+              "medium": {
+                "agyModelId": "gemini-3.6-flash-medium"
+              },
+              "low": {
+                "agyModelId": "gemini-3.6-flash-low"
+              }
+            }
+          },
+          "gemini-3.1-pro": {
+            "name": "gemini-3.1-pro",
+            "variants": {
+              "high": {
+                "agyModelId": "gemini-3.1-pro-high"
+              },
+              "low": {
+                "agyModelId": "gemini-3.1-pro-low"
+              }
+            }
+          },
+          "claude-sonnet-4-6": {
+            "name": "Claude Sonnet 4.6 (Thinking)"
+          },
+          "claude-opus-4-6-thinking": {
+            "name": "Claude Opus 4.6 (Thinking)"
+          },
+          "gpt-oss-120b": {
+            "name": "gpt-oss-120b",
+            "variants": {
+              "medium": {
+                "agyModelId": "gpt-oss-120b-medium"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

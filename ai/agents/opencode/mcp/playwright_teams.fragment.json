@@ -6,7 +6,9 @@
         "-y",
         "@playwright/mcp@latest",
         "--user-data-dir",
-        "$HOME/.local/share/opencode/playwright-teams-profile"
+        "$HOME/.local/share/opencode/playwright-teams-profile",
+        "--executable-path",
+        "$HOME/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome"
       ],
       "enabled": true,
       "type": "local"
