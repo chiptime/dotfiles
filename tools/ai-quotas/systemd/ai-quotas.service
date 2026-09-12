@@ -5,6 +5,7 @@ Documentation=file://%h/.dotfiles/tools/ai-quotas/README.md
 [Service]
 ExecStart=%h/.local/bin/ai-quotas serve
 Environment=AI_QUOTAS_PORT=47623
+Environment=AI_QUOTAS_HOST=0.0.0.0
 Restart=on-failure
 RestartSec=3
 
