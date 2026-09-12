@@ -46,7 +46,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 /// unidentified app (silently dropped, absent from notification settings).
 const AUMID: &str = "Bruno.aiquotas.tray";
 const API_HOST_PORT: &str = "127.0.0.1:47623";
-const DASHBOARD_URL: &str = "http://localhost:47623";
+const DASHBOARD_URL: &str = "http://127.0.0.1:47623";
 /// Background poll cadence. The fetch runs on its OWN thread so a slow or
 /// dead backend never freezes the UI message loop.
 const POLL_SECS: u64 = 120;
