@@ -55,7 +55,14 @@ fn run_serve(rest: Vec<String>) -> i32 {
     });
     let status = Arc::new(crate::status::StatusPoller::new());
     let costs = Arc::new(crate::costs::CostScanner::from_env());
-    let bind = format!("127.0.0.1:{port}");
+    // Bind host defaults to loopback; set AI_QUOTAS_HOST=0.0.0.0 to expose
+    // the dashboard to the LAN (pair with a firewall rule).
+    let host = std::env::var("AI_QUOTAS_HOST")
+        .ok()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let bind = format!("{host}:{port}");
     match server::serve(&bind, reader::state_dir(), pull, status, costs) {
         Ok(()) => 0,
         Err(e) => {

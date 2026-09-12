@@ -32,7 +32,8 @@ One JSON file per record in the state dir (e.g. `claude.json`; extra windows may
 | Variable | Default | Meaning |
 |---|---|---|
 | `AI_QUOTAS_STATE_DIR` | `$XDG_STATE_HOME/ai-quotas` else `~/.local/state/ai-quotas` | Record file directory. |
-| `AI_QUOTAS_PORT` | `47623` | Port for `serve` (binds 127.0.0.1 only). |
+| `AI_QUOTAS_PORT` | `47623` | Port for `serve`. |
+| `AI_QUOTAS_HOST` | `127.0.0.1` | Bind address for `serve`. Set to `0.0.0.0` to expose the dashboard to the LAN (add a firewall rule for the port). |
 | `CLAUDE_ACCESS_TOKEN` | unset | Claude OAuth token; when unset, falls back to `~/.claude/.credentials.json`. |
 | `CHATGPT_ACCESS_TOKEN` / `CODEX_ACCESS_TOKEN` | unset | ChatGPT / Codex access token; when unset, falls back to `~/.codex/auth.json`. |
 | `OPENCODE_API_KEY` / `OPENCODE_GO_API_KEY` | unset | OpenCode Go API key; when unset, falls back to `~/.local/share/opencode/auth.json`. |
