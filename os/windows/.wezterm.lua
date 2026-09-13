@@ -115,18 +115,16 @@ wezterm.on('gui-startup', function(cmd)
       -- make_2x2(SIS, { get_oc_cmd(1), get_oc_cmd(2), get_oc_cmd(3), get_oc_cmd(4) }, "SIS")
 
       make_2x2(CP, {
-        OC_WEB .. ' --hostname 0.0.0.0 --port 4096',
-        'bun run scripts/mobile-proxy.ts',
+        'htop',
+        'cd ~ && agy',
         'bun run scripts/copilot-backend.ts',
         'gentle-ai',
       }, "AI Tools")
 
       make_2x1(VC, {
-         'htop',
-         'cd ~ && agy',
+        './deploy_electron_to_windows.sh',
+        './run_dev.sh',
         --  'claude',
-         './deploy_electron_to_windows.sh',
-         './run_dev.sh'
     }, "VC Windows Deploy")
 
       -- 3. Cerrar la pestaña default inicial enviando un 'exit' para dejar solo nuestras 7 pestañas
