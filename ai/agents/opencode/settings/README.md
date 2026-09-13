@@ -6,9 +6,54 @@ Fuente de verdad, dentro de este repo, para las claves **top-level** de
 Cada fichero `*.fragment.json` es un objeto JSON parcial que se fusiona dentro de la
 configuración real mediante `jq`. El fragmento del repo **siempre gana**.
 
-| Fragmento | Clave que fija | Para qué |
+| Fragmento | Claves que fija | Para qué |
 | --- | --- | --- |
-| `small_model.fragment.json` | `small_model` | Fija el modelo usado en tareas auxiliares (generación de títulos). Sin esta clave, opencode usa el modelo de la sesión: con el proveedor `agy` eso lanza un proceso de la CLI y quema una conversación desechable en cada título. |
+| `agy-models.fragment.json` | `provider.agy.models` + `provider.agy.options.models` | Catálogo agy materializado (generado — no editar a mano). opencode no consulta el hook `provider.models` del plugin para providers npm, así que el picker y el runtime necesitan esto en config. Regenerable desde `agy models`. |
+
+## Principio agnóstico: el repo transporta mecanismo, no valores
+
+Los fragmentos del repo **no fijan modelos concretos de terceros** (muse-spark,
+glm-flash, tu plan de Zen...): otros usuarios de este repo no tienen los mismos
+proveedores ni credenciales. Lo único universal aquí es `agy` — y ni aún eso es
+obligatorio para las claves de preferencia.
+
+Los **valores personales** (qué modelo concreto usas para títulos, resúmenes o
+compactación) viven en el **fragmento local de la máquina**:
+
+```
+~/.config/opencode/settings.local.fragment.json
+```
+
+Ese fichero está FUERA del repo (mismo patrón que `shell/private-env.sh` para
+secretos) y el instalador lo fusiona EL ÚLTIMO: la máquina gana sobre el repo,
+el repo gana sobre la config viva. Ejemplo:
+
+```json
+{
+  "small_model": "opencode/muse-spark-1.3-contributor-free",
+  "agent": {
+    "summary":    { "model": "opencode/muse-spark-1.3-contributor-free" },
+    "compaction": { "model": "opencode/muse-spark-1.3-contributor-free" }
+  }
+}
+```
+
+### Opción "todo mediante agy"
+
+Si prefieres que TODAS las tareas auxiliares vayan por agy (válido para
+cualquier usuario del bridge, y con el store v2 ya no hay carrera de keys):
+
+```json
+{ "small_model": "agy/default" }
+```
+
+Coste: un spawn de proceso CLI y una conversación de agy por título/resumen.
+Decisión tuya; el repo no opina.
+
+### Sin pin, ¿qué pasa?
+
+Sin `small_model`, opencode usa el modelo de la sesión para títulos — si la
+sesión es agy, el título también (spawn + conversación desechable por título).
 
 ## Por qué no se puede symlinkear el `opencode.json` completo
 

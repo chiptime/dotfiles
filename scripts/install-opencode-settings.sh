@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Instalador idempotente de ajustes top-level de opencode.
 # Fusiona todos los fragmentos de ai/agents/opencode/settings/ dentro de
-# ~/.config/opencode/opencode.json. El repo siempre gana.
+# ~/.config/opencode/opencode.json. El repo siempre gana sobre la config
+# viva; el fragmento LOCAL de la máquina (settings.local.fragment.json,
+# fuera del repo: valores personales como modelos concretos) gana sobre el
+# repo. Así el repo transporta MECANISMO, nunca valores de un proveedor que
+# otros usuarios no tienen.
 # Safe to re-run. No ejecuta dotbot ni gentle-ai ni opencode.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SETTINGS_DIR="$REPO/ai/agents/opencode/settings"
+LOCAL_FRAGMENT="$HOME/.config/opencode/settings.local.fragment.json"
 CFG="$HOME/.config/opencode/opencode.json"
 
 echo "[1/5] Dependencias y prerrequisitos"
@@ -31,12 +36,15 @@ fi
 for f in "${FRAGMENTS[@]}"; do
   echo "  - ${f#"$REPO"/}"
 done
+if [ -f "$LOCAL_FRAGMENT" ]; then
+  echo "  - (local) settings.local.fragment.json — máquina; gana sobre el repo"
+fi
 
 # Directorio temporal junto al destino: el mv final es atómico (mismo sistema de ficheros).
 WORK="$(mktemp -d "$(dirname "$CFG")/.opencode-settings.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "[3/5] Fusión (fragmento del repo prioritario)"
+echo "[3/5] Fusión (repo prioritario sobre config viva; local prioritario sobre repo)"
 MERGED="$WORK/merged.json"
 cp "$CFG" "$MERGED"
 i=0
@@ -50,6 +58,14 @@ for f in "${FRAGMENTS[@]}"; do
   jq -s '.[0] * .[1]' "$MERGED" "$EXPANDED" > "$WORK/step.json"
   mv "$WORK/step.json" "$MERGED"
 done
+if [ -f "$LOCAL_FRAGMENT" ]; then
+  jq empty "$LOCAL_FRAGMENT" 2>/dev/null || { echo "FALLO: fragmento local inválido: $LOCAL_FRAGMENT"; exit 1; }
+  jq -e 'type == "object"' "$LOCAL_FRAGMENT" >/dev/null 2>&1 \
+    || { echo "FALLO: el fragmento local debe ser un objeto JSON"; exit 1; }
+  cp "$LOCAL_FRAGMENT" "$WORK/fragment-local.json"
+  jq -s '.[0] * .[1]' "$MERGED" "$WORK/fragment-local.json" > "$WORK/step.json"
+  mv "$WORK/step.json" "$MERGED"
+fi
 
 jq empty "$MERGED" 2>/dev/null || { echo "FALLO: el resultado fusionado no es JSON válido; se aborta sin tocar $CFG"; exit 1; }
 
