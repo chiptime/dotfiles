@@ -1,0 +1,136 @@
+# Global project annotations — human-maintained layer for scripts/projects-dashboard.sh
+#
+# One block per repo (basename). Keys: scope, status, desc, next.
+# status: active | proposal | paused | closed | cold
+# The script auto-discovers repos under ~/Code; anything here enriches the snapshot,
+# anything discovered but absent shows up under "Unclassified".
+
+# ---- Personal ----
+
+dotfiles:
+  scope: personal
+  status: active
+  desc: Infra personal — skills OpenCode, notificaciones ntfy, teams-to-tasks, tools
+  next: notificaciones móviles siguen fallando; commitear staged de teams-to-tasks
+
+agy-bridge:
+  scope: personal
+  status: active
+  desc: Bridge agy↔opencode (npm agy-bridge-opencode 0.3.0 publicado)
+  next: push pi-adapter-v02 (6 commits sin push) + README/CHANGELOG del release
+
+compare-prices:
+  scope: personal
+  status: active
+  desc: Comparador de precios + plataforma móvil (mobile-proxy, ntfy, aprobaciones 1-tap)
+  next: estabilizar proxy móvil; decidir propuestas F2 de docs
+
+vps:
+  scope: personal
+  status: active
+  desc: VPS + antivirus ClamAV + dashboard ai-quotas
+  next: estable, solo health-checks automáticos
+
+engram-sync:
+  scope: personal
+  status: active
+  desc: Utilidad de sincronización de memoria Engram
+
+ai-stack:
+  scope: personal
+  status: proposal
+  desc: Automatizaciones del VPS (jobs, opencode-delegate)
+  next: 2 propuestas SDD sin aplicar (payloads-v3-cerebro, openclaw-notion-mcp) — aplicar o descartar
+
+voice-assistant:
+  scope: personal
+  status: paused
+  desc: Asistente de voz (Electron + Whisper, podman)
+  next: falta test E2E manual; 13 ficheros dirty
+
+busqueda-vacaciones:
+  scope: personal
+  status: paused
+  desc: Buscador de vacaciones (Airbnb/Booking), publicado en GitHub privado
+  next: errores tsc preexistentes + 2 tests de red rotos
+
+odata-batch:
+  scope: personal
+  status: paused
+  desc: Librería npm OData V2 batch — v1.3.0 completa y archivada
+  next: 8 ficheros dirty — ¿publicar?
+
+llm-hub:
+  scope: personal
+  status: paused
+  desc: Hub de LLMs
+
+time-tracker:
+  scope: personal
+  status: cold
+  desc: Legacy 2024
+
+lambda-test:
+  scope: personal
+  status: cold
+  desc: Legacy 2023
+
+ts-sap-cap-ddd-example:
+  scope: personal
+  status: cold
+  desc: Ejemplo SAP CAP DDD, 2023
+
+ai_workshop_dist_20251124-161644:
+  scope: personal
+  status: cold
+  desc: Taller IA nov-2025
+
+antigravity-awesome-skills:
+  scope: personal
+  status: cold
+  desc: Fork de skills Antigravity
+
+wsl-notify-send:
+  scope: personal
+  status: cold
+  desc: Binario instalado, no repo activo
+
+# ---- Work (Clece SIS / Stratesys) ----
+
+entities-portal:
+  scope: work
+  status: closed
+  desc: Portal de entidades (Clece SIS) — batería de tests verde
+  next: cerrado 09/09 tras completar programa de cobertura
+
+associations:
+  scope: work
+  status: closed
+  desc: App asociaciones (Clece) — incidente prod resuelto
+  next: cerrado 19/08, estable en producción
+
+entities-portal-ep-comments:
+  scope: work
+  status: proposal
+  desc: Workspace dual (frontend+backend) para ep-comments
+  next: workspace listo 21/08, sin arrancar
+
+operational-centers:
+  scope: work
+  status: cold
+  desc: Centros operativos (Clece SIS backend)
+
+sis:
+  scope: work
+  status: cold
+  desc: Monorepo Clece SIS (recruiting front+back)
+
+recruiting-backend:
+  scope: work
+  status: cold
+  desc: Backend reclutamiento (SAP CAP)
+
+recruiting-frontend:
+  scope: work
+  status: cold
+  desc: Frontend reclutamiento (Angular) — último trabajo harness emails 13/08
