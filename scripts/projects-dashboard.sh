@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # projects-dashboard — global project tracker
 #
 # Merges two sources of truth into one Markdown snapshot:
@@ -51,6 +52,9 @@ while IFS= read -r gitdir; do
 done < <(find "$CODE_ROOT" -maxdepth 6 -type d -name .git \
   -not -path "*/node_modules/*" \
   -not -path "*sis-app-worktrees*" \
+  -not -path "*apps-workspaces*" \
+  -not -path "*/.onboard-capture/*" \
+  -not -path "*__MACOSX*" \
   -not -path "*/.cache/*" 2>/dev/null | sort)
 
 # ---------------------------------------------------------------------------
