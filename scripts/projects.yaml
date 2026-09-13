@@ -15,7 +15,7 @@ dotfiles:
   scope: personal
   status: active
   desc: Infra personal — skills OpenCode, notificaciones ntfy, teams-to-tasks, tools
-  next: notificaciones ntfy intermitentes en el móvil (batería/Doze de Android); documentar mapping ~/bin/projects en conf.linux.yaml
+  next: notificaciones ntfy intermitentes en el móvil (batería/Doze de Android); documentar mapping ~/bin/projects en conf.linux.yaml; skill openclaw pc-eyes creada (ai/agents/openclaw/skills/pc-eyes) — desplegar SKILL.md al workspace VPS, emparejar nodo WSL y sesión de enseñanza
 
 agy-bridge:
   scope: personal
@@ -41,9 +41,8 @@ engram-sync:
 
 ai-stack:
   scope: personal
-  status: proposal
-  desc: Automatizaciones del VPS (jobs, opencode-delegate)
-  next: 2 propuestas SDD sin aplicar (payloads-v3-cerebro, openclaw-notion-mcp) — aplicar o descartar
+  status: active
+  desc: Automatizaciones del VPS (jobs, opencode-delegate) — 2 ciclos SDD cerrados y archivados (payloads-v3-cerebro 18/08, openclaw-notion-mcp-stdio 19/08)
 
 voice-assistant:
   scope: personal
@@ -65,8 +64,8 @@ odata-batch:
 
 llm-hub:
   scope: personal
-  status: paused
-  desc: Hub de LLMs
+  status: active
+  desc: Hub para levantar modelos locales — vivo, uso puntual
 
 # ---- Personal: learning / one-offs ----
 
@@ -137,18 +136,19 @@ tmp-compare:
 
 time-tracker:
   scope: personal
-  status: cold
-  desc: Legacy 2024
+  status: paused
+  desc: Mi antigua app de tareas (2024)
+  next: decidir si se revive o se sustituye por una open-source que la cubra mejor
 
 lambda-test:
   scope: personal
   status: cold
-  desc: Legacy 2023
+  desc: ARCHIVADO (13/09) — test lambda, 2023
 
 ts-sap-cap-ddd-example:
   scope: personal
   status: cold
-  desc: Ejemplo SAP CAP DDD, 2023
+  desc: ARCHIVADO (13/09) — ejemplo de estudio SAP CAP DDD, 2023
 
 antigravity-awesome-skills:
   scope: personal
@@ -183,17 +183,19 @@ sis:
 HyperMonitor:
   scope: work
   status: cold
-  desc: Products — HyperMonitor, actividad ene-2026, 8 dirty
+  desc: Products — producto interno; sin desarrollo desde ene-2026, 8 dirty
 
 backend:
   scope: work
-  status: cold
-  desc: Products/Planificador backend — WIP refactoring mar-2025
+  status: paused
+  desc: Products/Planificador backend — evolución viva del planificador de Ahorramas; WIP refactoring mar-2025
+  next: PARK INDEFINIDO (13/09) — si revive, retomar rama refactoring y decidir el WIP
 
 frontend:
   scope: work
-  status: cold
-  desc: Products/Planificador frontend — WIP refactoring mar-2025, 95 dirty
+  status: paused
+  desc: Products/Planificador frontend — evolución viva del planificador de Ahorramas; WIP refactoring mar-2025
+  next: PARK INDEFINIDO (13/09) — si revive, retomar rama refactoring y decidir el WIP
 
 str06-bh-mid:
   scope: work
@@ -205,26 +207,26 @@ cap-nodejs-angular-skeleton:
   status: cold
   desc: Products — skeleton de referencia, 2023
 
-# Ahorramas
+# Ahorramas — superado por el proyecto interno Planificador de horarios
 ahorramas:
   scope: work
   status: cold
-  desc: Ahorramas — lógica, 2022, 111 dirty
+  desc: Ahorramas — lógica, 2022, 111 dirty · superado por Planificador de horarios
 
 ahorramas_shop:
   scope: work
   status: cold
-  desc: Ahorramas shop, 2022, 110 dirty
+  desc: Ahorramas shop, 2022, 110 dirty · superado por Planificador de horarios
 
 movimiento-de-tiendas:
   scope: work
   status: cold
-  desc: Ahorramas — HEAD ROTO (clone corrupto, bad object HEAD)
+  desc: Ahorramas — HEAD ROTO (clone corrupto) · superado por Planificador de horarios
 
 planificador-de-horarios:
   scope: work
   status: cold
-  desc: Ahorramas — planificador, 2023, 94 dirty
+  desc: Ahorramas — planificador original, 2023, 94 dirty · superado por Products/Planificador (backend+frontend)
 
 # Banco Galicia
 benefits-portal-backend:
