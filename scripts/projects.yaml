@@ -2,8 +2,12 @@
 #
 # One block per repo (basename). Keys: scope, status, desc, next.
 # status: active | proposal | paused | closed | cold
-# The script auto-discovers repos under ~/Code; anything here enriches the snapshot,
-# anything discovered but absent shows up under "Unclassified".
+#
+# CONVENTION (session-close): after finishing meaningful work on a project,
+# the agent updates that project's status/desc/next here and reruns `projects`.
+# Bruno only edits this file for scope decisions (activate/pause/close/triage).
+# Repos discovered by the sweep but absent here show up under "Unclassified".
+# Never put secrets in this file.
 
 # ---- Personal ----
 
@@ -11,7 +15,7 @@ dotfiles:
   scope: personal
   status: active
   desc: Infra personal — skills OpenCode, notificaciones ntfy, teams-to-tasks, tools
-  next: notificaciones móviles siguen fallando; commitear staged de teams-to-tasks
+  next: notificaciones móviles siguen fallando; añadir mapping de ~/bin/projects a conf.linux.yaml
 
 agy-bridge:
   scope: personal
@@ -22,7 +26,7 @@ agy-bridge:
 compare-prices:
   scope: personal
   status: active
-  desc: Comparador de precios + plataforma móvil (mobile-proxy, ntfy, aprobaciones 1-tap)
+  desc: Comparador de precios + plataforma móvil (mobile-proxy, ntfy, aprobaciones 1-tap) — vive en personal/hungry/
   next: estabilizar proxy móvil; decidir propuestas F2 de docs
 
 vps:
@@ -65,6 +69,73 @@ llm-hub:
   status: paused
   desc: Hub de LLMs
 
+# ---- Personal: learning / one-offs ----
+
+ai_workshop_dist_20251124-161644:
+  scope: personal
+  status: cold
+  desc: Taller IA nov-2025 (contiene exercises-done y current-exercise)
+
+current-exercise:
+  scope: personal
+  status: cold
+  desc: ai_workshop — ejercicio en curso (dic-2025)
+
+codely-legacy:
+  scope: personal
+  status: cold
+  desc: ai_workshop — ejercicio Codely
+
+koddely:
+  scope: personal
+  status: cold
+  desc: ai_workshop — ejercicio Codely
+
+01-analyze_logs-20251204-101847:
+  scope: personal
+  status: cold
+  desc: ai_workshop — ejercicio done
+
+01-analyze_logs-20251204-105506:
+  scope: personal
+  status: cold
+  desc: ai_workshop — ejercicio done
+
+02-fix_trucated_courses_bug-20251204-120952:
+  scope: personal
+  status: cold
+  desc: ai_workshop — ejercicio done
+
+03-review_course_feature-20251204-140850:
+  scope: personal
+  status: cold
+  desc: ai_workshop — ejercicio done
+
+04-suggested_courses_feature-20251204-161754:
+  scope: personal
+  status: cold
+  desc: ai_workshop — ejercicio done
+
+san-valentin:
+  scope: personal
+  status: cold
+  desc: App San Valentín 2025 (bajo personal/amore/)
+
+valentin-2026:
+  scope: personal
+  status: cold
+  desc: App San Valentín 2026 (bajo personal/amore/)
+
+adopta_perritos:
+  scope: personal
+  status: cold
+  desc: App tutorial (bajo personal/lucia/)
+
+tmp-compare:
+  scope: personal
+  status: cold
+  desc: Scratch bajo personal/hungry/ — candidata a borrar
+
 time-tracker:
   scope: personal
   status: cold
@@ -80,11 +151,6 @@ ts-sap-cap-ddd-example:
   status: cold
   desc: Ejemplo SAP CAP DDD, 2023
 
-ai_workshop_dist_20251124-161644:
-  scope: personal
-  status: cold
-  desc: Taller IA nov-2025
-
 antigravity-awesome-skills:
   scope: personal
   status: cold
@@ -95,42 +161,90 @@ wsl-notify-send:
   status: cold
   desc: Binario instalado, no repo activo
 
-# ---- Work (Clece SIS / Stratesys) ----
+# ---- Work (Stratesys / Clece SIS) ----
 
-entities-portal:
+recruiting-frontend:
   scope: work
-  status: closed
-  desc: Portal de entidades (Clece SIS) — batería de tests verde
-  next: cerrado 09/09 tras completar programa de cobertura
+  status: active
+  desc: Frontend Clece (Angular) — streams cerrados aquí dentro: associations hotfix 19/08, entities-portal batería verde 09/09
+  next: commits recientes 11/09 en deploy-develop, 7 dirty — revisar qué quedó a medio hacer
 
-associations:
+recruiting-backend:
   scope: work
-  status: closed
-  desc: App asociaciones (Clece) — incidente prod resuelto
-  next: cerrado 19/08, estable en producción
-
-entities-portal-ep-comments:
-  scope: work
-  status: proposal
-  desc: Workspace dual (frontend+backend) para ep-comments
-  next: workspace listo 21/08, sin arrancar
-
-operational-centers:
-  scope: work
-  status: cold
-  desc: Centros operativos (Clece SIS backend)
+  status: active
+  desc: Backend Clece (SAP CAP) — aquí viven los streams operational-centers y associations
+  next: commit 11/09 en deploy-develop
 
 sis:
   scope: work
   status: cold
-  desc: Monorepo Clece SIS (recruiting front+back)
+  desc: Monorepo Clece SIS (front+back) — pendiente arrancar: ep-comments (workspace listo 21/08)
 
-recruiting-backend:
+# Products
+HyperMonitor:
   scope: work
   status: cold
-  desc: Backend reclutamiento (SAP CAP)
+  desc: Products — HyperMonitor, actividad ene-2026, 8 dirty
 
-recruiting-frontend:
+backend:
   scope: work
   status: cold
-  desc: Frontend reclutamiento (Angular) — último trabajo harness emails 13/08
+  desc: Products/Planificador backend — WIP refactoring mar-2025
+
+frontend:
+  scope: work
+  status: cold
+  desc: Products/Planificador frontend — WIP refactoring mar-2025, 95 dirty
+
+str06-bh-mid:
+  scope: work
+  status: cold
+  desc: Products/BeHumans, 2019
+
+cap-nodejs-angular-skeleton:
+  scope: work
+  status: cold
+  desc: Products — skeleton de referencia, 2023
+
+# Ahorramas
+ahorramas:
+  scope: work
+  status: cold
+  desc: Ahorramas — lógica, 2022, 111 dirty
+
+ahorramas_shop:
+  scope: work
+  status: cold
+  desc: Ahorramas shop, 2022, 110 dirty
+
+movimiento-de-tiendas:
+  scope: work
+  status: cold
+  desc: Ahorramas — HEAD ROTO (clone corrupto, bad object HEAD)
+
+planificador-de-horarios:
+  scope: work
+  status: cold
+  desc: Ahorramas — planificador, 2023, 94 dirty
+
+# Banco Galicia
+benefits-portal-backend:
+  scope: work
+  status: cold
+  desc: Banco_Galicia — checkout sin commits locales
+
+# GAM / ZAM
+gam_sat_app:
+  scope: work
+  status: cold
+  desc: GAM — checkout sin commits locales
+
+zam_etm_app:
+  scope: work
+  status: cold
+  desc: GAM/ZAM — checkout sin commits locales
+
+zam_etm_app_capacitor:
+  scope: work
+  status: cold
+  desc: GAM/ZAM — wrapper capacitor, sin commits locales
