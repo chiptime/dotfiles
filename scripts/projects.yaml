@@ -15,13 +15,12 @@ dotfiles:
   scope: personal
   status: active
   desc: Infra personal — skills OpenCode, notificaciones ntfy, teams-to-tasks, tools
-  next: notificaciones móviles siguen fallando; añadir mapping de ~/bin/projects a conf.linux.yaml
+  next: notificaciones ntfy intermitentes en el móvil (batería/Doze de Android); documentar mapping ~/bin/projects en conf.linux.yaml
 
 agy-bridge:
   scope: personal
   status: active
-  desc: Bridge agy↔opencode (npm agy-bridge-opencode 0.3.0 publicado)
-  next: push pi-adapter-v02 (6 commits sin push) + README/CHANGELOG del release
+  desc: Bridge agy↔opencode — ciclo pi-adapter-v02 cerrado y publicado en npm (0.2/0.3)
 
 compare-prices:
   scope: personal
