@@ -86,6 +86,14 @@ export function normalizeTimestamp(raw: string, now: Date): Date | null {
 		return atLocalTime(now, Number(timeOnly[1]), Number(timeOnly[2]));
 	}
 
+	// English 12-hour form rendered by the search UI ("9:30 AM", "12:15 PM").
+	const meridiem = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(trimmed);
+	if (meridiem) {
+		let hours = Number(meridiem[1]) % 12;
+		if (meridiem[3].toUpperCase() === "PM") hours += 12;
+		return atLocalTime(now, hours, Number(meridiem[2]));
+	}
+
 	const yesterday = /^ayer (\d{1,2}):(\d{2})$/i.exec(trimmed);
 	if (yesterday) {
 		const d = atLocalTime(now, Number(yesterday[1]), Number(yesterday[2]));

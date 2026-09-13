@@ -104,6 +104,14 @@ describe("normalizeTimestamp", () => {
 		expect([t?.getDate(), t?.getHours(), t?.getMinutes()]).toEqual([9, 9, 15]);
 	});
 
+	test("12-hour `H:MM AM|PM` resolves to today at that local time", () => {
+		expect(normalizeTimestamp("9:30 AM", now)?.getHours()).toBe(9);
+		expect(normalizeTimestamp("9:30 PM", now)?.getHours()).toBe(21);
+		expect(normalizeTimestamp("12:15 AM", now)?.getHours()).toBe(0);
+		expect(normalizeTimestamp("12:15 PM", now)?.getHours()).toBe(12);
+		expect(normalizeTimestamp("9:30 AM", now)?.getMinutes()).toBe(30);
+	});
+
 	test("unrecognized form is null (DOM change signal)", () => {
 		expect(normalizeTimestamp("martes", now)).toBeNull();
 		expect(normalizeTimestamp("", now)).toBeNull();

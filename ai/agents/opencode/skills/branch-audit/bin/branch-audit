@@ -1,0 +1,247 @@
+#!/usr/bin/env node
+/**
+ * branch-audit — audit local git branches.
+ *
+ * Lists local branches with last-commit metadata and a merged-status matrix
+ * against configurable base targets (which branches are already merged into
+ * each target).
+ *
+ * Zero runtime dependencies. Requires Node >= 18 and git on PATH.
+ *
+ * Usage:
+ *   branch-audit [--targets <a,b,c>] [--json] [--help]
+ */
+
+'use strict';
+
+const { spawnSync } = require('node:child_process');
+const path = require('node:path');
+
+const DEFAULT_TARGETS = ['master', 'main', 'feature/entities-portal/base', 'deploy-develop'];
+const TOTAL_WIDTH = 100;
+
+// One for-each-ref call collects everything. NUL is the field separator so
+// subjects with spaces/unicode stay intact; each ref renders as one line
+// (no field can contain a newline).
+// Note: git has no "up:ahead"/"up:behind" atoms; ahead/behind come inside
+// %(upstream:track), rendered as "[ahead N, behind M]" (empty when in sync).
+const FOR_EACH_REF_FORMAT = [
+  '%(refname:short)',            // 0 branch name
+  '%(objectname)',               // 1 commit sha
+  '%(committerdate:iso-strict)', // 2 ISO date
+  '%(committerdate:relative)',   // 3 human date
+  '%(authorname)',               // 4 author
+  '%(contents:subject)',         // 5 subject
+  '%(upstream:short)',           // 6 upstream (empty when none)
+  '%(upstream:track)',           // 7 "[ahead N, behind M]"/"[gone]"/""
+  '%(HEAD)',                     // 8 '*' when checked out
+].join('%00');
+
+function fail(message) {
+  process.stderr.write(`branch-audit: ${message}\n`);
+  process.exit(1);
+}
+
+function runGit(args) {
+  const res = spawnSync('git', args, { encoding: 'utf8' });
+  if (res.error) {
+    fail(`unable to run git (${res.error.message}). Is git installed and on PATH?`);
+  }
+  return res;
+}
+
+function toInt(value) {
+  const n = Number.parseInt(value, 10);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+function truncate(text, maxWidth) {
+  if (text.length <= maxWidth) return text;
+  if (maxWidth <= 1) return text.slice(0, maxWidth);
+  return text.slice(0, maxWidth - 1) + '…';
+}
+
+function parseArgs(argv) {
+  const opts = { json: false, help: false, targets: null };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--json') {
+      opts.json = true;
+    } else if (arg === '--help' || arg === '-h') {
+      opts.help = true;
+    } else if (arg === '--targets') {
+      const value = argv[++i];
+      if (value === undefined) fail('--targets requires a comma-separated list');
+      opts.targets = value;
+    } else {
+      fail(`unknown argument: ${arg} (try --help)`);
+    }
+  }
+  return opts;
+}
+
+function printHelp() {
+  process.stdout.write(`branch-audit — audit local git branches and their merged status
+
+Usage:
+  branch-audit [--targets <a,b,c>] [--json]
+
+Options:
+  --targets <a,b,c>  Comma-separated base targets. Default:
+                     ${DEFAULT_TARGETS.join(',')}
+                     (targets missing from the repo are skipped).
+  --json             Emit machine-readable JSON instead of a table.
+  --help, -h         Show this help.
+
+Exit codes:
+  0  success
+  1  not inside a git repository or invalid usage
+`);
+}
+
+function collectBranches() {
+  const res = runGit([
+    'for-each-ref', 'refs/heads',
+    '--sort=-committerdate',
+    `--format=${FOR_EACH_REF_FORMAT}`,
+  ]);
+  if (res.status !== 0) {
+    fail(`git for-each-ref failed: ${(res.stderr || '').trim()}`);
+  }
+  return res.stdout
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const f = line.split('\0');
+      if (f.length < 9) return null; // defensive; should not happen
+      return {
+        name: f[0],
+        sha: f[1],
+        date: f[2],
+        dateRelative: f[3],
+        author: f[4],
+        subject: f[5],
+        upstream: f[6] === '' ? null : f[6],
+        ahead: trackField(f[7], 'ahead'),
+        behind: trackField(f[7], 'behind'),
+        isCurrent: f[8].trim() === '*',
+      };
+    })
+    .filter(Boolean);
+}
+
+// Extract one count from a %(upstream:track) value like "[ahead 1, behind 2]".
+// Empty track (in sync or no upstream) and "[gone]" both yield 0.
+function trackField(track, kind) {
+  const match = track.match(new RegExp(`${kind}\\s+(\\d+)`));
+  return match ? toInt(match[1]) : 0;
+}
+
+// A target exists if it is one of the repo's local branches (already known
+// from the single for-each-ref call — no extra git calls needed).
+function resolveTargets(requested, branchNames) {
+  const list = (requested === null ? DEFAULT_TARGETS : requested.split(','))
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  const unique = [...new Set(list)];
+  if (unique.length === 0) fail('no valid targets provided to --targets');
+  return {
+    existing: unique.filter((t) => branchNames.has(t)),
+    missing: unique.filter((t) => !branchNames.has(t)),
+  };
+}
+
+// Exit 0 from merge-base --is-ancestor means branch is merged into target.
+// A branch that is itself a target is an ancestor of itself -> true.
+function buildMatrix(branches, targets) {
+  for (const branch of branches) {
+    branch.merged = {};
+    for (const target of targets) {
+      const res = runGit(['merge-base', '--is-ancestor', branch.name, target]);
+      branch.merged[target] = res.status === 0;
+    }
+  }
+}
+
+function renderTable(branches, targets, missing) {
+  const rows = branches.map((b) => ({ ...b, label: (b.isCurrent ? '*' : ' ') + b.name }));
+  const branchW = Math.max(6, ...rows.map((r) => r.label.length));
+  const dateW = Math.max(11, ...rows.map((r) => r.dateRelative.length));
+  const targetsW = targets.reduce((acc, t) => acc + t.length, 0) + Math.max(0, targets.length - 1) * 2;
+  // Keep the whole line around ~100 columns; subject absorbs the squeeze.
+  const subjectW = Math.max(12, TOTAL_WIDTH - branchW - dateW - targetsW - (targets.length > 0 ? 6 : 4));
+
+  const head = [
+    'BRANCH'.padEnd(branchW),
+    'LAST COMMIT'.padEnd(dateW),
+    'SUBJECT'.padEnd(subjectW),
+    ...targets.map((t) => t.padStart(t.length)),
+  ].join('  ');
+
+  const lines = [head, '-'.repeat(head.length)];
+  for (const r of rows) {
+    lines.push([
+      truncate(r.label, branchW).padEnd(branchW),
+      truncate(r.dateRelative, dateW).padEnd(dateW),
+      truncate(r.subject, subjectW).padEnd(subjectW),
+      ...targets.map((t) => (r.merged[t] ? '✓' : '·').padStart(t.length)),
+    ].join('  '));
+  }
+
+  if (missing.length > 0) {
+    lines.push('', `Targets not present in this repository: ${missing.join(', ')}`);
+  }
+  if (targets.length === 0) {
+    lines.push('', 'No base target branches found in this repository.');
+  }
+  process.stdout.write(lines.join('\n') + '\n');
+}
+
+function renderJson(toplevel, branches, targets) {
+  const current = branches.find((b) => b.isCurrent);
+  const payload = {
+    repo: path.basename(toplevel),
+    current: current ? current.name : null,
+    targets,
+    branches: branches.map((b) => ({
+      name: b.name,
+      isCurrent: b.isCurrent,
+      subject: b.subject,
+      author: b.author,
+      date: b.date,
+      dateRelative: b.dateRelative,
+      upstream: b.upstream,
+      ahead: b.ahead,
+      behind: b.behind,
+      merged: b.merged,
+    })),
+  };
+  process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+}
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  if (opts.help) {
+    printHelp();
+    return;
+  }
+
+  const top = runGit(['rev-parse', '--show-toplevel']);
+  if (top.status !== 0) {
+    fail('not inside a git repository (git rev-parse --show-toplevel failed)');
+  }
+  const toplevel = top.stdout.trim();
+
+  const branches = collectBranches();
+  const branchNames = new Set(branches.map((b) => b.name));
+  const { existing, missing } = resolveTargets(opts.targets, branchNames);
+  buildMatrix(branches, existing);
+
+  if (opts.json) {
+    renderJson(toplevel, branches, existing);
+  } else {
+    renderTable(branches, existing, missing);
+  }
+}
+
+main();
