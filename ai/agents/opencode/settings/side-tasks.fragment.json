@@ -1,0 +1,7 @@
+{
+  "small_model": "agy/default",
+  "agent": {
+    "summary": { "model": "agy/default" },
+    "compaction": { "model": "agy/default" }
+  }
+}

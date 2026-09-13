@@ -9,6 +9,7 @@ configuración real mediante `jq`. El fragmento del repo **siempre gana**.
 | Fragmento | Claves que fija | Para qué |
 | --- | --- | --- |
 | `agy-models.fragment.json` | `provider.agy.models` + `provider.agy.options.models` | Catálogo agy materializado (generado — no editar a mano). opencode no consulta el hook `provider.models` del plugin para providers npm, así que el picker y el runtime necesitan esto en config. Regenerable desde `agy models`. |
+| `side-tasks.fragment.json` | `small_model` + `agent.summary/compaction.model` | Default CERO-CONFIG para tareas laterales: `agy/default` (universal para usuarios del bridge). Sobrescribir por máquina en el fragmento local. |
 
 ## Principio agnóstico: el repo transporta mecanismo, no valores
 
@@ -38,22 +39,26 @@ el repo gana sobre la config viva. Ejemplo:
 }
 ```
 
-### Opción "todo mediante agy"
+### Default cero-config: `agy/default`
 
-Si prefieres que TODAS las tareas auxiliares vayan por agy (válido para
-cualquier usuario del bridge, y con el store v2 ya no hay carrera de keys):
+El fragmento `side-tasks.fragment.json` fija `small_model` y los agentes
+`summary`/`compaction` a **`agy/default`**: cero configuración tras clonar —
+cualquier usuario del bridge tiene agy, y con el store v2 las tareas laterales
+no corrompen el hilo principal (cada una obtiene su propio binding).
+
+Coste asumido por el default: un spawn de CLI y una conversación de agy por
+título/resumen. Si no usas agy, o prefieres otro modelo, SOBREESCRÍBELO en tu
+fragmento local (la máquina gana sobre el repo):
 
 ```json
-{ "small_model": "agy/default" }
+{ "small_model": "opencode/muse-spark-1.3-contributor-free" }
 ```
-
-Coste: un spawn de proceso CLI y una conversación de agy por título/resumen.
-Decisión tuya; el repo no opina.
 
 ### Sin pin, ¿qué pasa?
 
-Sin `small_model`, opencode usa el modelo de la sesión para títulos — si la
-sesión es agy, el título también (spawn + conversación desechable por título).
+Ya no ocurre en esta setup: el repo SIEMPRE fija un default (cero config).
+El "sin pin" solo existe si alguien elimina el fragmento — y entonces opencode
+usa el modelo de la sesión para las tareas laterales.
 
 ## Por qué no se puede symlinkear el `opencode.json` completo
 
