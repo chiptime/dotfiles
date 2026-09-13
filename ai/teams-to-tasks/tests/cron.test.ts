@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { parseState } from "../src/core.ts";
 
 /** cron.sh under test — the repo copy, exactly what the symlink resolves to. */
-const CRON_SH = join(import.meta.dir, "..", "cron.sh");
+const CRON_SH = process.env.TEAMS_TEST_CRON ?? join(import.meta.dir, "..", "cron.sh");
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -59,8 +59,9 @@ function setup() {
 		zshMarker: join(tmp, "zsh.count"),
 		notifyLog: join(tmp, "notify.log"),
 		promptDump: join(tmp, "prompt.txt"),
+		runDirDump: join(tmp, "run-dir.txt"),
 		/** Run cron.sh with stubbed poller/agent (env seams) and stub notify. */
-		run(opts: { pollRc?: number; agentRc?: number }) {
+		run(opts: { pollRc?: number; agentRc?: number; scenario?: string; mode?: string; pollWrites?: boolean; concurrentState?: boolean }) {
 			const pollRc = opts.pollRc ?? 0;
 			const agentRc = opts.agentRc ?? 0;
 			const notifyExe = join(tmp, "notify-stub.sh");
@@ -77,17 +78,20 @@ function setup() {
 			env.PATH = `${bin}:${env.PATH ?? ""}`;
 			env.TEAMS_LOCK_FILE = ctx.lockFile;
 			env.TEAMS_NOTIFY_EXE = notifyExe;
-			env.TEAMS_POLL_CMD = `echo poll >> ${ctx.pollMarker}; exit ${pollRc}`;
+			env.TEAMS_POLL_CMD = `echo poll >> ${ctx.pollMarker}; ${opts.pollWrites ? 'printf advanced > "$TEAMS_STATE_FILE";' : ""} exit ${pollRc}`;
 			env.TEAMS_AGENT_CMD =
 				`echo agent >> ${ctx.agentMarker}; ` +
 				`printf '%s' "$TEAMS_PROMPT" > ${ctx.promptDump}; ` +
+				`printf '%s' "$TEAMS_RUN_DIR" > ${ctx.runDirDump}; ` +
+				(opts.concurrentState ? `printf concurrent > ${ctx.stateFile}; ` : "") +
+				`bun '${join(import.meta.dir, "completion-fixture.ts")}' '${opts.scenario ?? "success"}'; ` +
 				`exit ${agentRc}`;
-			const proc = Bun.spawnSync(["bash", CRON_SH, "sweep"], {
+			const proc = Bun.spawnSync(["bash", CRON_SH, opts.mode ?? "sweep"], {
 				env,
 				stdout: "pipe",
 				stderr: "pipe",
 			});
-			return { rc: proc.exitCode, log: content(ctx.logFile) };
+			return { rc: proc.exitCode, log: content(ctx.logFile), runDir: content(ctx.runDirDump) };
 		},
 	};
 	return ctx;
@@ -111,7 +115,7 @@ describe("cron.sh — poller-first agent gating (sweep)", () => {
 		expect(written).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 		expect(parseState(written)).not.toBe(null);
 		expect(r.log).toContain("[ok] sweep completed");
-		expect(content(c.notifyLog)).toContain("✅ Teams sweep");
+		expect(content(c.notifyLog)).toContain("[OK] Teams sweep");
 	});
 
 	test("poller rc 1 → no agent, no notify, log only; cron leaves state to the poller", () => {
@@ -132,12 +136,12 @@ describe("cron.sh — poller-first agent gating (sweep)", () => {
 			const c = setup();
 			writeFileSync(c.stateFile, "2026-09-09T18:30:00.000Z");
 			const r = c.run({ pollRc: rc, agentRc: 0 });
-			expect(r.rc).toBe(0);
+			expect(r.rc).toBe(1);
 			expect(lines(c.pollMarker)).toBe(1);
 			expect(lines(c.agentMarker)).toBe(0);
 			expect(lines(c.zshMarker)).toBe(0);
 			expect(readFileSync(c.stateFile, "utf8")).toBe("2026-09-09T18:30:00.000Z");
-			expect(content(c.notifyLog)).toContain(`Poller fallido (rc ${rc})`);
+				expect(content(c.notifyLog)).toContain(`Poller failed (rc ${rc})`);
 			expect(r.log).toContain(`[poll-fail] poller rc=${rc}`);
 		}
 	});
@@ -146,12 +150,66 @@ describe("cron.sh — poller-first agent gating (sweep)", () => {
 		const c = setup();
 		writeFileSync(c.stateFile, "2026-09-09T18:30:00.000Z");
 		const r = c.run({ pollRc: 0, agentRc: 1 });
-		expect(r.rc).toBe(0);
+		expect(r.rc).toBe(1);
 		expect(lines(c.pollMarker)).toBe(1);
 		expect(lines(c.agentMarker)).toBe(1);
 		expect(readFileSync(c.stateFile, "utf8")).toBe("2026-09-09T18:30:00.000Z");
-		expect(content(c.notifyLog)).toContain("Run fallido");
+		expect(content(c.notifyLog)).toContain("Incomplete run");
 		expect(r.log).toContain("state not advanced");
+	});
+
+	test.each(["denied", "missing", "malformed", "expired"])("exit zero with %s result fails closed and retains logs", (scenario) => {
+		const c = setup();
+		const previous = "2026-09-09T18:30:00.000Z";
+		writeFileSync(c.stateFile, previous);
+		const r = c.run({ scenario });
+		expect(r.rc).toBe(1);
+		expect(content(c.stateFile)).toBe(previous);
+		expect(content(c.notifyLog)).toContain("[FAIL]");
+		expect(content(c.notifyLog)).not.toContain("[OK]");
+		expect(existsSync(join(r.runDir, "events.jsonl"))).toBe(true);
+		expect(content(join(r.runDir, "validation.log"))).not.toBe("");
+	});
+
+	test("successful result ignores ANSI stderr and supplies local/UTC clock context", () => {
+		const c = setup();
+		const r = c.run({ scenario: "ansi" });
+		expect(r.rc).toBe(0);
+		expect(content(c.notifyLog)).not.toContain("\x1b");
+		expect(content(c.notifyLog)).not.toContain("ordinary diagnostic");
+		expect(content(join(r.runDir, "agent.stderr"))).toContain("\x1b");
+		expect(content(c.promptDump)).toContain("Current local date/time and timezone:");
+		expect(content(c.promptDump)).toContain("UTC window_end:");
+	});
+
+	test("failed digest never touches sweep checkpoint and bypasses poller", () => {
+		const c = setup();
+		writeFileSync(c.stateFile, "2026-09-09T18:30:00.000Z");
+		const r = c.run({ mode: "digest", scenario: "expired" });
+		expect(r.rc).toBe(1);
+		expect(existsSync(c.pollMarker)).toBe(false);
+		expect(content(c.stateFile)).toBe("2026-09-09T18:30:00.000Z");
+	});
+
+	test("quiet poller writes only its disposable checkpoint", () => {
+		const c = setup();
+		writeFileSync(c.stateFile, "2026-09-09T18:30:00.000Z");
+		expect(c.run({ pollRc: 1, pollWrites: true }).rc).toBe(0);
+		expect(content(c.stateFile)).toBe("2026-09-09T18:30:00.000Z");
+	});
+
+	test("validated digest leaves sweep checkpoint unchanged", () => {
+		const c = setup();
+		writeFileSync(c.stateFile, "2026-09-09T18:30:00.000Z");
+		expect(c.run({ mode: "digest" }).rc).toBe(0);
+		expect(content(c.stateFile)).toBe("2026-09-09T18:30:00.000Z");
+	});
+
+	test("concurrent external checkpoint change is not overwritten", () => {
+		const c = setup();
+		writeFileSync(c.stateFile, "2026-09-09T18:30:00.000Z");
+		expect(c.run({ concurrentState: true }).rc).toBe(1);
+		expect(content(c.stateFile)).toBe("concurrent");
 	});
 
 	test("PAUSE file present → neither poller nor agent runs", () => {

@@ -14,6 +14,6 @@
 		"isolatedModules": true,
 		"verbatimModuleSyntax": false
 	},
-	"include": ["src/**/*.ts", "tests/**/*.ts", "poller.ts"],
+	"include": ["src/**/*.ts", "tests/**/*.ts", "poller.ts", "unattended.ts", "read-plugin.ts"],
 	"exclude": ["node_modules"]
 }

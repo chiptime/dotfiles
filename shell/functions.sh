@@ -175,3 +175,48 @@ function fix-zsh-history() {
 if type compdef >/dev/null 2>&1; then
     compdef _npm_completion npm
 fi
+
+# notifyrun: ejecuta un comando largo y avisa por ntfy al terminar.
+# Uso: notifyrun bun test | notifyrun docker compose up
+# Reutiliza NTFY_TOPIC/NTFY_URL de private-env.sh. Sin topic, solo ejecuta.
+# Devuelve el exit code del comando (chainable: notifyrun x && y).
+function notifyrun() {
+	if [ $# -eq 0 ]; then
+		echo "uso: notifyrun <comando> [args...]" >&2
+		return 1
+	fi
+
+	local start=$SECONDS
+	local label="$*"
+
+	"$@"
+	local rc=$?
+
+	local dur=$(( SECONDS - start ))
+	local durstr
+	if [ "$dur" -ge 60 ]; then
+		durstr="$(( dur / 60 ))m $(( dur % 60 ))s"
+	else
+		durstr="${dur}s"
+	fi
+
+	if [ "$rc" -eq 0 ]; then
+		echo "✓ $label — $durstr"
+	else
+		echo "✗ $label (exit $rc) — $durstr" >&2
+	fi
+
+	if [ -n "$NTFY_TOPIC" ] && command -v curl >/dev/null 2>&1; then
+		local url="${NTFY_URL:-https://ntfy.sh}/$NTFY_TOPIC"
+		if [ "$rc" -eq 0 ]; then
+			curl -s -m 10 -H "X-Title: Comando completado" -H "X-Priority: 3" -H "X-Tags: white_check_mark" \
+				-d "✅ $label — $durstr" "$url" >/dev/null 2>&1 &
+		else
+			curl -s -m 10 -H "X-Title: Comando fallo" -H "X-Priority: 5" -H "X-Tags: x" \
+				-d "❌ $label (exit $rc) — $durstr" "$url" >/dev/null 2>&1 &
+		fi
+		disown 2>/dev/null  # no bloquear el prompt mientras ntfy responde
+	fi
+
+	return $rc
+}

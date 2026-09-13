@@ -1,0 +1,36 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "teams-reader",
+  "share": "disabled",
+  "autoupdate": false,
+  "snapshot": false,
+  "plugin": [],
+  "permission": { "*": "deny" },
+  "agent": {
+    "teams-reader": {
+      "description": "Unattended, bounded Teams discovery and authorized Notion task maintenance",
+      "mode": "primary",
+      "permission": {
+        "*": "deny",
+        "playwright_teams_browser_navigate": "allow",
+        "playwright_teams_browser_snapshot": "allow",
+        "playwright_teams_browser_click": "allow",
+        "playwright_teams_browser_type": "allow",
+        "playwright_teams_browser_press_key": "allow",
+        "playwright_teams_browser_wait_for": "allow",
+        "playwright_teams_browser_take_screenshot": "allow",
+        "playwright_teams_browser_close": "allow",
+        "engram_mem_search": "allow",
+        "engram_mem_get_observation": "allow",
+        "notion_API-post-search": "allow",
+        "notion_API-query-data-source": "allow",
+        "notion_API-retrieve-a-data-source": "allow",
+        "notion_API-retrieve-a-page": "allow",
+        "notion_API-get-block-children": "allow",
+        "notion_API-post-page": "allow",
+        "notion_API-patch-page": "allow",
+        "notion_API-patch-block-children": "allow"
+      }
+    }
+  }
+}
