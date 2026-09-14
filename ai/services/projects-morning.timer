@@ -1,0 +1,11 @@
+[Unit]
+Description=Projects morning chain — boot catch-up or 07:00
+
+[Timer]
+OnBootSec=90
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+Unit=projects-morning.service
+
+[Install]
+WantedBy=timers.target
