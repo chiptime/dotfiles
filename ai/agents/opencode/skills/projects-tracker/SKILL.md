@@ -30,10 +30,11 @@ The tracker lives in `~/.dotfiles`:
 ## Execution Steps
 
 1. Identify the repo the session worked on (basename under `~/Code`).
-2. Update only that project's block: `status` if the lifecycle changed, `desc` if the one-liner is stale, `next` with the concrete next action (or drop `next` if none). `next` must be actionable, not a wish.
-3. If the sweep would show new repos (a project was cloned/created), add blocks for them or leave them for the "Unclassified" triage section — never leave work repos silently unclassified after a triage round.
-4. Rerun `projects` so the snapshot regenerates.
-5. If the tracker files themselves changed and the user authorized a commit, commit ONLY `scripts/projects.yaml` and/or `scripts/projects-dashboard.sh` with a conventional message.
+2. **Time ledger**: if the session did real work, append AI hours — `time-ledger add-ai <D/M/YYYY> <project-basename> <hours> "<short note>" <ses_id>`. Take `ses_id` from the current session (it appears in every mem_save response as `Session: ses_...`); it deep-links the dashboard to this conversation. Approximate hours confidently from session window; Bruno corrects at Excel time. Never log hours for read-only/conversational sessions.
+3. Update only that project's block: `status` if the lifecycle changed, `desc` if the one-liner is stale, `next` with the concrete next action (or drop `next` if none). `next` must be actionable, not a wish.
+4. If the sweep would show new repos (a project was cloned/created), add blocks for them or leave them for the "Unclassified" triage section — never leave work repos silently unclassified after a triage round.
+5. Rerun `projects` so the snapshot regenerates.
+6. If the tracker files themselves changed and the user authorized a commit, commit ONLY `scripts/projects.yaml` and/or `scripts/projects-dashboard.sh` with a conventional message.
 
 ## Status Vocabulary
 
