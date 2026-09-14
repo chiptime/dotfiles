@@ -1,0 +1,14 @@
+{
+  "mcp": {
+    "notion": {
+      "type": "local",
+      "command": [
+        "/home/bruno/.dotfiles/ai/agents/opencode/mcp/notion-mcp.sh"
+      ],
+      "environment": {
+        "NOTION_TOKEN": "{env:NOTION_CLECE}"
+      },
+      "enabled": true
+    }
+  }
+}
