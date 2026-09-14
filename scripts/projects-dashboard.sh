@@ -171,6 +171,43 @@ section() {
 # Web dashboard (best-effort; standalone from ai-quotas, served on its own port)
 python3 "$DOTFILES/scripts/projects-html.py" "$OUT" >/dev/null 2>&1 || true
 
+# --- Control Hub telemetry (fail-soft) ---------------------------------------
+# The hub vault (~/hub, clone of gertru-lab/gertru-workspace) is the single
+# source of truth. Repo machine-state flows INTO it here: hub/telemetria/ is
+# a machine-writable zone with ONE writer (this sweep); nobody else edits it.
+# Contract: pull --rebase → pathspec-scoped write → push. Never force.
+HUB="$HOME/hub"
+if [ -d "$HUB/.git" ]; then
+  if git -C "$HUB" pull --rebase --quiet 2>/dev/null; then
+    TDIR="$HUB/hub/telemetria"; mkdir -p "$TDIR"; touch "$TDIR/.gitkeep"
+    {
+      echo "# Telemetría de repos"
+      echo
+      echo "> Zona de escritura MECÁNICA: único escritor = el sweep (projects-dashboard.sh)."
+      echo "> Nadie más edita aquí — ni Gertru ni Bruno. Versionada como todo el vault."
+      echo
+      echo "_Generado: $(date '+%Y-%m-%d %H:%M') por el sweep local · solo repos vivos (active/proposal/paused)_"
+      echo
+      echo "| Repo | Estado | Rama | Último commit | Dirty |"
+      echo "|------|--------|------|---------------|-------|"
+      for name in "${repos[@]}"; do
+        st="${A_STATUS["$name"]:-}"
+        case "$st" in active|proposal|paused) ;; *) continue ;; esac
+        printf '| %s | %s | `%s` | %s | %s |\n' \
+          "$name" "$st" "${R_BRANCH["$name"]:-?}" "${R_DATE["$name"]:-?}" "${R_DIRTY["$name"]:-0}"
+      done
+    } > "$TDIR/repos.md"
+    if git -C "$HUB" status --porcelain -- hub/telemetria | grep -q .; then
+      git -C "$HUB" add hub/telemetria/repos.md hub/telemetria/.gitkeep 2>/dev/null
+      git -C "$HUB" commit -q -m "telemetria(sweep): repos.md $(date '+%Y-%m-%d %H:%M')" -- hub/telemetria 2>/dev/null \
+        && git -C "$HUB" push --quiet 2>/dev/null \
+        && echo "hub: telemetria pushed" || echo "hub: telemetria commit/push falló (no crítico)"
+    fi
+  else
+    echo "hub: pull --rebase falló — telemetría omitida (no crítico)"
+  fi
+fi
+
 echo
 cat "$OUT"
 echo "Repos scanned: ${#repos[@]} · annotated: ${#annotated[@]} · unclassified: $unclassified_count"
