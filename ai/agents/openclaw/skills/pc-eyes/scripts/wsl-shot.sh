@@ -7,14 +7,14 @@
 #         (JSON moves to stderr when --b64 is used; stdout carries base64 only)
 # Options:
 #   --b64        print base64 of the capture to stdout (for WS transport)
-#   --width N    scale capture to N px wide (default 1600, 0 = full res)
+#   --width N    scale capture to N px wide (default 0 = full res)
 #
 # NOTE: env vars do NOT cross into Windows processes in this WSL setup
 # (WSLENV /u proved unreliable) — values are inlined into the PS command.
 set -euo pipefail
 
 B64=0
-MAXW="${WSL_SHOT_WIDTH:-1600}"
+MAXW="${WSL_SHOT_WIDTH:-0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --b64) B64=1 ;;
@@ -61,7 +61,7 @@ if($targetW -ne $w){
 }
 $codec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }
 $ep=New-Object System.Drawing.Imaging.EncoderParameters(1)
-$ep.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality,([long]70))
+$ep.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality,([long]85))
 $bmp.Save("__OUT__",$codec,$ep)
 $bmp.Dispose()
 Write-Output "$targetW $targetH"
@@ -74,10 +74,17 @@ DIMS="$("$PS_BIN" -NoProfile -Command "$PS_CMD" | tail -1)"
 cp "/mnt/c/Users/Public/pc-eyes-tmp.jpg" "$OUT"
 rm -f "/mnt/c/Users/Public/pc-eyes-tmp.jpg"
 
+# Deliver the capture to the gateway container (bind mount /downloads/pc-eyes)
+# so the agent can read it as a FILE — never ship base64 through the model context.
+GW_PATH=""
+if scp -o BatchMode=yes -o ConnectTimeout=8 "$OUT" "contabo-vps:/var/lib/docker/volumes/aistack-all-o9aphm_downloads/_data/pc-eyes/$(basename "$OUT")" 2>/dev/null; then
+  GW_PATH="/downloads/pc-eyes/$(basename "$OUT")"
+fi
+
 read -r W H BYTES <<< "$DIMS"
 BYTES=$(stat -c %s "$OUT")
 
-JSON="{\"file\":\"${OUT}\",\"width\":${W},\"height\":${H},\"bytes\":${BYTES}}"
+JSON="{\"file\":\"${OUT}\",\"gatewayPath\":\"${GW_PATH}\",\"width\":${W},\"height\":${H},\"bytes\":${BYTES}}"
 if [[ "$B64" -eq 1 ]]; then
   echo "$JSON" >&2
   base64 -w0 "$OUT"
