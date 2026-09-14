@@ -15,14 +15,15 @@ version: 1.0.0
 
 - Check the node is online first (`openclaw nodes status`); if absent, say so and ask Bruno to start it. Never fabricate or describe a screen you did not capture.
 - Never capture without Bruno expecting it, unless he explicitly started a watch mode.
+- Bruno's PC has a consent gate: every capture pops a 15-second Yes/No dialog on his screen. Refusals and timeouts return stdout JSON `{"error":"denied-by-user","gate":"denied"|"timeout"}` with non-zero exit. Accept the answer, say it plainly, and NEVER retry the capture without him asking first.
 - Screen content may contain credentials: never quote secrets seen in captures; describe actions and flows instead.
 - Captures stay machine-local under `~/.local/state/pc-eyes/` on the node; only the requested capture travels over the gateway.
 
 ## Workflow
 
-1. Invoke the node: `node.invoke` -> `system.run` -> `wsl-shot` (node path: `~/.local/bin/wsl-shot`). Default run prints one JSON line: `file`, `width`, `height`, `bytes`.
-2. Get the image for vision analysis. Prefer the node surface that returns files; otherwise rerun with `--b64` (stdout carries base64 only; JSON moves to stderr). If neither transport works yet, say the pairing transport is unresolved.
-3. Read the capture in context of what Bruno is doing: name the tool, the visible state, and the data flowing between tools.
+1. Invoke the node: exec tool with `host=node`, node `bruno-wsl`, command `/home/bruno/.local/bin/wsl-shot`. Run it as ONE plain command — NO redirects, pipes, or shell chains (wrappers like `bash -c` break the allowlist and get denied). stdout JSON: `{"file","gatewayPath","width","height","bytes"}`.
+2. The script already delivers the JPG to the gateway filesystem at `gatewayPath` (e.g. `/downloads/pc-eyes/shot-...jpg`). NEVER route the image through the conversation as base64 text — models corrupt large blobs when re-emitting them. The `image` tool cannot read `/downloads/` directly: first copy the file into the workspace (`cp <gatewayPath> /home/node/.openclaw/workspace/pc-eyes/`, create the dir if needed) and use the workspace path.
+3. Analyze the image with the `image` tool using `gatewayPath` (native vision, model `zai/glm-4.6v`): name the tool, the visible state, and the data flowing between tools. If `gatewayPath` is empty, the scp delivery failed — say so and stop; do not fall back to base64. Do NOT try `screen.record` — it is blocked by `gateway.nodes.denyCommands`.
 4. Persist learnings after each teaching segment into the workflow doc Bruno names (or propose one): tools, steps, data flow, failure points.
 
 ## Teaching Protocol (apprenticeship loop)
