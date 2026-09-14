@@ -21,6 +21,7 @@ Decisions closed in this phase (design Open Question + validator notes):
 Decision needed before apply: Yes
 Chained PRs recommended: Yes
 Chain strategy: stacked-to-main (human-decided 2026-09-14 via question tool)
+PR A1 size:exception accepted by maintainer 2026-09-14 (779 actual lines vs ~310 est; every test maps to a spec scenario)
 400-line budget risk: High
 
 ### Suggested Work Units
