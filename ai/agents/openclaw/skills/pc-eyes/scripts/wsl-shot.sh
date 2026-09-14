@@ -36,6 +36,22 @@ fi
 
 STATE_DIR="${HOME}/.local/state/pc-eyes"
 mkdir -p "$STATE_DIR"
+
+# Consent gate (TCC-style): no capture without Bruno's explicit Yes.
+# PC_EYES_NO_GATE=1 skips the prompt (only for Bruno's own local runs).
+GATE_TIMEOUT="${PC_EYES_GATE_TIMEOUT:-15}"
+[[ "$GATE_TIMEOUT" =~ ^[0-9]+$ ]] || GATE_TIMEOUT=15
+if [[ "${PC_EYES_NO_GATE:-0}" != "1" ]]; then
+  ANSWER=$("$PS_BIN" -NoProfile -Command "(New-Object -ComObject WScript.Shell).Popup('Gertru (OpenClaw) solicita una captura de tu pantalla. Permitir?',${GATE_TIMEOUT},'pc-eyes',4100)" 2>/dev/null | tr -d '\r' | tail -1)
+  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') answer=${ANSWER}" >> "$STATE_DIR/approvals.log"
+  if [[ "$ANSWER" != "6" ]]; then
+    REASON="denied"
+    [[ "$ANSWER" == "-1" ]] && REASON="timeout"
+    echo "{\"error\":\"denied-by-user\",\"gate\":\"${REASON}\"}"
+    exit 1
+  fi
+fi
+
 OUT="${STATE_DIR}/shot-$(date +%Y%m%d-%H%M%S).jpg"
 TMP_WIN='C:\Users\Public\pc-eyes-tmp.jpg'
 
