@@ -2,12 +2,20 @@
 
 Weekly summary of the global project tracker to the phone via ntfy + standalone web dashboard.
 
+## Scheduling
+
+The morning chain fires at **PC boot +90s** or **07:00** if already on
+(`Persistent=true` recovers missed runs at next boot — Bruno starts his day ~08:50).
+VPS-side clocks (drain-inbox 07:30, morning-brief 08:00) read whatever the last
+chain delivered; see `doc/MAPA_INGESTAS.md` for the full clock map.
+
 ## Components
 
 | File | Role |
 |---|---|
 | `cron.sh` | Regenerates `~/.local/share/projects-dashboard/PROJECTS.md` (via `scripts/projects-dashboard.sh`) and pushes a compact digest (section counts + repos with uncommitted changes) to ntfy |
-| `install.sh` | Idempotent installer: weekly digest cron (Mon 09:00), daily silent regen cron (08:00), systemd user service |
+| `morning.sh` | Morning chain: regenerate snapshot + send daily digest (ntfy) |
+| `install.sh` | Idempotent installer: morning-chain systemd timer (boot catch-up + 07:00) + web service |
 
 ## Web dashboard
 
@@ -25,9 +33,9 @@ Tailscale is the access control).
 
 ```bash
 ~/.dotfiles/ai/projects/install.sh    # install or refresh
-crontab -l | grep projects            # verify
+systemctl --user list-timers projects-morning.timer   # verify
 systemctl --user status projects-dashboard.service
-# remove: crontab -e → delete both lines; systemctl --user disable --now projects-dashboard.service
+# remove: systemctl --user disable --now projects-morning.timer projects-dashboard.service
 ```
 
 ## Dependencies

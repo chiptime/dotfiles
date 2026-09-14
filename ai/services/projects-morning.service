@@ -1,0 +1,6 @@
+[Unit]
+Description=Projects morning chain (regen snapshot + daily digest)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.dotfiles/ai/projects/morning.sh
