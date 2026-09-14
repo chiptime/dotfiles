@@ -70,7 +70,11 @@ gertru-workspace/
 │   │   ├── bruno/
 │   │   └── _triage/              ←    disputed items awaiting human election
 │   ├── proyectos/                ← structured zone: clerk writes ONLY here
-│   ├── dashboard.md              ← global state table (see follow-up: regen)
+│   ├── dashboard.md              ← UNIFIED view: summary + dated milestones +
+│   │                               projects + repo telemetry (regen-dashboard)
+│   ├── telemetria/repos.md       ← machine zone: ONLY writer = the projects sweep
+│   │                               (2026-09-15 amendment — repo state flows INTO
+│   │                               the hub; any other view is a projection)
 │   └── ecosistema.md             ← apps, integrations, automations map
 ├── cerebro/                      ← Gertru's brain: untouched
 └── (openclaw.json, credentials, identity — outside git entirely)
