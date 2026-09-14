@@ -76,7 +76,7 @@ case "${1:-help}" in
   tsv)
     init; [ $# -ge 2 ] || { echo "usage: time-ledger tsv <D/M/YYYY>"; exit 1; }
     iso="$(dmy_to_iso "$2")"
-    awk -F, -v iso="$iso" '$1==iso {printf "%s\t%s\t%s\t%s\n", $2, $3, $5, $6}' "$CSV"
+    awk -F, -v iso="$iso" '$1==iso { line = $2 "\t" $3 "\t" $5; if ($6 != "") line = line "\t" $6; print line }' "$CSV"
     ;;
   help|*)
     sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'
