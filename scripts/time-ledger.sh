@@ -36,7 +36,12 @@ dmy_to_iso() { # D/M/YYYY -> YYYY-MM-DD
 add_row() {
   local src="$1" d="$2" proj="$3" hours="$4" note="${5:-}" ses="${6:-}"
   case "$d" in */*) d="$(dmy_to_iso "$d")";; esac
-  echo "$d,$proj,$hours,$src,$note${ses:+,}$ses" >> "$CSV"
+  local line="$d,$proj,$hours,$src,$note${ses:+,}$ses"
+  if grep -qF "$line" "$CSV" 2>/dev/null; then
+    echo "skip: entrada idéntica ya existe ($line)"
+    return 0
+  fi
+  echo "$line" >> "$CSV"
 }
 
 report() { # report <from_iso> <to_iso> <title>
