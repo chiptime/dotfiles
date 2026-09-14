@@ -22,6 +22,7 @@ Decision needed before apply: Yes
 Chained PRs recommended: Yes
 Chain strategy: stacked-to-main (human-decided 2026-09-14 via question tool)
 PR A1 size:exception accepted by maintainer 2026-09-14 (779 actual lines vs ~310 est; every test maps to a spec scenario)
+Blanket size:exception for remaining PRs (A2 969, A3, A4, B) accepted by maintainer 2026-09-14 — honest per-PR line reporting at delivery; forecasts ran ~3x short due to RED-first test weight
 400-line budget risk: High
 
 ### Suggested Work Units
