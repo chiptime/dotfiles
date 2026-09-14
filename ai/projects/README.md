@@ -1,20 +1,33 @@
-# projects — weekly digest subsystem
+# projects — tracker digest + web dashboard subsystem
 
-Sends a weekly summary of the global project tracker to the phone via ntfy.
+Weekly summary of the global project tracker to the phone via ntfy + standalone web dashboard.
 
 ## Components
 
 | File | Role |
 |---|---|
 | `cron.sh` | Regenerates `~/.local/share/projects-dashboard/PROJECTS.md` (via `scripts/projects-dashboard.sh`) and pushes a compact digest (section counts + repos with uncommitted changes) to ntfy |
-| `install.sh` | Idempotent crontab installer (weekly, Monday 09:00) |
+| `install.sh` | Idempotent installer: weekly digest cron (Mon 09:00), daily silent regen cron (08:00), systemd user service |
+
+## Web dashboard
+
+`scripts/projects-html.py` renders `PROJECTS.html` (standalone, NOT part of ai-quotas),
+served by the `projects-dashboard.service` user unit on **port 47624**. Includes:
+- 🎯 Pending actionables (every `next:` from `scripts/projects.yaml`)
+- 💬 Recent conversations — ledger rows carrying an OpenCode `ses_...` id, deep-linked
+  via `~/.local/share/time-ledger/webbase` (one line; default `http://127.0.0.1:4096`;
+  point it at the mobile-proxy base for phone access)
+
+Phone access: Tailscale → `<wsl-host>:47624/PROJECTS.html` (service binds 0.0.0.0;
+Tailscale is the access control).
 
 ## Install / remove
 
 ```bash
 ~/.dotfiles/ai/projects/install.sh    # install or refresh
 crontab -l | grep projects            # verify
-# remove: crontab -e → delete the ai/projects/cron.sh line
+systemctl --user status projects-dashboard.service
+# remove: crontab -e → delete both lines; systemctl --user disable --now projects-dashboard.service
 ```
 
 ## Dependencies
