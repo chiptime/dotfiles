@@ -7,8 +7,10 @@ Lee Microsoft Teams web mediante un Chromium con perfil persistente (MCP `playwr
 The scheduled reader now fails closed: process exit zero is necessary but NOT
 sufficient for success. Only a final assistant JSON result bound to this run's
 exact window, followed by a terminal `stop` event, can authorize a checkpoint
-commit. The validator also requires successful browser discovery/closure and
-matches every claimed Notion write to a successful parsed tool response ID.
+commit. The agent is strictly read-only: it queries Notion to deduplicate
+and emits planned actions in its JSON result. Direct Notion write tool calls are
+forbidden and rejected by the validator. The host (`cron.sh`) then invokes
+`src/notion-writer.ts` to execute validated actions with retry and strict schemas.
 Any tool error, permission rejection, expired session, missing/malformed
 result, or interrupted stream preserves the checkpoint — with one deliberate,
 revertable allowance: a `playwright_teams_browser_*` tool failing with a stale
@@ -66,6 +68,111 @@ running invocation retains its current configuration. Do not interrupt it to act
 Rollback only this completion/config/logging work unit, preserving earlier PATH,
 AM/PM, Chromium and dedupe changes. Do not restore `last_run`, PAUSE or browser locks.
 
+## Arquitectura y límites de confianza
+
+El sistema sigue el patrón **Extractor Cognitivo (LLM) + Ejecutor Determinista (Host)** para garantizar aislamiento estricto contra *prompt injection*, resiliencia ante rate-limits y determinismo en los schemas de Notion:
+
+```mermaid
+flowchart TD
+    subgraph Host["Host / Sistema Operativo"]
+        cron["Cron Job (cada hora)"] --> cron_sh["cron.sh (Orquestador)"]
+        cron_sh --> poller["poller.ts (Preflight sin LLM)"]
+        cron_sh -. Lee variables de entorno .-> priv_env["shell/private-env.sh (NOTION_CLECE)"]
+        cron_sh --> validator["src/completion.ts (Validador estricto)"]
+        cron_sh --> writer["src/notion-writer.ts (Bun / Fetch nativo)"]
+        checkpoint["Checkpoint: ~/.local/state/teams-to-tasks/last_run"]
+    end
+
+    subgraph Sandbox["Sandbox del Agente (Zero-Shell, Read-Only)"]
+        unattended["unattended.ts (OpenCode runtime)"]
+        llm["LLM (Reasoner)"]
+        mcp_teams["MCP: playwright_teams (Browser)"]
+        mcp_notion_ro["MCP: Notion (Solo lectura)"]
+    end
+
+    subgraph External["Servicios Externos"]
+        teams_web["Microsoft Teams Web"]
+        notion_api["Notion REST API (Database Tareas)"]
+    end
+
+    %% Relaciones
+    poller -- "Revisa mensajes en ventana" --> teams_web
+    cron_sh -- "Si hay actividad, invoca" --> unattended
+    unattended --> llm
+    llm -- "Lee chats / pantallazos" --> mcp_teams --> teams_web
+    llm -- "Consulta tareas existentes (dedupe)" --> mcp_notion_ro --> notion_api
+
+    llm -- "Emite events.jsonl con actions[]" --> validator
+    validator -- "Valida dedupe y exporta" --> actions_file["actions.json"]
+    actions_file --> writer
+
+    writer -- "POST/PATCH determinista (reintentos 429/5xx)" --> notion_api
+    writer -- "rc == 0 (Éxito)" --> cron_sh
+    cron_sh -- "Avanza timestamp atómicamente" --> checkpoint
+```
+
+## Flujo funcional (Secuencia de ejecución)
+
+Flujo de decisión en cada barrido (`sweep`), mostrando cómo se filtran los casos y se protegen los checkpoints frente a fallos:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Cron as cron.sh
+    participant Poller as poller.ts
+    participant Teams as Teams Web
+    participant Agent as Agente LLM
+    participant Validator as completion.ts
+    participant Writer as notion-writer.ts
+    participant Notion as Notion API
+    participant State as last_run (Checkpoint)
+
+    Cron->>Poller: Ejecutar preflight (rango: last_run .. now)
+    Poller->>Teams: Buscar actividad reciente ("que" + Today)
+    
+    alt No hay mensajes nuevos (rc=1)
+        Poller-->>Cron: Salida limpia (sin novedades)
+        Cron->>Cron: Fin del barrido (conserva last_run)
+    else Error en Poller (rc=2)
+        Poller-->>Cron: Error (login, DOM, timeout)
+        Cron->>Cron: Notificación crítica, NO toca checkpoint
+    else Hay mensajes nuevos (rc=0)
+        Poller-->>Cron: Novedades detectadas
+        Cron->>Agent: Iniciar sweep aislado (window.json)
+        
+        loop Lectura y deduplicación
+            Agent->>Teams: Extraer texto e imágenes de mensajes
+            Agent->>Notion: Query data_source (¿existe fingerprint?)
+        end
+        
+        Agent-->>Cron: Termina y emite JSON final con actions[]
+        
+        Cron->>Validator: Validar events.jsonl + stderr
+        
+        alt Violación de seguridad o sin dedupe
+            Validator-->>Cron: Rechazo (fail-closed)
+            Cron->>Cron: Notificación de error, NO toca checkpoint
+        else Contrato verificado
+            Validator-->>Cron: Valida OK y extrae actions.json
+            
+            alt Array de acciones vacío (sin tareas nuevas)
+                Cron->>State: Avanza checkpoint atómicamente
+            else Hay tareas a crear/enriquecer
+                Cron->>Writer: bun src/notion-writer.ts actions.json
+                Writer->>Notion: Ejecutar POST/PATCH con schema data_source_id (reintentos 429/5xx)
+                
+                alt Error Notion (4xx o 5xx agotado)
+                    Writer-->>Cron: rc != 0 (Fallo)
+                    Cron->>Cron: Alerta crítica, NO avanza checkpoint
+                else Escritura exitosa
+                    Writer-->>Cron: rc == 0 (Éxito)
+                    Cron->>State: Avanza checkpoint atómicamente
+                end
+            end
+        end
+    end
+```
+
 ## Componentes
 
 | Artefacto (fuente en este repo) | Destino real (mapeado por symlink) |
@@ -75,6 +182,7 @@ AM/PM, Chromium and dedupe changes. Do not restore `last_run`, PAUSE or browser 
 | `ai/agents/opencode/skills/dotfiles-context/` | `~/.config/opencode/skills/dotfiles-context` |
 | `ai/teams-to-tasks/cron.sh` | `~/.config/opencode/scripts/teams-to-tasks-cron.sh` |
 | `ai/teams-to-tasks/poller.ts` | sin symlink: cron.sh lo resuelve vía `readlink -f` junto a `src/` y `node_modules/` |
+| `ai/teams-to-tasks/src/notion-writer.ts` | sin symlink: invocado por `cron.sh` para mutaciones deterministas en Notion |
 | `ai/agents/opencode/mcp/playwright_teams.fragment.json` | aplicado dentro de `~/.config/opencode/opencode.json` por el instalador |
 
 Datos locales (nunca en el repo): perfil de navegador en `~/.local/share/opencode/playwright-teams-profile`, estado y log en `~/.local/state/teams-to-tasks/`.

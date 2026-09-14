@@ -35,19 +35,45 @@ describe("final assistant completion contract", () => {
 		if (scenario === "MCP error") events[2].part.state.output = "### Error\nSnapshot reference missing";
 		expect(() => validateCompletion(encode(events), "", window)).toThrow();
 	});
-	test("only confirmed Notion response IDs prove writes; narration does not", () => {
+	test("accepts validated task creation action with dedupe lookup", () => {
 		const events = fixture();
 		const lookup = structuredClone(events[1]);
 		lookup.part.tool = lookup.part.callID = "notion_API-query-data-source";
-		const write = structuredClone(lookup);
-		write.part.tool = write.part.callID = "notion_API-post-page";
-		write.part.state.output = JSON.stringify({ object: "page", id: "page-created" });
-		events.splice(5, 0, lookup, write);
+		events.splice(5, 0, lookup);
 		const text = events.at(-2)!.part;
-		text.text = JSON.stringify({ ...JSON.parse(text.text), actions: [{ tool: write.part.tool, result_id: "page-created" }] });
-		expect(validateCompletion(encode(events), "", window)).toContain("1 created");
-		write.part.state.output = "I created page-created";
-		expect(() => validateCompletion(encode(events), "", window)).toThrow("unverified Notion write");
+		text.text = JSON.stringify({
+			...JSON.parse(text.text),
+			actions: [{ action: "create", title: "Test task", notes: "Test notes" }],
+		});
+		expect(validateCompletion(encode(events), "", window)).toContain("1 created, 0 updated");
+	});
+	test("rejects actions if dedupe lookup is missing in sweep mode", () => {
+		const events = fixture();
+		const text = events.at(-2)!.part;
+		text.text = JSON.stringify({
+			...JSON.parse(text.text),
+			actions: [{ action: "create", title: "Test task", notes: "Test notes" }],
+		});
+		expect(() => validateCompletion(encode(events), "", window)).toThrow("missing dedupe lookup evidence");
+	});
+	test("rejects direct agent Notion write tool calls", () => {
+		const events = fixture();
+		const write = structuredClone(events[1]);
+		write.part.tool = write.part.callID = "notion_API-post-page";
+		events.splice(5, 0, write);
+		expect(() => validateCompletion(encode(events), "", window)).toThrow("unexpected agent direct Notion write");
+	});
+	test("rejects malformed action payload", () => {
+		const events = fixture();
+		const lookup = structuredClone(events[1]);
+		lookup.part.tool = lookup.part.callID = "notion_API-query-data-source";
+		events.splice(5, 0, lookup);
+		const text = events.at(-2)!.part;
+		text.text = JSON.stringify({
+			...JSON.parse(text.text),
+			actions: [{ action: "create", title: "" }],
+		});
+		expect(() => validateCompletion(encode(events), "", window)).toThrow("create action missing title");
 	});
 
 	// Deliberate, revertable allowance: stale snapshot refs on teams browser tools

@@ -43,18 +43,41 @@ export function validateCompletion(raw: string, stderr: string, window: Window):
 		tools.at(-1)?.tool !== "playwright_teams_browser_close") fail("missing browser completion evidence");
 	if (!tools.some((part) => part.tool === "playwright_teams_browser_navigate" && /^https:\/\/teams\.microsoft\.com(?:\/|$)/.test(part.state.input?.url ?? "")) ||
 		!tools.some((part) => part.tool === "playwright_teams_browser_type" && part.state.input?.text === "que")) fail("missing discovery evidence");
-	const writes = tools.filter((part) => ["notion_API-post-page", "notion_API-patch-page", "notion_API-patch-block-children"].includes(part.tool));
-	if (writes.length !== result.actions.length) fail("unaccounted Notion writes");
-	if (writes.length && window.mode === "sweep" && !used("notion_API-query-data-source")) fail("missing dedupe lookup evidence");
-	if (window.mode === "digest" && !used("notion_API-get-block-children")) fail("missing digest heading lookup evidence");
-	const claimed = new Set<string>();
-	for (const action of result.actions) {
-		const write = writes.find((part) => part.tool === action?.tool && !claimed.has(part.callID) && responseIds(part.state.output).includes(action.result_id));
-		if (!write) fail("unverified Notion write");
-		claimed.add(write.callID);
+	// The agent must be strictly read-only: direct Notion writes are forbidden.
+	if (tools.some((part) => ["notion_API-post-page", "notion_API-patch-page", "notion_API-patch-block-children"].includes(part.tool))) {
+		fail("unexpected agent direct Notion write");
 	}
-	const created = writes.filter((part) => part.tool === "notion_API-post-page").length;
-	return `Validated ${window.mode}: ${created} created, ${writes.length - created} updated (que+Today scope)`;
+	const actions = result.actions;
+	if (actions.length && window.mode === "sweep" && !used("notion_API-query-data-source")) {
+		fail("missing dedupe lookup evidence");
+	}
+	const hasDigest = actions.some((a: any) => (a?.action || a?.type) === "digest");
+	if (hasDigest && window.mode === "digest" && !used("notion_API-get-block-children")) {
+		fail("missing digest heading lookup evidence");
+	}
+	for (const a of actions) {
+		if (!a || typeof a !== "object") fail("invalid action payload");
+		const act = a.action || a.type;
+		if (!["create", "enrich", "resolve", "digest"].includes(act)) {
+			fail(`unrecognized action type: ${act}`);
+		}
+		if (act === "create") {
+			if (!a.title || typeof a.title !== "string" || !a.title.trim()) fail("create action missing title");
+			if (typeof a.notes !== "string") fail("create action missing notes");
+		} else if (act === "enrich") {
+			if (!a.page_id || typeof a.page_id !== "string") fail("enrich action missing page_id");
+			if (typeof a.notes !== "string" && typeof a.notes_update !== "string") fail("enrich action missing notes");
+		} else if (act === "resolve") {
+			if (!a.page_id || typeof a.page_id !== "string") fail("resolve action missing page_id");
+		} else if (act === "digest") {
+			if (!a.parent_id || typeof a.parent_id !== "string") fail("digest action missing parent_id");
+			if (!a.date_heading || typeof a.date_heading !== "string") fail("digest action missing date_heading");
+			if (!Array.isArray(a.sections)) fail("digest action missing sections");
+		}
+	}
+	const created = actions.filter((a: any) => (a.action || a.type) === "create").length;
+	const updated = actions.filter((a: any) => ["enrich", "resolve"].includes(a.action || a.type)).length;
+	return `Validated ${window.mode}: ${created} created, ${updated} updated (que+Today scope)`;
 }
 
 function toolOutputFailed(output: unknown): boolean {
@@ -91,23 +114,24 @@ function recoveredStaleRef(part: any, index: number, tools: any[]): boolean {
 	);
 }
 
-/** Only IDs from parsed successful Notion response objects count as write evidence. */
-function responseIds(output: unknown): string[] {
-	let value: any = output;
-	if (typeof value === "string") {
-		try { value = JSON.parse(value); } catch { return []; }
-	}
-	if (!value || value.isError === true || value.object === "error") return [];
-	if ((value.object === "page" || value.object === "block") && typeof value.id === "string") return [value.id];
-	if (value.object === "list" && Array.isArray(value.results)) return value.results.flatMap(responseIds);
-	if (Array.isArray(value.content)) return value.content.flatMap((part: any) => responseIds(part.text));
-	return [];
+export function extractActions(raw: string): any[] {
+	const events: Event[] = raw.split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
+	const text = events.at(-2);
+	const result = JSON.parse(text!.part.text);
+	return result.actions ?? result.tasks ?? [];
 }
 
 if (import.meta.main) {
 	try {
-		const [events, stderr, runId, mode, start, end] = process.argv.slice(2);
-		console.log(validateCompletion(await Bun.file(events).text(), await Bun.file(stderr).text(), { runId, mode, start, end }));
+		const [events, stderr, runId, mode, start, end, actionsOut] = process.argv.slice(2);
+		const raw = await Bun.file(events).text();
+		const err = await Bun.file(stderr).text();
+		console.log(validateCompletion(raw, err, { runId, mode, start, end }));
+		const targetFile = actionsOut || process.env.TEAMS_ACTIONS_FILE;
+		if (targetFile) {
+			const actions = extractActions(raw);
+			await Bun.write(targetFile, JSON.stringify(actions, null, 2));
+		}
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : "completion validation failed");
 		process.exit(1);
