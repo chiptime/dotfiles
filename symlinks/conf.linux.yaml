@@ -13,6 +13,8 @@
     ~/.config/opencode/skills/teams-to-tasks: ai/agents/opencode/skills/teams-to-tasks
     ~/.config/opencode/skills/notion-personal-backlog: ai/agents/opencode/skills/notion-personal-backlog
     ~/.config/opencode/skills/dotfiles-context: ai/agents/opencode/skills/dotfiles-context
+    ~/.config/opencode/skills/hub-session-close: ai/agents/opencode/skills/hub-session-close
+    ~/.pi/agent/skills/hub-session-close: ai/agents/pi/skills/hub-session-close
     ~/.config/opencode/scripts/teams-to-tasks-cron.sh: ai/teams-to-tasks/cron.sh
     ~/bin/projects: scripts/projects-dashboard.sh
     ~/.config/systemd/user/opencode-web.service: ai/services/opencode-web.service
