@@ -188,8 +188,6 @@ drain job via jobs.yaml + drift gate. Human steps only for pre-existing content:
   refresh (spec CH-DASH "Filter query" stays PARTIAL for this).
 - **Upstream report** to OpenClaw for the SSRF-guard unhandled error; unpin
   `extra_hosts` when fixed.
-- **pi copy of the session-close convention**: `~/.pi/agent/skills/` needs its own
-  `hub-session-close` variant (opencode version exists).
 - Plan phase 4: formal pause/archive of dormant projects + absorb `projects.yaml`.
 
 ## Non-goals
