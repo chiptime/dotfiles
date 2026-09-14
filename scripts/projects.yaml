@@ -20,7 +20,8 @@ dotfiles:
 agy-bridge:
   scope: personal
   status: active
-  desc: Bridge agy↔opencode — ciclo pi-adapter-v02 cerrado y publicado en npm (0.2/0.3)
+  desc: Bridge agy↔opencode — soporte de imagen (bridge de adjuntos) implementado, verificado y commiteado
+  next: push los 4 commits de image-support; reiniciar opencode (modalities/imageInput); arreglar pin pi-adapter manifest (0.3.0→0.3.1)
 
 compare-prices:
   scope: personal
@@ -136,9 +137,8 @@ tmp-compare:
 
 time-tracker:
   scope: personal
-  status: paused
-  desc: Mi antigua app de tareas (2024)
-  next: decidir si se revive o se sustituye por una open-source que la cubra mejor
+  status: cold
+  desc: ARCHIVADO (13/09) — sustituido por el ledger de horas Engram; repo en ~/Code/_archive (remote saneado, PAT pendiente de rotar)
 
 lambda-test:
   scope: personal
@@ -160,24 +160,32 @@ wsl-notify-send:
   status: cold
   desc: Binario instalado, no repo activo
 
+homelab:
+  scope: personal
+  status: active
+  desc: Infra del homelab — Raspberry Pi 4
+  next: primer commit y estructura inicial del repo
+
 # ---- Work (Stratesys / Clece SIS) ----
+
+# Clece SIS — grupo: recruiting-frontend + recruiting-backend (monorepo con apps como streams)
+sis:
+  scope: work
+  status: active
+  name: Clece SIS
+  desc: Monorepo Clece (Angular + SAP CAP) — apps organizadas como streams
+  streams: operational-centers (estable) · associations (cerrado 19/08) · entities-portal (cerrado 09/09) · ep-comments (pendiente de arrancar, workspace listo 21/08)
+  next: revisar qué quedó a medio hacer en deploy-develop (9 dirty); arrancar ep-comments cuando toque
 
 recruiting-frontend:
   scope: work
-  status: active
-  desc: Frontend Clece (Angular) — streams cerrados aquí dentro: associations hotfix 19/08, entities-portal batería verde 09/09
-  next: commits recientes 11/09 en deploy-develop, 7 dirty — revisar qué quedó a medio hacer
+  group: sis
+  desc: Frontend Clece (Angular)
 
 recruiting-backend:
   scope: work
-  status: active
-  desc: Backend Clece (SAP CAP) — aquí viven los streams operational-centers y associations
-  next: commit 11/09 en deploy-develop
-
-sis:
-  scope: work
-  status: cold
-  desc: Monorepo Clece SIS (front+back) — pendiente arrancar: ep-comments (workspace listo 21/08)
+  group: sis
+  desc: Backend Clece (SAP CAP)
 
 # Products
 HyperMonitor:
@@ -185,17 +193,22 @@ HyperMonitor:
   status: cold
   desc: Products — producto interno; sin desarrollo desde ene-2026, 8 dirty
 
-backend:
+# Products/Planificador — grupo: backend + frontend se muestran como un único proyecto
+planificador:
   scope: work
   status: paused
-  desc: Products/Planificador backend — evolución viva del planificador de Ahorramas; WIP refactoring mar-2025
-  next: PARK INDEFINIDO (13/09) — si revive, retomar rama refactoring y decidir el WIP
+  name: Products/Planificador
+  desc: Evolución viva del planificador de Ahorramas (repos backend + frontend en Products/)
+
+backend:
+  scope: work
+  group: planificador
+  desc: Products/Planificador backend — WIP refactoring mar-2025
 
 frontend:
   scope: work
-  status: paused
-  desc: Products/Planificador frontend — evolución viva del planificador de Ahorramas; WIP refactoring mar-2025
-  next: PARK INDEFINIDO (13/09) — si revive, retomar rama refactoring y decidir el WIP
+  group: planificador
+  desc: Products/Planificador frontend — WIP refactoring mar-2025
 
 str06-bh-mid:
   scope: work
