@@ -144,6 +144,41 @@ Formal SDD proposal on `ai-stack` (clerk skill + payload repoint + `backup.sh` l
 `hub/` structure definition), preceded by the standard session preflight choices.
 Implementation lands in ai-stack; the vault change is content-only inside `hub/`.
 
+## Decision: the hub is the single source of truth for project intent (2026-09-14)
+
+Bruno confirmed the goal: ONE place to talk to and see the global state of everything
+running in parallel — that place is the hub. Consequences:
+
+- **The projects dashboard is a sensor + viewer, not a catalog.** It owns facts
+  (repos, git state, sessions, hours) and renders the hub's intent beside them.
+- **Sensor contract:** the dashboard emits
+  `~/.local/share/projects-dashboard/projects.json` (`projects-sensor/v1`) —
+  facts only, including projects discovered solely by OpenCode sessions
+  (`uncatalogued: true`), which is the autodiscovery feed. Transport to the VPS:
+  the 08:00 cron scps the JSON into `hub/inbox/bruno/` (the hub's ingestion
+  interface). pc-eyes keeps its real job: OpenClaw working on the PC.
+- **Task materialization (one collector):** Gertru pulls BOTH Notions directly
+  via her stdio MCP — her token has access to the personal Tareas DB and to
+  Mantenimiento SIS (Clece) — and materializes the `## Tareas` section through
+  the clerk. No inbox hop and no PC involvement for tasks; the sensor keeps
+  machine facts only (repos, sessions, hours, autodiscovery). One-way pull,
+  never hand-edited, source ids preserved. Their schema already fits the model:
+  `ID` (e.g. OC-11), `App` multi-select maps to streams, `Epic`↔`Tasks` dual
+  relation is the milestone→task link, `Status`/`Priority` vocabularies map to
+  the hub's closed sets (mapping to be defined in the ai-stack spec change).
+- **Ingestion:** unknown/changed projects become hub inbox items → existing
+  `drain-inbox` Telegram triage elects estado/prioridad/ambito → clerk writes the
+  note. The sensor never writes to `hub/`.
+- **Vocabulary mapping (dashboard → hub), approved:** active→`activo`,
+  paused→`pausa`, closed+cold→`archivado`; **proposal is not a state** — it becomes
+  an inbox item. The hub schema stays at three estados; do not extend it.
+- **`scripts/projects.yaml` degrades gracefully:** `status` becomes a local
+  fallback/cache until the hub note exists; `group`, `streams`, and descriptions
+  remain local presentation metadata.
+- **Offline safety:** the dashboard keeps a read-only local mirror of hub
+  estado/prioridad; viewing survives VPS downtime, writing always goes through
+  the clerk.
+
 ## Roadmap context (Sept 2026 survey)
 
 | Wave | Content |

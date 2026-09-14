@@ -1,0 +1,94 @@
+flowchart TB
+    subgraph PC["💻 WSL — Bruno's PC"]
+        REPOS["📁 ~/Code"]
+        YAML["📝 projects.yaml (caché)"]
+        LEDGER["⏱️ time-ledger"]
+        subgraph SENSOR["🔍 SENSOR — projects-dashboard"]
+            SWEEP["git sweep"]
+            API["API OpenCode :4096"]
+            RENDER["projects → md/html/json"]
+        end
+        REPOS --> SWEEP
+        API --> RENDER
+        SWEEP --> RENDER
+        YAML --> RENDER
+        LEDGER --> RENDER
+        JSON["📄 projects.json (sensor/v1)"]
+        DASH["🖥️ Dashboard :47624 — ÚNICA VISTA<br/>estado + pendientes + acciones"]
+        RENDER --> JSON
+        RENDER --> DASH
+        CRON["⏰ cron 08:00: regenera + scp"]
+        RENDER --> CRON
+        TSSHEET["📋 daily-ai-timesheet"]
+        SESSIONS["🤖 sesiones locales (opencode)"]
+        PI["🤖 sesiones pi / agy 🔜"]
+    end
+
+    subgraph VPS["☁️ VPS — gertru-workspace"]
+        INBOXHUB["📥 hub/inbox/bruno/"]
+        HUB["🗄️ hub/ (vault — la verdad)<br/>proyectos + hitos + tareas materializadas"]
+        CLERK["📜 CLERK.md + schema<br/>(ro-mount: Gertru no escribe sus propias reglas)"]
+
+        ENGRAMVPS["🧠 Engram réplica read-only<br/>(engram-sync, pull-only)"]
+
+        subgraph OPENCLAW["🐙 OpenClaw = Gertru — EL ORQUESTADOR"]
+            CORE["cerebro del agente"]
+            JOBS["⚙️ jobs.yaml<br/>drain-inbox 07:30 · morning-brief 08:00<br/>weekly-review · overnight"]
+            TG["📱 puente Telegram"]
+            MCPN["🔌 Notion MCP (stdio)"]
+            NODES["🔗 nodos remotos<br/>(pc-eyes: ve/trabaja en el PC)"]
+        end
+
+        CORE --- JOBS
+        CORE --- TG
+        CORE --- MCPN
+        CORE --- NODES
+        ENGRAMVPS -.->|"consulta memoria<br/>(contexto, logs, resúmenes)"| CORE
+    end
+
+    subgraph EXT["🌐 Otros sistemas"]
+        NOTION_P["📓 Notion personal (Tareas)"]
+        NOTION_T["📓 Notion Clece (Mantenimiento SIS)"]
+        ENGRAM["🧠 Engram (memoria)"]
+        RPI["🍓 RPi4 homelab 🔜"]
+        EXCEL["📊 Excel Clece (parte de horas)"]
+        TEAMS["💬 Teams"]
+    end
+
+    BRUNOBOX["👤 Bruno"]
+
+    %% --- flujo de proyectos (sensor → inbox → triaje → hub) ---
+    CRON -- "scp" --> INBOXHUB
+    INBOXHUB --> JOBS
+    JOBS -- "nuevos/cambiados" --> TG
+    TG -- "preguntas de triaje" --> BRUNOBOX
+    BRUNOBOX -- "tu elección" --> CORE
+    CORE -- "valida via CLERK y escribe" --> HUB
+    CLERK -.->|"gobierna"| CORE
+    CORE <-->|"lee/consulta"| HUB
+    HUB -- "espejo read-only" --> DASH
+    JOBS -- "timbre: hay N pendientes" --> TG
+
+    %% --- flujo de tareas (Gertru pull directo de AMBOS Notion) ---
+    NOTION_P -- "pull: tareas personales" --> MCPN
+    NOTION_T -- "pull: tareas trabajo (id, app, rama, estado)" --> MCPN
+    MCPN -- "materializa sección ## Tareas" --> HUB
+    TEAMS -- "teams-to-tasks" --> NOTION_P
+
+    %% --- resto ---
+    NODES <-->|"trabaja unificado"| PC
+    TG <--> BRUNOBOX
+    SESSIONS -- "memoria" --> ENGRAM
+    PI -.->|"futuro: multi-agente"| API
+    ENGRAM -- "engram-sync: chunks vía git<br/>(local → repo → VPS, never reverse)" --> ENGRAMVPS
+    RPI -.->|"futuro: nodo escritor engram-sync"| ENGRAM
+    ENGRAM -- "contexto" --> TSSHEET
+    LEDGER -- "horas" --> TSSHEET
+    TSSHEET -- "TSV diario" --> EXCEL
+    DASH --> BRUNOBOX
+
+    style SENSOR fill:#0d1524,stroke:#5ec2f7,color:#e8eef8
+    style HUB fill:#1a2333,stroke:#34d399,color:#e8eef8
+    style OPENCLAW fill:#1a1325,stroke:#c084fc,color:#e8eef8
+    style DASH fill:#0d1524,stroke:#5ec2f7,color:#e8eef8
+    style EXT fill:#12101a,stroke:#a78bfa,color:#e8eef8
