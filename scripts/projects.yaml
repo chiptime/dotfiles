@@ -43,7 +43,8 @@ engram-sync:
 ai-stack:
   scope: personal
   status: active
-  desc: Automatizaciones del VPS (jobs, opencode-delegate) — 2 ciclos SDD cerrados y archivados (payloads-v3-cerebro 18/08, openclaw-notion-mcp-stdio 19/08)
+  desc: Automatizaciones del VPS (jobs, drift-check, config declarativa) — control-hub fase 2 en producción; fix registro de alias de modelos (237bedf)
+  next: Verificar drain-inbox 07:30 (primer uso real del tier flash) y silencio del drift-alert :17
 
 voice-assistant:
   scope: personal
