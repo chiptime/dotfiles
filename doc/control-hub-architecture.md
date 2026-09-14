@@ -4,8 +4,8 @@ Architecture decision record for Bruno's global control hub: one git-versioned v
 that every assistant (Gertru, opencode local/VPS, pi, Obsidian) reads and feeds without
 merge risk, without manual git, and without invading the agent's living space.
 
-Decided: 2026-09-13 · Status: design closed, implementation pending formal SDD proposal
-Traceability: Engram topic key `architecture/hub-control-ecosistema` (observations #8613–#8629, project `dotfiles`/`ai-stack`/`bruno`)
+Decided: 2026-09-13 · **Implemented & in production: 2026-09-14** (SDD change `control-hub`, archived) · **Local layer wired: 2026-09-14** (plan phases 1-3 complete)
+Traceability: Engram topic keys `architecture/hub-control-ecosistema` + `sdd/control-hub/*`; ai-stack `openspec/specs/{control-hub,gertru-clerk}`; vault `gertru-lab/gertru-workspace`
 
 ---
 
@@ -19,43 +19,60 @@ priorities, noise, and project surveys that only an agent session can reconstruc
 
 ## The decision (one line)
 
-**The vault already exists: `gertru-lab/gertru-workspace`.** Gertru's workspace inside
+**The vault already existed: `gertru-lab/gertru-workspace`.** Gertru's workspace inside
 the OpenClaw container is a git repo (branch `master`, GitHub origin, daily snapshot via
-`backup.sh`, living on named volume `openclaw-state`). We do not build a new vault —
-we add a delimited, well-structured room (`hub/`) inside it and route all writes
+`backup.sh`, living on named volume `openclaw-state`). We did not build a new vault —
+we added a delimited, well-structured room (`hub/`) inside it and route all writes
 through fixed, validated operations.
 
 Rejected alternatives:
 - **New vault / repo** — a seventh entry point; ignores that the embryo exists.
 - **Notion as hub** — breaks file-native access for every agent; network-dependent.
-- **Bind-mount gymnastics** — unnecessary; the workspace is already a git repo with remote.
+- **Bind-mount gymnastics on the clone** — replaced in production by the stable
+  `/opt/ai-stack/openclaw-hub` mirror (Dokploy's re-clone races container creation).
 
 ## Role map
 
 | System | Role |
 |---|---|
 | `gertru-lab/gertru-workspace` (`hub/`) | **Single source of truth** for project management state |
+| **Obsidian (local clone, pull-only)** | **Human dashboard — first-class product layer**: `hub/dashboard.md`, project notes, Canvas ecosystem map. Read-only sync via obsidian-git (never pushes) |
 | `cerebro/` (rest of workspace) | Gertru's personal second brain — untouched by the hub |
 | Engram | Agent operational memory (session state) — never the human dashboard |
 | Notion personal | Inbox + mobile push reminders (satellite, not source) |
 | Notion work (Clece) | Corporate boundary — untouched |
 | `~/.dotfiles/scripts/projects.yaml` + `PROJECTS.md` | Repo-level technical layer (branch, dirty, last commit) — stays as is |
-| Morning-brief / weekly-review | Consumers: read the vault, list pending triage |
+| `/opt/ai-stack/openclaw-hub` (ro-mounted at `/etc/openclaw/hub/`) | The RULES: `CLERK.md`, `schema.json`, `clerk-validate.mjs`, `MANUAL.md`, `templates/` — stable mirror, never workspace-resident (Gertru cannot edit her own write rules) |
+| **`~/hub` (local clone + `hub-session-close` skill)** | **Local agent layer**: every meaningful opencode session drops a session-close summary into `~/hub/hub/inbox/opencode/` and pushes (create-only, pathspec-scoped, pull --rebase first). First live item: `aaf4081` (2026-09-14) |
+| Morning-brief / weekly-review / drain-inbox | Consumers: read the vault, list pending triage, apply inbox items |
+
+## Data vs. Rules — separation of powers
+
+| | `workspace/hub/` (the vault — DATA) | `/etc/openclaw/hub/` (ro-mount — RULES) |
+|---|---|---|
+| Contents | `proyectos/`, `inbox/`, `dashboard.md`, `ecosistema.md` | `CLERK.md`, `schema.json`, `clerk-validate.mjs`, `MANUAL.md`, `templates/` |
+| Who writes | Gertru, only via validated ops | Nobody in-container (physically read-only) |
+| Source | git → GitHub vault → Obsidian mirror | ai-stack repo (with its 141+ tests), rsynced to the stable `/opt` mirror |
+| Lifecycle | Evolves with every drain/log | Evolves with every deploy |
+
+Rationale: Gertru must keep write access to her workspace (it is her house). If the
+validator lived inside it, the fox would guard the henhouse. The ro-mount is the only
+hard in-container boundary.
 
 ## Hub layout
 
 ```
 gertru-workspace/
-├── hub/                          ← THE ROOM (ours, created once by us)
+├── hub/                          ← THE ROOM (ours)
 │   ├── inbox/                    ← capture door: multi-writer, safe by construction
 │   │   ├── opencode/             ←    each writer ONLY creates new files:
 │   │   ├── pi/                   ←    <YYYY-MM-DD>-<slug>.md in its own namespace
 │   │   ├── bruno/
 │   │   └── _triage/              ←    disputed items awaiting human election
 │   ├── proyectos/                ← structured zone: clerk writes ONLY here
-│   ├── dashboard.md              ← global state, filterable queries
+│   ├── dashboard.md              ← global state table (see follow-up: regen)
 │   └── ecosistema.md             ← apps, integrations, automations map
-├── cerebro/                      ← Gertru's brain: intocable
+├── cerebro/                      ← Gertru's brain: untouched
 └── (openclaw.json, credentials, identity — outside git entirely)
 ```
 
@@ -64,28 +81,30 @@ gertru-workspace/
 | Zone | Writers | Rule |
 |---|---|---|
 | `hub/inbox/<writer>/` | Everyone (agents, Bruno drops) | Create-only, own namespace → content conflicts impossible by construction |
-| `hub/proyectos/`, `dashboard.md`, `ecosistema.md` | Clerk (Gertru) only | Fixed validated operations: `set-estado`, `add-hito`, `add-log`, `nuevo-proyecto`, `archivar`, `drain-inbox` |
+| `hub/proyectos/`, `dashboard.md`, `ecosistema.md` | Clerk (Gertru) only | Six fixed validated ops: `set-estado`, `add-hito`, `add-log`, `nuevo-proyecto`, `archivar`, `drain-inbox` — schema validation before any write, exit 1 = zero writes |
 | `hub/inbox/_triage/` | Nobody applies anything | Items wait for Bruno's explicit election |
 | Rest of workspace | Gertru only | Hub never touches it (the 90%) |
 | Local clone | Nobody pushes. Ever | Obsidian + obsidian-git configured **pull-only** |
 
-Gertru enters `hub/` only through the service door: her judgment goes into **what**
-she writes (mature states, extra info); schema validation guarantees **how**.
+Vocabularies (closed, Spanish): `estado ∈ {activo, pausa, archivado}` ·
+`prioridad` integer ≥ 1 (1 = max) · `ámbito ∈ {personal, trabajo}` ·
+`próxima-acción` ≤ 140 chars · `actualizado` ISO date, mandatory on every write.
 
-## The cycle
+## The cycle (PROVEN in production 2026-09-14)
 
 ```
 1. CAPTURE   fast + dirty → inbox/<writer>/<date>-<slug>.md
              (Telegram dictation bypasses inbox: Gertru applies via clerk directly)
-2. DRAIN     clerk drains inbox at session end (+ daily safety net):
+2. DRAIN     drain-inbox job 07:30 Europe/Madrid (jobs.yaml, Telegram delivery):
              clean deterministic item → applied to proyectos/ + dashboard, file removed
              ambiguous/contradictory  → moved to _triage/ + Telegram notification
-3. TRIAGE    Bruno elects from his phone ("the second one", "merge them", "drop #1")
-             → clerk applies the election (git remembers everything)
-4. CONSULT   dashboard (Obsidian, auto-pull) · morning-brief lists pending triage
+3. TRIAGE    Bruno elects from his phone; clerk applies the election (re-validated)
+4. CONSULT   Obsidian dashboard (auto-pull) · morning-brief §4 lists pending triage 08:00
 ```
 
-Human interrupted only by a real decision; the machine applies everything mechanical.
+Production evidence (2026-09-14): drain run ok (236s, delivered), fail-closed with
+absent validator, 2-writer zero-collision inbox, human election applied
+(vault commits `0dbe89f` → `214bd2a` → `7130e99`, all pushed).
 
 ## Why merges are impossible
 
@@ -93,100 +112,93 @@ Human interrupted only by a real decision; the machine applies everything mechan
 |---|---|
 | Inbox content | Writers create disjoint new files only — no shared file, no conflict, ever |
 | Structured zone | Single writer (clerk) — one head, nothing to merge |
-| Git level (non-fast-forward push) | Resolved by `pull --rebase` before every push — invisible plumbing |
-| Rebasing safety | `pull --rebase` **replays** local commits on top of remote (nothing dropped); real overlaps stop loudly and ask — it never silently overwrites |
-
-**Proscribed operations:** `push --force`, `reset --hard`. The plumbing contract is
-exactly `pull --rebase` + `push`, nothing else.
+| Git level (non-fast-forward push) | `pull --rebase [--autostash]` + push only; force-push and hard reset are PROSCRIBED |
+| Rebasing safety | Rebase REPLAYS local commits (nothing dropped); overlaps stop loudly and ask |
 
 ## Model strategy
 
 | Work | Model tier |
 |---|---|
-| Clerk operations, inbox drain, state updates | Small/cheap model (structured ops against a fixed schema — small models excel here) |
-| Judgment: reprioritize, weekly-review synthesis, what to archive | Large model |
-| Local agents closing a session | Cheap tier (flash class proven on full SDD cycles in agy-bridge) |
+| Clerk ops, drain, state updates | Cheap tier (`zai/glm-4.5-flash` alias, cost 0, plan-covered) |
+| Judgment: reprioritize, weekly-review synthesis | Large model (`zai/glm-5.3` default, denylist-corrected) |
+| Local agents closing a session | Cheap tier |
 
-Also fixes the pending VPS config bug: default model `glm-5.3-highspeed` is not in
-the plan (exit-3 delegation failures) — route/pin a valid cheap tier.
+## Obsidian — the human layer (WIRED 2026-09-14)
 
-## Implementation phases
+The local mirror lives at `~/hub` (clone via the `github.com-chiptime` SSH alias) and is
+**pre-wired**: the Obsidian Git plugin is downloaded at
+`~/hub/.obsidian/plugins/obsidian-git/` with `data.json` locked to pull-only
+(`disablePush: true`, `autoPullInterval: 5`, `autoSaveInterval: 0`), enabled via
+`community-plugins.json`, and `.obsidian/` is excluded through `.git/info/exclude`
+(never travels to the vault). Remaining human steps: open `~/hub` as an Obsidian vault
+and turn on community plugins.
 
-| # | Phase | Contents | Status |
-|---|---|---|---|
-| 1 | Control schema | `hub/` tree, project frontmatter (`estado`, `prioridad`, `ámbito`, `próxima-acción`, `actualizado`), `dashboard.md` queries, `ecosistema.md` | Approved — pending formal proposal |
-| 2 | Gertru clerk | Clerk skill (fixed ops + schema validation), `drain-inbox` op, model routing, `pull --rebase` added to `backup.sh`, push-per-session convention | Approved — pending formal proposal |
-| 3 | Local mirror | Clone + Obsidian (pull-only sync), local agents drop session-close items to `inbox/<writer>/` and push | Approved — pending formal proposal |
-| 4 | Noise zeroing | Archive dead projects (`estado: archivado`), absorb `projects.yaml` conventions where they overlap | Approved — pending formal proposal |
+Agent side: the `hub-session-close` skill (dotfiles
+`ai/agents/opencode/skills/hub-session-close/`, symlinked + registered) wires the
+session-close convention — create-only items under `hub/inbox/opencode/`, `pull
+--rebase` → pathspec add → commit → push, never force, stop on conflict. What you get:
+`hub/dashboard.md` as the global state table, every project note readable/searchable,
+`hub/ecosistema.md` + Canvas for the ecosystem map. Edits made here NEVER travel — if
+you want a change, tell Gertru or drop an inbox item.
 
-**Migration notes (one-time):** move `cerebro/proyectos/` → `hub/proyectos/`
-(same content, cleaner boundary); repoint payloads (morning-brief §4, weekly-review
-§6–7 read exact paths); everything lives in ai-stack, which we own.
+## From-zero reproducibility (verified live)
 
-## Safety nets
+Deploy the compose app and the hub self-assembles: clerk surface mounted from the
+stable `/opt` mirror, entrypoint scaffold (idempotent, fail-soft, NEVER `migrate`),
+drain job via jobs.yaml + drift gate. Human steps only for pre-existing content:
+`migrate` + derived-values report review before the vault push. Full story:
+`DEPLOY.md §9.7`; operator usage: `openclaw/hub/MANUAL.md`; agent contract:
+`openclaw/hub/CLERK.md`.
 
-| Scenario | Net |
+## Production incidents & hardenings (2026-09-14, all fixed with RED-GREEN tests)
+
+1. **Gateway death on transient fetch failure** — upstream OpenClaw 2026.7.1-2 bug:
+   unhandled TLSSocket `'error'` in the SSRF guard; its custom lookup dials api.z.ai
+   AAAA records. Three-layer mitigation: `NODE_OPTIONS=--dns-result-order=ipv4first` +
+   `net.ipv6.conf.all.disable_ipv6=1` + `/etc/hosts` pin (`extra_hosts`) — the hosts
+   file is the only lookup layer nothing can bypass. Upstream report + unpin pending.
+2. **Dokploy re-clone inode race** — direct `./openclaw/hub` bind captured an empty
+   pre-clone inode; the drain ran with "validador ausente" and correctly fail-closed
+   everything to `_triage`. Fix: stable `/opt/ai-stack/openclaw-hub` mirror (the same
+   proven pattern as `/opt/ai-stack/automations`), synced by the existing path unit.
+3. **Crash-orphaned writes** — a killed run left uncommitted writes in the working
+   tree; the drain refused to touch them (fail-closed), the human elected, the operator
+   re-validated, then they were committed. Lesson: "zero partial writes" is guaranteed
+   at COMMIT granularity; write-then-crash leaves working-tree orphans by design.
+4. **Empty directories are invisible to git** — scaffold created `inbox/<ns>/` with
+   `mkdir`, but git does not version empty dirs: every fresh clone (Obsidian mirror,
+   local agents) was born WITHOUT an inbox; the container's own working tree masked
+   the flaw. Fix: `.gitkeep` in all four namespaces (vault `1e3cec2`) + scaffold seeds
+   them (ai-stack `a65d23a`). Lesson: a distributed system's real test is a NEW node
+   joining, not the existing ones working.
+
+## Plan status (convergence plan v2.3)
+
+| Phase | Status |
 |---|---|
-| Bad write to `hub/` (by Gertru, us, or anyone) | Git history = audit + `git revert` |
-| Container recreation | Named volume `openclaw-state` + daily backup + GitHub remote |
-| Backup/deploy failure | Existing fail-soft semantics (OpenCode backup never breaks) |
-| Secrets | `openclaw.json`/credentials live outside the versioned workspace; hub holds none |
+| 1 — Control schema (tree, frontmatter, vocabularies, dashboard) | ✅ production |
+| 2 — Gertru clerk (ops, validator, drain 07:30, model routing, rebase plumbing) | ✅ production |
+| 3 — Local layer (mirror `~/hub`, Obsidian pull-only pre-wired, agent session-close skill) | ✅ wired (open Obsidian to finish) |
+| 4 — Noise zeroing (archive dead projects, pause decisions, absorb projects.yaml) | 🔲 not started |
+
+## Follow-ups (open, non-blocking)
+
+- **Dashboard regeneration**: migrated notes never populate `dashboard.md` (only
+  drain-touched rows appear). Recommend a clerk `regen-dashboard` op or drain-side
+  refresh (spec CH-DASH "Filter query" stays PARTIAL for this).
+- **Upstream report** to OpenClaw for the SSRF-guard unhandled error; unpin
+  `extra_hosts` when fixed.
+- **pi copy of the session-close convention**: `~/.pi/agent/skills/` needs its own
+  `hub-session-close` variant (opencode version exists).
+- Plan phase 4: formal pause/archive of dormant projects + absorb `projects.yaml`.
 
 ## Non-goals
 
-- No new vault, no Notion-hub, no bind mounts, no manual git for Bruno.
+- No new vault, no Notion-hub, no manual git for Bruno, no local pushes.
 - Not touching: `cerebro/` personal content, `openclaw.json`/credentials, Notion work,
   `PROJECTS.md`/`projects.yaml` repo-technical layer.
 
-## Next step
+## Documents
 
-Formal SDD proposal on `ai-stack` (clerk skill + payload repoint + `backup.sh` line +
-`hub/` structure definition), preceded by the standard session preflight choices.
-Implementation lands in ai-stack; the vault change is content-only inside `hub/`.
-
-## Decision: the hub is the single source of truth for project intent (2026-09-14)
-
-Bruno confirmed the goal: ONE place to talk to and see the global state of everything
-running in parallel — that place is the hub. Consequences:
-
-- **The projects dashboard is a sensor + viewer, not a catalog.** It owns facts
-  (repos, git state, sessions, hours) and renders the hub's intent beside them.
-- **Sensor contract:** the dashboard emits
-  `~/.local/share/projects-dashboard/projects.json` (`projects-sensor/v1`) —
-  facts only, including projects discovered solely by OpenCode sessions
-  (`uncatalogued: true`), which is the autodiscovery feed. Transport to the VPS:
-  the 08:00 cron scps the JSON into `hub/inbox/bruno/` (the hub's ingestion
-  interface). pc-eyes keeps its real job: OpenClaw working on the PC.
-- **Task materialization (one collector):** Gertru pulls BOTH Notions directly
-  via her stdio MCP — her token has access to the personal Tareas DB and to
-  Mantenimiento SIS (Clece) — and materializes the `## Tareas` section through
-  the clerk. No inbox hop and no PC involvement for tasks; the sensor keeps
-  machine facts only (repos, sessions, hours, autodiscovery). One-way pull,
-  never hand-edited, source ids preserved. Their schema already fits the model:
-  `ID` (e.g. OC-11), `App` multi-select maps to streams, `Epic`↔`Tasks` dual
-  relation is the milestone→task link, `Status`/`Priority` vocabularies map to
-  the hub's closed sets (mapping to be defined in the ai-stack spec change).
-- **Ingestion:** unknown/changed projects become hub inbox items → existing
-  `drain-inbox` Telegram triage elects estado/prioridad/ambito → clerk writes the
-  note. The sensor never writes to `hub/`.
-- **Vocabulary mapping (dashboard → hub), approved:** active→`activo`,
-  paused→`pausa`, closed+cold→`archivado`; **proposal is not a state** — it becomes
-  an inbox item. The hub schema stays at three estados; do not extend it.
-- **`scripts/projects.yaml` degrades gracefully:** `status` becomes a local
-  fallback/cache until the hub note exists; `group`, `streams`, and descriptions
-  remain local presentation metadata.
-- **Offline safety:** the dashboard keeps a read-only local mirror of hub
-  estado/prioridad; viewing survives VPS downtime, writing always goes through
-  the clerk.
-
-## Roadmap context (Sept 2026 survey)
-
-| Wave | Content |
-|---|---|
-| 1 — Close | agy-bridge 0.2.0 (commit docs, push 6 commits, publish) · teams-to-tasks staged commit · compare-prices docs commit |
-| 2 — Unblock | VPS server default-model fix → delegate deploy + live smoke |
-| 3 — Build | `ep-storage-lifecycle` apply (entities-portal, planning complete, ~1400-1600 lines, 5 work units) |
-| 4 — Backlog | openclaw-notion-mcp apply · pdr-async-docs-phase3 apply · compare-prices critical scrapers |
-| Decision | Formal pause/archive: recruiting-backend, recruiting-frontend, voice-assistant, sis, busqueda-vacaciones |
-
-Engram: roadmap saved under topic key `roadmap/activo/global` (observation #8613).
+`MANUAL.md` (daily use, Spanish) · `CLERK.md` (agent contract, Spanish) ·
+`DEPLOY.md §9.7` (from-zero) · this ADR (why) · specs in `openspec/specs/{control-hub,gertru-clerk}`.
