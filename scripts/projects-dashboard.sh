@@ -53,14 +53,16 @@ done < <(find "$CODE_ROOT" -maxdepth 6 -type d -name .git \
   -not -path "*/node_modules/*" \
   -not -path "*sis-app-worktrees*" \
   -not -path "*apps-workspaces*" \
+  -not -path "*/_archive/*" \
   -not -path "*/.onboard-capture/*" \
+  -not -path "*/Clece/sis/.git" \
   -not -path "*__MACOSX*" \
   -not -path "*/.cache/*" 2>/dev/null | sort)
 
 # ---------------------------------------------------------------------------
 # 2. Parse human annotations (simple YAML subset: 2-space indented key: value)
 # ---------------------------------------------------------------------------
-declare -A A_SCOPE A_STATUS A_DESC A_NEXT
+declare -A A_SCOPE A_STATUS A_DESC A_NEXT A_GROUP
 annotated=()
 
 if [ -f "$ANNOTATIONS" ]; then
@@ -74,10 +76,34 @@ if [ -f "$ANNOTATIONS" ]; then
            status) A_STATUS["$current"]="$val" ;;
            desc)   A_DESC["$current"]="$val" ;;
            next)   A_NEXT["$current"]="$val" ;;
+           group)  A_GROUP["$current"]="$val" ;;
          esac ;;
     esac
   done < "$ANNOTATIONS"
 fi
+
+# ---------------------------------------------------------------------------
+# 2.5 Ledger hours (current week) from time-ledger CSV, if present
+# ---------------------------------------------------------------------------
+declare -A L_WEEK
+LEDGER_CSV="$HOME/.local/share/time-ledger/entries.csv"
+week_total=""
+if [ -f "$LEDGER_CSV" ]; then
+  if [ "$(date +%u)" -eq 1 ]; then lw_mon="$(date +%F)"; else lw_mon="$(date -d 'last monday' +%F)"; fi
+  lw_sun="$(date -d "$lw_mon +6 days" +%F)"
+  while read -r p h; do L_WEEK["$p"]="$h"; done < <(
+    awk -F, -v from="$lw_mon" -v to="$lw_sun" \
+      '$1>=from && $1<=to {sum[$2]+=$3} END {for (p in sum) printf "%s %.1f\n", p, sum[p]}' "$LEDGER_CSV")
+  week_total="$(awk -F, -v from="$lw_mon" -v to="$lw_sun" '$1>=from && $1<=to {s+=$3} END {printf "%.1f", s+0}' "$LEDGER_CSV")"
+fi
+
+# group members inherit the parent's status
+for n in "${!A_GROUP[@]}"; do
+  if [ -z "${A_STATUS["$n"]:-}" ]; then
+    parent="${A_GROUP["$n"]}"
+    [ -n "${A_STATUS["$parent"]:-}" ] && A_STATUS["$n"]="${A_STATUS["$parent"]}"
+  fi
+done
 
 # ---------------------------------------------------------------------------
 # 3. Emit Markdown grouped by status
@@ -95,8 +121,10 @@ emit_row() {
   [ "${R_BEHIND["$name"]}" != "-" ] && [ "${R_BEHIND["$name"]}" != "0" ] && sync="$sync ↓${R_BEHIND["$name"]}"
   local next="${A_NEXT["$name"]:-}"
   [ -n "$next" ] && next=" · **Next:** $next"
-  printf "| %s | \`%s\` | %s%s%s | %s%s |\n" \
-    "$name" "${R_BRANCH["$name"]}" "${R_DATE["$name"]}" "$dirty_flag" "$sync" "${A_DESC["$name"]:-}" "$next"
+  local wh="${L_WEEK["$name"]:-}"
+  [ -z "$wh" ] && wh="—"
+  printf "| %s | \`%s\` | %s%s%s | %s | %s%s |\n" \
+    "$name" "${R_BRANCH["$name"]}" "${R_DATE["$name"]}" "$dirty_flag" "$sync" "$wh" "${A_DESC["$name"]:-}" "$next"
 }
 
 section() {
@@ -106,7 +134,7 @@ section() {
     [ "${A_STATUS["$name"]:-}" = "$status" ] && names+=("$name")
   done
   [ "${#names[@]}" -eq 0 ] && return 0
-  printf "\n## %s (%d)\n\n| Repo | Branch | Last commit | Notes |\n|---|---|---|---|\n" "$title" "${#names[@]}"
+  printf "\n## %s (%d)\n\n| Repo | Branch | Last commit | H(sem) | Notes |\n|---|---|---|---|---|\n" "$title" "${#names[@]}"
   mapfile -t names < <(for n in "${names[@]}"; do echo "${R_DATE["$n"]} $n"; done | sort -r | awk '{print $2}')
   for name in "${names[@]}"; do emit_row "$name"; done
 }
@@ -115,7 +143,8 @@ section() {
   echo "# 🗂️ Global Project Tracker"
   echo
   echo "_Generated $gen · sources: git sweep of \`$CODE_ROOT\` + \`scripts/projects.yaml\`_"
-  echo "_Refresh: run \`projects\`_"
+  echo "_Refresh: run \`projects\` (now prints this view)_"
+  [ -n "$week_total" ] && [ "$week_total" != "0.0" ] && echo "_⏱️ Ledger semana actual: **${week_total}h**_"
 
   section "🟢 Active" active
   section "📝 Proposal pending decision" proposal
@@ -139,5 +168,9 @@ section() {
   echo
 } > "$OUT"
 
-echo "Dashboard written: $OUT"
+# Web dashboard (best-effort; standalone from ai-quotas, served on its own port)
+python3 "$DOTFILES/scripts/projects-html.py" "$OUT" >/dev/null 2>&1 || true
+
+echo
+cat "$OUT"
 echo "Repos scanned: ${#repos[@]} · annotated: ${#annotated[@]} · unclassified: $unclassified_count"
