@@ -34,6 +34,11 @@ $TL tsv 2/1/2026 | grep -qP '^proj-y\t2\tnota y\tses_XYZ$' || fail "tsv: ses_id 
 # month aggregation over the fixture month
 $TL month 2026-01 | grep -qE "TOTAL +3\.5 h" || fail "month: total"
 
+# dedupe guard: identical add twice -> single row
+$TL add 2/1/2026 proj-x 1.5 "nota x" >/dev/null || fail "add repetido"
+[ "$(grep -c 'proj-x,1.5,manual,nota x' "$T/.local/share/time-ledger/entries.csv")" -eq 1 ] \
+  || fail "dedupe: fila duplicada"
+
 # usage error: missing args must fail (non-zero) without writing
 if $TL add 2/1/2026 proj-z >/dev/null 2>&1; then fail "add sin horas debe fallar"; fi
 [ "$(wc -l < "$T/.local/share/time-ledger/entries.csv")" -eq 3 ] || fail "CSV sin filas basura"
