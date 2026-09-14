@@ -7,7 +7,7 @@ Mental map completo: qué alimenta al sistema, por dónde, quién ingiere y con 
 
 | # | Fuente | Tubería | Quién ingiere | Papel | Periodicidad / frescura | Estado |
 |---|---|---|---|---|---|---|
-| 1 | **Repos / sesiones / horas** (PC) | `projects.json` (`projects-sensor/v1`) → scp → `hub/inbox/bruno/` | drain-inbox 07:30 | Hechos + autodescubrimiento (incluye `uncatalogued` por sesiones) | regen 08:00 diaria + on-demand (`projects`) + cierre de cada sesión; scp en el cron de las 08:00 ⚠️ **llega DESPUÉS del drain de las 07:30 — resolver orden** | ✅ vivo |
+| 1 | **Repos / sesiones / horas** (PC) | `projects.json` (`projects-sensor/v1`) → scp → `hub/inbox/bruno/` | drain-inbox 07:30 | Hechos + autodescubrimiento (incluye `uncatalogued` por sesiones) | cadena matinal: **al arrancar el PC (+90 s) o a las 07:00 si ya está encendido** (timer systemd `Persistent=true` — recupera la ejecución si estaba apagado) + on-demand (`projects`) + cierre de cada sesión; scp → inbox: 🔜 se engancha a la misma cadena (spec ai-stack) | ✅ vivo |
 | 2 | **Notion personal (Tareas)** | MCP directo de Gertru (stdio) | clerk → sección `## Tareas` | Tareas personales (id, estado, accionable) | a definir en el spec (sugerencia: con el drain diario) | ✅ vivo |
 | 3 | **Notion Clece (Mantenimiento SIS)** | MCP directo de Gertru (mismo token, permisos de ambos) | clerk → sección `## Tareas` | Tareas de trabajo (OC-N, App=streams, rama, estado) | ídem #2 | ✅ según token de Gertru — **verificar empíricamente en la 1ª sync** |
 | 4 | **Engram** | `engram-sync` chunks vía git → réplica read-only en VPS (`ENGRAM_SYNC_PULL_ONLY=1`) | Gertru consulta | Contexto: memoria de sesiones, logs, resúmenes | ciclo por ejecución del sync (cron de engram-sync, continuo) | ✅ corriendo |
@@ -17,17 +17,25 @@ Mental map completo: qué alimenta al sistema, por dónde, quién ingiere y con 
 | 8 | **RPi4 homelab** | `engram-sync` como nodo escritor + potencial sensor propio | réplica Engram / inbox | Cuarta máquina aportando memoria y hechos | heredaría engram-sync | 🔜 repo recién creado |
 | 9 | GitHub issues/PRs | *sin tubería* | ¿clerk? | Tareas de código | — | 💡 potencial — sin plan, no dibujado |
 
-## Relojes montados (inventario de frescura)
+## Relojes (definitivos, 2026-09-14)
 
-| Reloj | Cuándo | Qué refresca |
-|---|---|---|
-| cron `projects` (PC) | diario 08:00 | snapshot MD/HTML/JSON + scp al inbox |
-| `projects` on-demand | cuando lo invocas / cierre de sesión | ídem |
-| digest ntfy | lunes 09:00 | resumen al móvil |
-| drain-inbox (VPS) | 07:30 | triaje del inbox → Telegram ⚠️ hoy leería el JSON de ayer (ver #1) |
-| morning-brief (VPS) | 08:00 | lee hub → timbre por Telegram |
-| engram-sync | por ejecución de su cron | réplica read-only en VPS |
-| espejo hub → dashboard | 🔜 no montado | pintaría estado del hub en las tarjetas |
+| Reloj | Cuándo | Qué hace | Estado |
+|---|---|---|---|
+| **Cadena matinal PC** | **primer encendido +90 s** o 07:00 si ya está on (Persistent) | regen md/html/json → digest ntfy diario | ✅ montado (`projects-morning.timer`) |
+| Espejo hub→dashboard | dentro de la cadena matinal (tras regen) | baja `hub-state.json` y lo pinta | 🔜 spec ai-stack |
+| scp sensor → inbox | dentro de la cadena matinal (tras espejo) | entrega `projects.json` en `hub/inbox/bruno/` | 🔜 spec ai-stack |
+| drain-inbox (VPS) | 07:30 | triaje → Telegram | ✅ diseñado en control-hub (jobs.yaml) |
+| morning-brief (VPS) | 08:00 | lee hub → timbre Telegram | ✅ diseñado |
+| Sync Notion (Gertru) | cada 1 h a :15, laborables 08–20 | pull tareas → `## Tareas` | 🔜 spec ai-stack |
+| engram-sync | push :45 cada hora (locales) · pull 07:15 (VPS) | réplica read-only | 🔜 coordinar con sesión engram-sync |
+| Teams→Notion | cron laboral | alimenta Notion personal | ✅ vivo |
+| Web :47624 | estática entre regens | vista | ✅ viva — refresca la cadena u on-demand |
+
+**Orden anti-pisado**: productores antes que consumidores (espejo→scp→drain→brief); escritores
+del hub (drain y sync de tareas) nunca coinciden en minuto (:30 vs :15); engram-sync lleva
+flock + rebase propio. **Nota de arranque**: con el PC apagado de madrugada, el drain de las
+07:30 lee lo último que dejó la cadena del día anterior — suficiente para triaje matinal; la
+cadena del encendido (~08:50) entrega el fresco antes de que empieces a las 9:00.
 
 ## Invariantes (lo que mantiene coherente el sistema)
 
