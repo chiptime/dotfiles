@@ -179,7 +179,7 @@ drain job via jobs.yaml + drift gate. Human steps only for pre-existing content:
 | 1 — Control schema (tree, frontmatter, vocabularies, dashboard) | ✅ production |
 | 2 — Gertru clerk (ops, validator, drain 07:30, model routing, rebase plumbing) | ✅ production |
 | 3 — Local layer (mirror `~/hub`, Obsidian pull-only pre-wired, agent session-close skill) | ✅ wired (open Obsidian to finish) |
-| 4 — Noise zeroing (archive dead projects, pause decisions, absorb projects.yaml) | 🔲 not started |
+| 4 — Noise zeroing (2026-09-14: `012-time-tracker` archived by election `b76c1e3`; recruiting ×2 proven ACTIVE — the dormant-survey was stale Engram data; `projects.yaml` absorption resolved by layer consistency, no merge needed) | ✅ closed |
 
 ## Follow-ups (open, non-blocking)
 
