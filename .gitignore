@@ -6,4 +6,4 @@
 # Router + poller typecheck deps (lockfiles stay committed)
 ai/opencode-router/node_modules/
 ai/teams-to-tasks/node_modules/
-.playwright-mcp/
+.playwright-mcp/__pycache__/
