@@ -73,6 +73,9 @@ test("isolated allowlist preserves user model but excludes interactive agents/pl
 			"playwright_teams_browser_run_code_unsafe",
 			"engram_mem_save",
 			"notion_API-delete-a-block",
+			"notion_API-post-page",
+			"notion_API-patch-page",
+			"notion_API-patch-block-children",
 		])
 			expect(permissions[name]).toBeUndefined();
 		const roots = [

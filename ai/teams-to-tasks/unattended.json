@@ -26,10 +26,7 @@
         "notion_API-query-data-source": "allow",
         "notion_API-retrieve-a-data-source": "allow",
         "notion_API-retrieve-a-page": "allow",
-        "notion_API-get-block-children": "allow",
-        "notion_API-post-page": "allow",
-        "notion_API-patch-page": "allow",
-        "notion_API-patch-block-children": "allow"
+        "notion_API-get-block-children": "allow"
       }
     }
   }

@@ -60,8 +60,9 @@ function setup() {
 		notifyLog: join(tmp, "notify.log"),
 		promptDump: join(tmp, "prompt.txt"),
 		runDirDump: join(tmp, "run-dir.txt"),
+		writerMarker: join(tmp, "writer.count"),
 		/** Run cron.sh with stubbed poller/agent (env seams) and stub notify. */
-		run(opts: { pollRc?: number; agentRc?: number; scenario?: string; mode?: string; pollWrites?: boolean; concurrentState?: boolean }) {
+		run(opts: { pollRc?: number; agentRc?: number; writerRc?: number; writerCmd?: string; scenario?: string; mode?: string; pollWrites?: boolean; concurrentState?: boolean }) {
 			const pollRc = opts.pollRc ?? 0;
 			const agentRc = opts.agentRc ?? 0;
 			const notifyExe = join(tmp, "notify-stub.sh");
@@ -86,6 +87,13 @@ function setup() {
 				(opts.concurrentState ? `printf concurrent > ${ctx.stateFile}; ` : "") +
 				`bun '${join(import.meta.dir, "completion-fixture.ts")}' '${opts.scenario ?? "success"}'; ` +
 				`exit ${agentRc}`;
+			if (opts.writerCmd) {
+				env.TEAMS_WRITER_CMD = opts.writerCmd;
+			} else if (opts.writerRc !== undefined) {
+				env.TEAMS_WRITER_CMD = `echo writer >> ${ctx.writerMarker}; exit ${opts.writerRc}`;
+			} else {
+				env.TEAMS_WRITER_CMD = `echo writer >> ${ctx.writerMarker}; exit 0`;
+			}
 			const proc = Bun.spawnSync(["bash", CRON_SH, opts.mode ?? "sweep"], {
 				env,
 				stdout: "pipe",
@@ -240,5 +248,29 @@ describe("cron.sh — poller-first agent gating (sweep)", () => {
 			holder.kill();
 			await holder.exited;
 		}
+	});
+
+	test("when agent produces actions and writer succeeds → state advances, writer executed", () => {
+		const c = setup();
+		writeFileSync(c.stateFile, "2026-09-09T18:30:00.000Z");
+		const r = c.run({ scenario: "actions", writerRc: 0 });
+		expect(r.rc).toBe(0);
+		expect(lines(c.writerMarker)).toBe(1);
+		const written = readFileSync(c.stateFile, "utf8");
+		expect(written).not.toBe("2026-09-09T18:30:00.000Z");
+		expect(r.log).toContain("[ok] sweep completed");
+		expect(content(c.notifyLog)).toContain("[OK] Teams sweep");
+	});
+
+	test("when agent produces actions but writer fails → state untouched, critical notify", () => {
+		const c = setup();
+		const previous = "2026-09-09T18:30:00.000Z";
+		writeFileSync(c.stateFile, previous);
+		const r = c.run({ scenario: "actions", writerRc: 1 });
+		expect(r.rc).toBe(1);
+		expect(lines(c.writerMarker)).toBe(1);
+		expect(readFileSync(c.stateFile, "utf8")).toBe(previous);
+		expect(r.log).toContain("state not advanced");
+		expect(content(c.notifyLog)).toContain("[FAIL]");
 	});
 });

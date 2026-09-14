@@ -36,6 +36,15 @@ if (import.meta.main) {
 		events[2].part.state.status = "error";
 		events[2].part.state.error = "The user rejected permission";
 	}
+	if (scenario === "actions") {
+		const lookup = structuredClone(events[1]);
+		lookup.part.tool = lookup.part.callID = "notion_API-query-data-source";
+		events.splice(5, 0, lookup);
+		text.text = JSON.stringify({
+			...JSON.parse(text.text),
+			actions: [{ action: "create", title: "Task 1", notes: "Notes 1" }],
+		});
+	}
 	if (scenario === "ansi") console.error("\x1b[93mordinary diagnostic\x1b[0m");
 	console.log(encode(events));
 }
