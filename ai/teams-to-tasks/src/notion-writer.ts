@@ -44,11 +44,40 @@ export interface AppendDigestAction {
 	}>;
 }
 
+/**
+ * Hard cap for the Resolution Draft mirror property (spec R7): Notion
+ * rich_text payloads are capped at 2000 characters per text content node;
+ * the writer refuses longer drafts before any request leaves.
+ */
+export const MAX_RESOLUTION_DRAFT_CHARS = 2000;
+
+/**
+ * Post-approval triage mirror update (spec R7 — resolver path ONLY).
+ * Every field is optional and only provided fields are PATCHed: Estado /
+ * Notas (fingerprint carriers, R5) are never touched by this action.
+ * Ingestion (completion.ts) keeps its own allowlist and never emits it.
+ */
+export interface SetTriageAction {
+	action: "triage";
+	page_id: string;
+	/** Triage Status select value (⏳ Pendiente/🤖 Auto/💡 Acción/✋ Manual/✔️ Hecho/❌ Rechazado). */
+	triage_status?: string;
+	/** Resolution Draft rich_text — capped at MAX_RESOLUTION_DRAFT_CHARS. */
+	resolution_draft?: string;
+	/** Local Context Ref rich_text (cited path+lines, machine-local pointer). */
+	local_context_ref?: string;
+	/** Approval State select value (Pendiente/Aprobado/Rechazado). */
+	approval_state?: string;
+	/** Draft ID rich_text — the h12 short form of the approved hash. */
+	draft_id?: string;
+}
+
 export type NotionAction =
 	| CreateTaskAction
 	| EnrichTaskAction
 	| ResolveTaskAction
-	| AppendDigestAction;
+	| AppendDigestAction
+	| SetTriageAction;
 
 export interface ActionResult {
 	action: NotionAction["action"];
@@ -332,6 +361,62 @@ export class NotionWriter {
 	}
 
 	/**
+	 * Set triage mirror properties on an existing task page (resolver path).
+	 * Selective by construction: absent fields never appear in the PATCH
+	 * body, so fingerprints (Estado/Notas) and unrelated properties are
+	 * preserved (spec R5, R7). 429/5xx retries come from request().
+	 */
+	async triageTask(action: SetTriageAction): Promise<ActionResult> {
+		if (!action.page_id || typeof action.page_id !== "string") {
+			throw new Error("triage action requires a page_id");
+		}
+		if (
+			action.resolution_draft !== undefined &&
+			action.resolution_draft.length > MAX_RESOLUTION_DRAFT_CHARS
+		) {
+			throw new Error(
+				`resolution_draft exceeds ${MAX_RESOLUTION_DRAFT_CHARS} chars ` +
+					`(${action.resolution_draft.length})`,
+			);
+		}
+
+		const properties: Record<string, any> = {};
+		if (action.triage_status !== undefined) {
+			properties["Triage Status"] = { select: { name: action.triage_status } };
+		}
+		if (action.resolution_draft !== undefined) {
+			properties["Resolution Draft"] = {
+				rich_text: [{ text: { content: action.resolution_draft } }],
+			};
+		}
+		if (action.local_context_ref !== undefined) {
+			properties["Local Context Ref"] = {
+				rich_text: [{ text: { content: action.local_context_ref } }],
+			};
+		}
+		if (action.approval_state !== undefined) {
+			properties["Approval State"] = { select: { name: action.approval_state } };
+		}
+		if (action.draft_id !== undefined) {
+			properties["Draft ID"] = { rich_text: [{ text: { content: action.draft_id } }] };
+		}
+		if (Object.keys(properties).length === 0) {
+			throw new Error("triage action sets no properties");
+		}
+
+		const response = await this.request<{ id: string }>(
+			`/pages/${action.page_id}`,
+			"PATCH",
+			{ properties },
+		);
+		return {
+			action: "triage",
+			id: response.id,
+			success: true,
+		};
+	}
+
+	/**
 	 * Execute an array of actions sequentially.
 	 */
 	async executeActions(actions: NotionAction[]): Promise<ActionResult[]> {
@@ -351,6 +436,9 @@ export class NotionWriter {
 						break;
 					case "digest":
 						results.push(await this.appendDigest(action as AppendDigestAction));
+						break;
+					case "triage":
+						results.push(await this.triageTask(action as SetTriageAction));
 						break;
 					default:
 						throw new Error(`Unknown action: ${act}`);

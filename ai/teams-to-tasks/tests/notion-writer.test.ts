@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	DEFAULT_DATA_SOURCE_ID,
+	MAX_RESOLUTION_DRAFT_CHARS,
 	NOTION_API_VERSION,
 	NotionApiError,
 	NotionWriter,
@@ -306,5 +307,152 @@ describe("NotionWriter", () => {
 		expect(results[0].success).toBe(true);
 		expect(results[1].success).toBe(false);
 		expect(results[1].error).toContain("Server error");
+	});
+});
+
+describe("NotionWriter triage handler (R7 — resolver path)", () => {
+	test("sets only the provided properties, preserving fingerprints", async () => {
+		let capturedUrl = "";
+		let capturedBody: any;
+
+		const mockFetch = createMockFetch((url, init) => {
+			capturedUrl = url;
+			capturedBody = JSON.parse(init.body as string);
+			return jsonResponse({ id: "page-tri-1" });
+		});
+
+		const writer = new NotionWriter({
+			token: "secret_test_token",
+			fetchFn: mockFetch,
+		});
+
+		const result = await writer.triageTask({
+			action: "triage",
+			page_id: "page-tri-1",
+			triage_status: "💡 Acción",
+			resolution_draft: "Borrador aprobado",
+		});
+
+		expect(result).toEqual({
+			action: "triage",
+			id: "page-tri-1",
+			success: true,
+		});
+
+		expect(capturedUrl).toBe("https://api.notion.com/v1/pages/page-tri-1");
+		const properties = capturedBody.properties;
+		// Selective set: exactly the two provided fields, nothing else.
+		expect(Object.keys(properties).sort()).toEqual(["Resolution Draft", "Triage Status"]);
+		expect(properties["Triage Status"].select.name).toBe("💡 Acción");
+		expect(properties["Resolution Draft"].rich_text[0].text.content).toBe(
+			"Borrador aprobado",
+		);
+		// Fingerprint carriers are never part of a triage PATCH (R5).
+		expect(properties.Estado).toBeUndefined();
+		expect(properties.Notas).toBeUndefined();
+	});
+
+	test("mirrors every resolver field when all are provided", async () => {
+		let capturedBody: any;
+		const mockFetch = createMockFetch((_url, init) => {
+			capturedBody = JSON.parse(init.body as string);
+			return jsonResponse({ id: "page-tri-2" });
+		});
+
+		const writer = new NotionWriter({ token: "t", fetchFn: mockFetch });
+
+		await writer.triageTask({
+			action: "triage",
+			page_id: "page-tri-2",
+			triage_status: "✔️ Hecho",
+			resolution_draft: "done",
+			local_context_ref: "/data/work/sis/README.md:L10-L42",
+			approval_state: "Aprobado",
+			draft_id: "ab12cd34ef56",
+		});
+
+		expect(Object.keys(capturedBody.properties).sort()).toEqual([
+			"Approval State",
+			"Draft ID",
+			"Local Context Ref",
+			"Resolution Draft",
+			"Triage Status",
+		]);
+		expect(capturedBody.properties["Draft ID"].rich_text[0].text.content).toBe("ab12cd34ef56");
+	});
+
+	test("refuses a resolution_draft over the 2000-char cap before any request", async () => {
+		let calls = 0;
+		const mockFetch = createMockFetch(() => {
+			calls++;
+			return jsonResponse({ id: "x" });
+		});
+
+		const writer = new NotionWriter({ token: "t", fetchFn: mockFetch });
+
+		expect(() =>
+			writer.triageTask({
+				action: "triage",
+				page_id: "p",
+				resolution_draft: "x".repeat(MAX_RESOLUTION_DRAFT_CHARS + 1),
+			}),
+		).toThrow(`resolution_draft exceeds ${MAX_RESOLUTION_DRAFT_CHARS} chars`);
+		expect(calls).toBe(0);
+	});
+
+	test("refuses a triage action with no properties", async () => {
+		const writer = new NotionWriter({ token: "t", fetchFn: createMockFetch(() => jsonResponse({ id: "x" })) });
+		await expect(
+			writer.triageTask({ action: "triage", page_id: "p" }),
+		).rejects.toThrow("sets no properties");
+	});
+
+	test("429 on triage retries then succeeds — receipt-ready (R7)", async () => {
+		let attempts = 0;
+		const bodies: any[] = [];
+
+		const mockFetch = createMockFetch((_url, init) => {
+			attempts++;
+			bodies.push(init.body ? JSON.parse(init.body as string) : null);
+			if (attempts === 1) {
+				return jsonResponse({ message: "rate limited" }, 429, { "retry-after": "0" });
+			}
+			return jsonResponse({ id: "page-tri-3" });
+		});
+
+		const writer = new NotionWriter({
+			token: "secret_test_token",
+			fetchFn: mockFetch,
+			retryDelayMs: 1,
+		});
+
+		const result = await writer.triageTask({
+			action: "triage",
+			page_id: "page-tri-3",
+			triage_status: "🤖 Auto",
+		});
+
+		expect(attempts).toBe(2);
+		expect(result.success).toBe(true);
+		expect(result.id).toBe("page-tri-3");
+		// Same PATCH body on the retry — idempotent replay of the validated action.
+		expect(bodies[0]).toEqual(bodies[1]);
+	});
+
+	test("executeActions dispatches triage through the shared switch", async () => {
+		let capturedBody: any;
+		const mockFetch = createMockFetch((_url, init) => {
+			capturedBody = JSON.parse(init.body as string);
+			return jsonResponse({ id: "page-tri-4" });
+		});
+
+		const writer = new NotionWriter({ token: "t", fetchFn: mockFetch });
+
+		const results = await writer.executeActions([
+			{ action: "triage", page_id: "page-tri-4", triage_status: "✋ Manual" },
+		]);
+
+		expect(results).toEqual([{ action: "triage", id: "page-tri-4", success: true }]);
+		expect(capturedBody.properties["Triage Status"].select.name).toBe("✋ Manual");
 	});
 });
