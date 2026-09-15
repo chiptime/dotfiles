@@ -136,14 +136,12 @@ class RendererTests(unittest.TestCase):
                 self.assertNotIn("no disponible", panel)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class DirtyHistoryTests(RendererTests):
     """Phase 2 (sensor-inbox-triage): rolling dirty_history[7] fact collection."""
 
-    MD = "## Active (1)\n| known | `main` | 2020-01-01 | — | ⚠25 dirty |\n"
+    MD = "## Active (1)\n| known | `main` | 2020-01-01 ⚠️25 dirty | — | |\n"
 
     def run_renderer(self, md_text):
         def urlopen(url, timeout):
@@ -199,3 +197,47 @@ class DirtyHistoryTests(RendererTests):
             rows = json.loads(hist_path(tmp).read_text())["known"]
             self.assertEqual(len(rows), 7)
             self.assertEqual(rows[-1]["dirty"], 25)  # today's row is the newest
+
+
+class HubStateMirrorTests(RendererTests):
+    """Phase 3 (hub-state-mirror): optional sibling index becomes json facts."""
+
+    def run_renderer_with_hub(self, md_text, hub_index=None):
+        captured = {}
+        with tempfile.TemporaryDirectory(prefix="dashboard-test-", dir="/tmp/opencode") as tmp:
+            home = Path(tmp)
+            annotations = home / ".dotfiles/scripts/projects.yaml"
+            annotations.parent.mkdir(parents=True)
+            annotations.write_text("")
+            md = home / "PROJECTS.md"
+            md.write_text(md_text)
+            if hub_index is not None:
+                (home / "hub-state.json").write_text(json.dumps(hub_index))
+            with patch.dict(os.environ, {"HOME": tmp}), \
+                 patch("sys.argv", [str(RENDERER), str(md)]), \
+                 patch("urllib.request.urlopen", side_effect=lambda *a, **k: (_ for _ in ()).throw(OSError("offline"))), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                runpy.run_path(str(RENDERER), run_name="__main__")
+            captured["projects.json"] = json.loads((home / "projects.json").read_text())
+        return captured
+
+    MD = "## Active (1)\n| known | `main` | 2020-01-01 | — | |\n"
+
+    def test_hub_facts_embedded_when_mirror_present(self):
+        cap = self.run_renderer_with_hub(self.MD, {
+            "schema": "hub-state/v1", "generated": "2026-09-15T10:00:00Z",
+            "projects": [{"slug": "known", "estado": "pausa", "prioridad": 2, "ambito": "personal"}],
+        })
+        entry = cap["projects.json"]["projects"][0]
+        self.assertEqual(entry["estado_hub"], "pausa")
+        self.assertEqual(entry["prioridad_hub"], 2)
+        self.assertEqual(entry["status_local"], None)  # never merged — both facts coexist
+
+    def test_no_mirror_means_no_hub_facts(self):
+        cap = self.run_renderer_with_hub(self.MD)
+        entry = cap["projects.json"]["projects"][0]
+        self.assertNotIn("estado_hub", entry)
+        self.assertNotIn("prioridad_hub", entry)
+
+if __name__ == "__main__":
+    unittest.main()
