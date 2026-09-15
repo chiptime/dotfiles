@@ -12,6 +12,19 @@ describe("final assistant completion contract", () => {
 	test.each(["", "not json", "\x1b[0m{}"])("rejects missing/malformed events: %j", (raw) => {
 		expect(() => validateCompletion(raw, "", window)).toThrow();
 	});
+	test("accepts a final JSON missing only trailing closers and reports the repair", () => {
+		const events = fixture();
+		const raw = events.at(-2)!.part.text as string;
+		expect(raw.endsWith("]}")).toBe(true);
+		events.at(-2)!.part.text = raw.slice(0, -2);
+		expect(validateCompletion(encode(events), "", window)).toContain("final JSON repaired");
+	});
+	test("still rejects a mid-document malformation with balanced brackets", () => {
+		const events = fixture();
+		const raw = events.at(-2)!.part.text as string;
+		events.at(-2)!.part.text = raw.replace('"coverage":"que-today"', '"coverage" "que-today"');
+		expect(() => validateCompletion(encode(events), "", window)).toThrow("malformed final assistant result");
+	});
 	test("rejects zero-exit permission denial even with a valid final result", () => {
 		expect(() => validateCompletion(encode(fixture()), "permission requested: external_directory; auto-rejecting", window)).toThrow("permission denied");
 	});

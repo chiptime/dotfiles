@@ -224,7 +224,8 @@ Tras el primer install: reiniciar opencode y hacer login manual una vez en la ve
 | `2` | fallo (login, perfil bloqueado, DOM cambiado, timeout) | log + notificación crítica, sin agente, `last_run` intacto |
 
 - **Timeout**: deadline in-process de 100 s dentro del poller (cierra el navegador) + backstop `timeout -k 15s 120s` en cron.sh (SIGTERM → cierra y rc 2; `-k` SIGKILL como último recurso).
-- **Checkpoint commit**: only validated sweep completion advances the committed state. Failed/incomplete runs are retried from the same boundary, with fingerprint dedupe protecting previous writes. The agent has a 900-second timeout plus a 15-second kill backstop; no automatic browser-lock cleanup is attempted.
+- **Checkpoint commit**: only validated sweep completion advances the committed state. Failed/incomplete runs are retried from the same boundary, with fingerprint dedupe protecting previous writes. The agent timeout is mode-dependent: 900 s for sweeps, 1500 s for digest (override with `TEAMS_DIGEST_TIMEOUT`), plus a 15-second kill backstop; no automatic browser-lock cleanup is attempted.
+- **Failure diagnosis**: on any failed run, `src/diagnose.ts` classifies the failure from the run artifacts (exit code mapping, stage reconstruction from the event stream, session signals, validator reason) and its one-liner becomes the critical notification body; the full breakdown is written to `<run_dir>/diag.txt`. Toasts never carry raw agent content.
 - **E2E manual** (sin CI con credenciales): con el perfil libre de MCP, `cd ai/teams-to-tasks && bun poller.ts; echo $?` — espera `0` (primera vez = bootstrap news) o `1`; revisa `last_run` y repite. Un rc `2` con diagnóstico en stderr indica drift de selectores o sesión caducada.
 
 ## Operación
