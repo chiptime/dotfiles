@@ -43,8 +43,8 @@ engram-sync:
 ai-stack:
   scope: personal
   status: active
-  desc: Automatizaciones del VPS (jobs, drift-check, config declarativa) — control-hub en producción, validador verificado exit 0 (591e1fa: ro-mount vía /opt mirror)
-  next: Observar drain 07:30 — primera ejecución programada con clerk-validate vivo; si aplica limpio, ciclo probado
+  desc: Control-hub en producción — roadmap de integración COMPLETO (fases 0-4): clerk 8 ops, tareas Notion a :15, triaje determinista del sensor, espejo hub-state y panel multi-agente
+  next: Aceptación en vivo — preguntar a Gertru "¿tareas abiertas de X?" tras el primer sync de las 08:15; primer consumo de projects.json por el drain
 
 voice-assistant:
   scope: personal
