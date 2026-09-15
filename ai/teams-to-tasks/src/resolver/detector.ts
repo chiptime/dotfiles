@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Cron detector for the task-resolver (spec R1, design D1).
+ * DEPRECATED (v1, dormant): superseded by enrich.ts.
  *
  * LLM-free, read-only poll: queries ONLY the Tareas data source for Estado
  * `📥 Inbox`, never the forbidden SIS data sources, deduplicates by
