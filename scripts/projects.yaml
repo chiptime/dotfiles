@@ -20,8 +20,8 @@ dotfiles:
 agy-bridge:
   scope: personal
   status: active
-  desc: Bridge agy↔opencode — soporte de imagen (bridge de adjuntos) implementado, verificado y commiteado
-  next: push los 4 commits de image-support; reiniciar opencode (modalities/imageInput); arreglar pin pi-adapter manifest (0.3.0→0.3.1)
+  desc: Bridge agy para hosts CLI (opencode 0.5.0 + pi 0.4.0) — soporte de imagen publicado en npm; pipeline compartido en el engine
+  next: habilitar imageInput por proyecto (.pi/agy-bridge.json o ~/.pi/agent/); follow-up flake session-store (1ms timestamp)
 
 compare-prices:
   scope: personal
