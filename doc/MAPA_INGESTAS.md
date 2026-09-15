@@ -23,17 +23,23 @@ Mental map completo: qué alimenta al sistema, por dónde, quién ingiere y con 
 |---|---|---|---|
 | **Cadena matinal PC** | **primer encendido +90 s** o 07:00 si ya está on (Persistent) | regen md/html/json → digest ntfy diario | ✅ montado (`projects-morning.timer`) |
 | Espejo hub→dashboard | dentro de la cadena matinal (tras regen) | baja `hub-state.json` y lo pinta | 🔜 spec ai-stack |
-| scp sensor → inbox | dentro de la cadena matinal (tras espejo) | entrega `projects.json` en `hub/inbox/bruno/` | 🔜 spec ai-stack |
-| drain-inbox (VPS) | 07:30 | triaje → Telegram | ✅ diseñado en control-hub (jobs.yaml) |
+| scp sensor → inbox | dentro de la cadena matinal (tras espejo) | entrega `projects.json` en `hub/inbox/bruno/` (atómico, best-effort) | ⚙️ implementado (`1ae65f2`, dotfiles) — vivo tras el despliegue de las 19:00 |
+| drain-inbox (VPS) | 07:30 | triaje → Telegram; consume `projects.json` con `sensor-triage-eval.mjs` (3 disparadores sellados) | ⚙️ implementado (`db2e455`) — vivo tras el despliegue de las 19:00 |
 | morning-brief (VPS) | 08:00 | lee hub → timbre Telegram | ✅ diseñado |
 | Sync Notion (Gertru) | cada 1 h a :15, laborables 08–20 | pull tareas → `## Tareas` | 🔜 spec ai-stack |
-| engram-sync | push :45 cada hora (locales) · pull 07:15 (VPS) | réplica read-only | 🔜 coordinar con sesión engram-sync |
+| engram-sync | push :45 cada hora (locales) · pull **07:15 Europe/Madrid** (VPS) | réplica read-only | ✅ vivo — desplegado el 2026-09-15 (`1967af3`, imagen reconstruida); `engram-sync-loop.sh` en `mode=daily`, zona verificada CEST. Primer disparo real pendiente de comprobar tras las 07:30. Marcha atrás sin reconstruir: `ENGRAM_SYNC_MODE=activity` |
 | Teams→Notion | cron laboral | alimenta Notion personal | ✅ vivo |
 | Web :47624 | estática entre regens | vista | ✅ viva — refresca la cadena u on-demand |
 
 **Orden anti-pisado**: productores antes que consumidores (espejo→scp→drain→brief); escritores
 del hub (drain y sync de tareas) nunca coinciden en minuto (:30 vs :15); engram-sync lleva
-flock + rebase propio. **Nota de arranque**: con el PC apagado de madrugada, el drain de las
+flock + rebase propio. **Horario civil, no UTC**: los relojes del VPS se expresan en
+Europe/Madrid (igual que `automations/jobs.yaml`); el contenedor corre en UTC, así que fijar
+la hora en UTC desplazaría el pull una hora al cambiar el horario de verano y lo dejaría
+*después* del drain la mitad del año. El pull diario tiene ventana acotada `[07:15, 07:30)`:
+si falla o el contenedor reinicia dentro de la ventana reintenta, y al cerrarse ya no se
+ejecuta — nunca llega tarde al drain que alimenta. Una marca con la fecha local garantiza
+una sola ejecución por día aunque supervisor reinicie el proceso. **Nota de arranque**: con el PC apagado de madrugada, el drain de las
 07:30 lee lo último que dejó la cadena del día anterior — suficiente para triaje matinal; la
 cadena del encendido (~08:50) entrega el fresco antes de que empieces a las 9:00.
 
