@@ -163,6 +163,50 @@ for wt in sorted(oc_projects):
         group = session_projects.setdefault(group_key, {"display": display, "sessions": {}})
         group["sessions"][ses] = row
 
+# ---------- multi-agent sessions (Phase 4): pi + agy (facts only, no links) ----------
+# pi: ~/.pi/agent/sessions/--encoded-path--/  (directory name encodes the project path)
+# agy: ~/.gemini/antigravity/code_tracker/active/<project>_<hash>/ (name carries the project)
+agent_sessions = {}  # basename -> {"pi"|"agy": {"count", "last_dt"}}
+RECENT = datetime.now() - timedelta(days=14)
+
+def _bump(name, src, when, count):
+    entry = agent_sessions.setdefault(name, {})
+    cur = entry.get(src)
+    if not cur or when > cur["last_dt"]:
+        entry[src] = {"count": count, "last_dt": when}
+    else:
+        cur["count"] += count
+
+def _scan_files(root):
+    best, recent = datetime.min, 0
+    for _root, _dirs, files in os.walk(root):
+        for f in files:
+            try:
+                m = datetime.fromtimestamp(os.path.getmtime(os.path.join(_root, f)))
+            except OSError:
+                continue
+            if m >= RECENT:
+                recent += 1
+            best = max(best, m)
+    return best, recent
+
+_pi_dir = os.path.expanduser("~/.pi/agent/sessions")
+if os.path.isdir(_pi_dir):
+    for d in os.listdir(_pi_dir):
+        if not (d.startswith("--") and d.endswith("--")):
+            continue
+        best, recent = _scan_files(os.path.join(_pi_dir, d))
+        if recent:
+            real = "/" + d[2:-2].replace("-", "/").lstrip("/")
+            _bump(os.path.basename(real.rstrip("/")) or real, "pi", best, recent)
+
+_agy_dir = os.path.expanduser("~/.gemini/antigravity/code_tracker/active")
+if os.path.isdir(_agy_dir):
+    for d in os.listdir(_agy_dir):
+        best, recent = _scan_files(os.path.join(_agy_dir, d))
+        if recent:
+            _bump(re.sub(r"_[0-9a-f]{16,}$", "", d), "agy", best, recent)
+
 # ---------- units: fold YAML groups (e.g. Products/Planificador) ----------
 # unit = dict(section_key, display, git, meta_key, members[list of names])
 units, grouped = [], {}
@@ -346,7 +390,15 @@ session_notice = ("<p role=\"status\">OpenCode no disponible o datos incompletos
                   "Regenera el panel para reintentar.</p>") if oc_unavailable else ""
 if not session_cards and not oc_unavailable:
     session_notice = "<p>No hay proyectos con sesiones de OpenCode.</p>"
-agent_html = session_notice + f'<div class="grid">{"".join(session_cards)}</div>'
+ma_items = []
+for _name, _srcs in sorted(agent_sessions.items(),
+                           key=lambda kv: max(v["last_dt"] for v in kv[1].values()), reverse=True)[:12]:
+    _parts = " · ".join(f'{k}: {v["count"]} recientes, última {v["last_dt"].strftime("%d/%m %H:%M")}'
+                        for k, v in _srcs.items())
+    ma_items.append(f'<li><code>{esc(_name)}</code> — {_parts}</li>')
+ma_html = (f'<div class="convtitle">Otros agentes (pi · agy)</div>'
+           f'<ul class="conv">{"".join(ma_items)}</ul>') if ma_items else ""
+agent_html = session_notice + f'<div class="grid">{"".join(session_cards)}</div>' + ma_html
 
 week_chip = (f'<span class="chip">{I_CLOCK}<strong>{("%.1f" % week_total).replace(".", ",")}h</strong>'
              f'&nbsp;esta semana</span>') if week_total > 0 else ""
@@ -428,7 +480,7 @@ html_doc = f"""<!doctype html>
 <p class="meta">Actualizado {gen} · fuentes: git sweep + projects.yaml + time-ledger + sesiones OpenCode · refresco diario 08:00 · <code>projects</code> regenera</p>
 <div class="strip">{''.join(chips)}{week_chip}</div>
 <div class="panel"><h2>{I_TARGET}Accionables pendientes</h2><ul>{act_html}</ul></div>
-<section class="panel" id="sec-opencode" aria-labelledby="opencode-title"><h2 id="opencode-title">{I_CHAT}Proyectos con sesiones de OpenCode</h2>{agent_html}</section>
+<section class="panel" id="sec-opencode" aria-labelledby="opencode-title"><h2 id="opencode-title">{I_CHAT}Proyectos con sesiones multi-agente</h2>{agent_html}</section>
 {''.join(body_sections)}
 </body></html>"""
 
@@ -529,7 +581,17 @@ sensor = {
     "schema": "projects-sensor/v1",
     "generated": datetime.now().isoformat(timespec="seconds"),
     "projects": sensor_projects,
+    "multi_agent": {
+        name: {k: {"count": v["count"], "last": v["last_dt"].isoformat(timespec="seconds")}
+               for k, v in srcs.items()}
+        for name, srcs in sorted(agent_sessions.items())
+    },
 }
+for _p in sensor["projects"]:
+    _a = agent_sessions.get(_p["name"])
+    if _a:
+        _p["agents"] = {k: {"count": v["count"], "last": v["last_dt"].isoformat(timespec="seconds")}
+                        for k, v in _a.items()}
 json_path = os.path.join(os.path.dirname(md_path), "projects.json")
 with open(json_path, "w", encoding="utf-8") as f:
     json.dump(sensor, f, ensure_ascii=False, indent=1)
