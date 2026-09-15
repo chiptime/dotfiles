@@ -22,7 +22,7 @@ Mental map completo: qué alimenta al sistema, por dónde, quién ingiere y con 
 | Reloj | Cuándo | Qué hace | Estado |
 |---|---|---|---|
 | **Cadena matinal PC** | **primer encendido +90 s** o 07:00 si ya está on (Persistent) | regen md/html/json → digest ntfy diario | ✅ montado (`projects-morning.timer`) |
-| Espejo hub→dashboard | dentro de la cadena matinal (tras regen) | baja `hub-state.json` y lo pinta | 🔜 spec ai-stack |
+| Espejo hub→dashboard | inicio del sweep (pull del clon `~/hub`) | `hub-state.json` (slug→estado/prioridad) manda sobre `status_local`; fallback sin nota | ⚙️ implementado (`a5c2871` + `13324fb`) — vivo tras el despliegue de las 19:00 |
 | scp sensor → inbox | dentro de la cadena matinal (tras espejo) | entrega `projects.json` en `hub/inbox/bruno/` (atómico, best-effort) | ⚙️ implementado (`1ae65f2`, dotfiles) — vivo tras el despliegue de las 19:00 |
 | drain-inbox (VPS) | 07:30 | triaje → Telegram; consume `projects.json` con `sensor-triage-eval.mjs` (3 disparadores sellados) | ⚙️ implementado (`db2e455`) — vivo tras el despliegue de las 19:00 |
 | morning-brief (VPS) | 08:00 | lee hub → timbre Telegram | ✅ diseñado |
