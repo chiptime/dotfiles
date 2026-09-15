@@ -472,6 +472,28 @@ def unit_json(u):
 
 sensor_projects = [unit_json(u) for u in units]
 
+# dirty_history[7]: hecho rodante por repo (fecha, dirty) para el triaje
+# sostenido del hub. Estado local del sensor, cap 7 por fecha; los huecos
+# (PC apagado) viajan como ausencia y el drain falla cerrado.
+_HIST_PATH = os.path.join(os.path.dirname(md_path), "dirty-history.json")
+try:
+    with open(_HIST_PATH, encoding="utf-8") as f:
+        _hist = json.load(f)
+except (OSError, ValueError):
+    _hist = {}
+_today = datetime.now().strftime("%Y-%m-%d")
+for _u in units:
+    _key = _u["display"]
+    _row = {"date": _today, "dirty": int(_u["git"]["dirty"]) if _u["git"]["dirty"] else 0}
+    _rows = [r for r in (_hist.get(_key) or []) if r.get("date") != _today]
+    _rows.append(_row)
+    _rows.sort(key=lambda r: r["date"])
+    _hist[_key] = _rows[-7:]
+with open(_HIST_PATH, "w", encoding="utf-8") as f:
+    json.dump(_hist, f, ensure_ascii=False, indent=1)
+for _p in sensor_projects:
+    _p["dirty_history"] = _hist.get(_p["name"], [])
+
 # autodescubrimiento: proyectos presentes solo en sesiones de OpenCode (sin catálogo)
 known = {n for u in units for n in u["names"]}
 known_display = {u["display"] for u in units}
@@ -486,6 +508,7 @@ for name, sess in oc_sessions.items():
         "name": name, "repos": [], "scope": None, "status_local": None,
         "branch": [], "last_commit": None, "dirty": 0, "ahead": 0,
         "hours_week": 0.0, "sessions": sessions[:20], "uncatalogued": True,
+        "dirty_history": _hist.get(name, []),
     })
 
 sensor = {

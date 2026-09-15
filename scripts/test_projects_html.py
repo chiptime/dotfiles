@@ -138,3 +138,64 @@ class RendererTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DirtyHistoryTests(RendererTests):
+    """Phase 2 (sensor-inbox-triage): rolling dirty_history[7] fact collection."""
+
+    MD = "## Active (1)\n| known | `main` | 2020-01-01 | — | ⚠25 dirty |\n"
+
+    def run_renderer(self, md_text):
+        def urlopen(url, timeout):
+            raise OSError("no sessions needed")
+
+        captured = {}
+        with tempfile.TemporaryDirectory(prefix="dashboard-test-", dir="/tmp/opencode") as tmp:
+            home = Path(tmp)
+            annotations = home / ".dotfiles/scripts/projects.yaml"
+            annotations.parent.mkdir(parents=True)
+            annotations.write_text("")
+            md = home / "PROJECTS.md"
+            md.write_text(md_text)
+            with patch.dict(os.environ, {"HOME": tmp}), \
+                 patch("sys.argv", [str(RENDERER), str(md)]), \
+                 patch("urllib.request.urlopen", side_effect=urlopen), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                runpy.run_path(str(RENDERER), run_name="__main__")
+            captured["projects.json"] = json.loads((home / "projects.json").read_text())
+            captured["dirty-history.json"] = json.loads((home / "dirty-history.json").read_text())
+        return captured
+
+    def test_embeds_dirty_history_and_dedupes_same_date(self):
+        first = self.run_renderer(self.MD)
+        entry = first["projects.json"]["projects"][0]
+        self.assertEqual(entry["name"], "known")
+        self.assertEqual(len(entry["dirty_history"]), 1)
+        self.assertEqual(entry["dirty_history"][0]["dirty"], 25)
+        hist = first["dirty-history.json"]["known"]
+        self.assertEqual(len(hist), 1)
+        # second same-day run replaces the row instead of duplicating it
+        second = self.run_renderer(self.MD)
+        self.assertEqual(len(second["dirty-history.json"]["known"]), 1)
+
+    def test_roll_cap_keeps_last_seven(self):
+        def hist_path(tmp):  # mirror the harness layout
+            return Path(tmp) / "dirty-history.json"
+
+        # seven old dates + today's run must keep exactly the newest 7
+        with tempfile.TemporaryDirectory(prefix="dashboard-test-", dir="/tmp/opencode") as tmp:
+            home = Path(tmp)
+            (home / ".dotfiles/scripts").mkdir(parents=True)
+            (home / ".dotfiles/scripts/projects.yaml").write_text("")
+            md = home / "PROJECTS.md"
+            md.write_text(self.MD)
+            old = [{"date": f"2020-01-{d:02d}", "dirty": 30} for d in range(1, 8)]
+            (home / "dirty-history.json").write_text(json.dumps({"known": old}))
+            with patch.dict(os.environ, {"HOME": tmp}), \
+                 patch("sys.argv", [str(RENDERER), str(md)]), \
+                 patch("urllib.request.urlopen", side_effect=lambda *a, **k: (_ for _ in ()).throw(OSError("offline"))), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                runpy.run_path(str(RENDERER), run_name="__main__")
+            rows = json.loads(hist_path(tmp).read_text())["known"]
+            self.assertEqual(len(rows), 7)
+            self.assertEqual(rows[-1]["dirty"], 25)  # today's row is the newest

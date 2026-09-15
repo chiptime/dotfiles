@@ -211,3 +211,23 @@ fi
 echo
 cat "$OUT"
 echo "Repos scanned: ${#repos[@]} · annotated: ${#annotated[@]} · unclassified: $unclassified_count"
+
+# ---------------------------------------------------------------------------
+# 6. Hub delivery (Phase 2 — sensor-inbox-triage): atomic best-effort scp of
+# projects.json into hub/inbox/bruno/. Never fatal: the morning chain (regen,
+# digest) must complete even when the VPS is unreachable. Ordering per
+# doc/MAPA_INGESTAS.md: regen -> espejo -> scp -> drain 07:30.
+JSON_OUT="$OUT_DIR/projects.json"
+if [ -s "$JSON_OUT" ]; then
+  SSH_OPTS=(-F /dev/null -i "$HOME/.ssh/id_contabo_VPS_1"
+    -o IdentitiesOnly=yes -o IdentityAgent=none -o ControlPath=none
+    -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
+  if scp -q "${SSH_OPTS[@]}" "$JSON_OUT" \
+      "root@100.74.160.4:/tmp/bruno-projects.incoming" 2>/dev/null \
+     && ssh "${SSH_OPTS[@]}" root@100.74.160.4 \
+      'mv /tmp/bruno-projects.incoming /home/node/.openclaw/workspace/hub/inbox/bruno/projects.json' 2>/dev/null; then
+    echo "hub: projects.json entregado al inbox"
+  else
+    echo "hub: entrega de projects.json falló (no crítico)"
+  fi
+fi
