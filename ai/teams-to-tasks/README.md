@@ -187,6 +187,27 @@ sequenceDiagram
 
 Datos locales (nunca en el repo): perfil de navegador en `~/.local/share/opencode/playwright-teams-profile`, estado y log en `~/.local/state/teams-to-tasks/`.
 
+## Task Resolver (HITL)
+
+Subsistema de dos procesos sobre la misma base Tareas, mismo patrón extractor/ejecutor que el resto del sistema:
+
+- **Detector (cron, LLM-free)**: `src/resolver/detector.ts` consulta Tareas por Estado `📥 Inbox` (jamás fuentes SIS), deduplica por página/revision con `seen.json` y añade a la cola. Lock single-instance y `PAUSE` con la misma semántica que teams-to-tasks. Instalador propio: `scripts/install-task-resolver.sh` (crontab laborable cada hora, minuto 10 para no chocar con el sweep de Teams; idempotente y separado del instalador de teams-to-tasks).
+- **Evaluador (skill atendida `task-resolver`)**: consume `pending-queue.json`, enriquece con contexto local de SOLO lectura vía `src/resolver/read-cli.ts` (raíces aprobadas por `scripts/projects.yaml`, realpath-pinned, deny de `shell/private-env.sh` y ficheros adyacentes a credenciales), clasifica (`SOLVABLE_LOCAL` / `ACTIONABLE_RECOMMENDED` / `MANUAL_REQUIRED`) y persiste runs versionados.
+
+Estado en `~/.local/state/task-resolver/` — local de máquina, JAMÁS commiteado:
+
+```
+pending-queue.json   cola del detector
+seen.json            dedupe página/revision
+lock                 single-instance del detector
+runs/<draft-id>/     run.json, draft.md, evidence.json, patch.diff, actions.json
+receipts.jsonl       append-only; nunca se podan
+```
+
+**Gate de aprobación**: el borrador se previsualiza en el chat con su `h12`; solo un `approve <h12>` en ESA sesión autoriza — vincula hash exacto, acciones, destino y sesión. El espejo en Notion (Triage Status, Approval State, Draft ID) NUNCA autoriza ejecución: el ejecutor determinista (`src/resolver/execute.ts`) lee únicamente el `run.json` local y guarda receipts que bloquean replays. Deriva de revision ⇒ aprobación anulada y nuevo análisis.
+
+**Notificaciones**: `wsl-notify-send` saliente fire-and-forget (Executed / Manual required); sin listener ni webhook — nunca un canal de actuación entrante.
+
 ## Instalación (máquina nueva o reparación)
 
 ```bash
