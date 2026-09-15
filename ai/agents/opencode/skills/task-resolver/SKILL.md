@@ -48,4 +48,4 @@ Return per task: enrichment outcome, hint, evidence citations (or exactly why ev
 
 - `ai/teams-to-tasks/src/resolver/enrich.ts` — the ONLY enrichment write path
 - `ai/teams-to-tasks/src/resolver/read-cli.ts` — the ONLY context read path
-- `openspec/changes/task-resolver-direct-enrichment/specs/notion-task-hitl-resolver/spec.md` — v2 scenarios
+- `openspec/specs/notion-task-hitl-resolver/spec.md` — v2 scenarios
