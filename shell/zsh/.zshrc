@@ -379,3 +379,6 @@ export PATH="/home/bruno/.local/bin:$PATH"
 
 # OpenCode server auth (local-only file, never committed)
 [[ -f "$HOME/.local/share/opencode/server.env" ]] && source "$HOME/.local/share/opencode/server.env"
+
+# OpenClaw Completion
+[ -f "/home/bruno/.openclaw/completions/openclaw.zsh" ] && source "/home/bruno/.openclaw/completions/openclaw.zsh"
