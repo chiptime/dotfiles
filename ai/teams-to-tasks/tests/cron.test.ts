@@ -162,7 +162,8 @@ describe("cron.sh — poller-first agent gating (sweep)", () => {
 		expect(lines(c.pollMarker)).toBe(1);
 		expect(lines(c.agentMarker)).toBe(1);
 		expect(readFileSync(c.stateFile, "utf8")).toBe("2026-09-09T18:30:00.000Z");
-		expect(content(c.notifyLog)).toContain("Incomplete run");
+		expect(content(c.notifyLog)).toContain("agent crash rc=1");
+		expect(content(c.notifyLog)).toContain("[FAIL]");
 		expect(r.log).toContain("state not advanced");
 	});
 

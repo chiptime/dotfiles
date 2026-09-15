@@ -63,6 +63,11 @@ export TEAMS_WINDOW_START="$PREV_LAST_RUN" TEAMS_WINDOW_END="$POLL_START_T"
 jq -n --arg run_id "$RUN_ID" --arg mode "$MODE" --arg start "$PREV_LAST_RUN" --arg end "$POLL_START_T" --arg local_now "$LOCAL_NOW" \
   '{run_id:$run_id, mode:$mode, window_start:$start, window_end:$end, local_now:$local_now}' > "$RUN_DIR/window.json" || exit 1
 
+# Mode-dependent agent wall: digest sweeps the whole day plus images and Notion
+# dedupe; 900s killed it mid-flight (rc=124). Override: TEAMS_DIGEST_TIMEOUT.
+AGENT_TIMEOUT=900
+[ "$MODE" = "digest" ] && AGENT_TIMEOUT="${TEAMS_DIGEST_TIMEOUT:-1500}"
+
 run_poller() {
   if [ -n "${TEAMS_POLL_CMD:-}" ]; then
     bash -c "$TEAMS_POLL_CMD"
@@ -75,8 +80,9 @@ run_agent() {
   if [ -n "${TEAMS_AGENT_CMD:-}" ]; then
     bash -c "$TEAMS_AGENT_CMD"
   else
+    # Digest needs a bigger wall than the hourly sweep (see AGENT_TIMEOUT above).
     # Load only the existing secret environment, not interactive zsh plugins/hooks.
-    timeout -k 15s 900s zsh -f -c '
+    timeout -k 15s "${AGENT_TIMEOUT}s" zsh -f -c '
       if [[ -r "$1/../../shell/private-env.sh" ]]; then source "$1/../../shell/private-env.sh"; fi
       exec bun "$1/unattended.ts"
     ' teams-reader "$SCRIPT_DIR"
@@ -169,5 +175,8 @@ if [ "$AGENT_RC" = 0 ] && bun "$SCRIPT_DIR/src/completion.ts" "$RUN_DIR/events.j
 fi
 
 printf '%s [fail] %s incomplete (agent rc=%s); state not advanced; run=%s\n' "$(date '+%F %T')" "$MODE" "$AGENT_RC" "$RUN_ID" >> "$LOG"
-notify critical "[FAIL] Teams $MODE" "Incomplete run; checkpoint unchanged; inspect runs/$RUN_ID"
+# Classify the failure from run artifacts; deterministic wrapper text only,
+# never raw agent content. Full breakdown lands in <run_dir>/diag.txt.
+DIAG="$(timeout -k 5s 20s bun "$SCRIPT_DIR/src/diagnose.ts" "$RUN_DIR" "$MODE" "$AGENT_RC" "$AGENT_TIMEOUT" 2>/dev/null || true)"
+notify critical "[FAIL] Teams $MODE" "${DIAG:-Incomplete run; checkpoint unchanged; inspect runs/$RUN_ID}"
 exit 1

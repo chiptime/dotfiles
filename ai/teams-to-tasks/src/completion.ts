@@ -26,10 +26,27 @@ export function validateCompletion(raw: string, stderr: string, window: Window):
 	const finish = events.at(-1);
 	const text = events.at(-2);
 	if (finish?.type !== "step_finish" || finish.part?.reason !== "stop" ||
-		text?.type !== "text" || text.part?.type !== "text" || !text.part?.messageID ||
+		text?.type !== "text" || text?.part?.type !== "text" || !text.part?.messageID ||
 		text.part.messageID !== finish.part?.messageID || !text.part.time?.end) fail("missing final assistant result");
 	let result: any;
-	try { result = JSON.parse(text!.part.text); } catch { return fail("malformed final assistant result"); }
+	let repaired = 0;
+	try {
+		result = JSON.parse(text!.part.text);
+	} catch {
+		// Production failure mode (4 consecutive digests, ~250k context): the
+		// document is complete but the model drops 1-2 trailing closing
+		// brackets. Repair ONLY that: reparse after appending the closers
+		// implied by the bracket stack. Any other malformation, and every
+		// substantive contract check below, stays fail-closed.
+		const repairedRaw = balancedCloserRepair(text.part.text);
+		if (repairedRaw === null) fail("malformed final assistant result");
+		try {
+			result = JSON.parse(repairedRaw);
+			repaired = repairedRaw.length - text.part.text.length;
+		} catch {
+			fail("malformed final assistant result");
+		}
+	}
 	if (!result || result.version !== 1 || result.run_id !== window.runId || result.mode !== window.mode ||
 		result.window_start !== window.start || result.window_end !== window.end) fail("completion window mismatch");
 	if (result.status === "session_expired") fail("session expired: manual login required");
@@ -77,7 +94,40 @@ export function validateCompletion(raw: string, stderr: string, window: Window):
 	}
 	const created = actions.filter((a: any) => (a.action || a.type) === "create").length;
 	const updated = actions.filter((a: any) => ["enrich", "resolve"].includes(a.action || a.type)).length;
-	return `Validated ${window.mode}: ${created} created, ${updated} updated (que+Today scope)`;
+	const repairedNote = repaired > 0 ? `; final JSON repaired (+${repaired} closers)` : "";
+	return `Validated ${window.mode}: ${created} created, ${updated} updated (que+Today scope)${repairedNote}`;
+}
+
+/** Appends only the trailing closing brackets implied by the bracket stack
+ * (string- and escape-aware). Returns null when the text ends mid-string,
+ * has more closers than openers anywhere, or exceeds the repair cap — those
+ * are real malformations, never repaired. */
+function balancedCloserRepair(raw: string): string | null {
+	const stack: string[] = [];
+	let inStr = false;
+	let esc = false;
+	for (const ch of raw) {
+		if (esc) {
+			esc = false;
+			continue;
+		}
+		if (inStr && ch === "\\") {
+			esc = true;
+			continue;
+		}
+		if (ch === '"') {
+			inStr = !inStr;
+			continue;
+		}
+		if (inStr) continue;
+		if (ch === "{" || ch === "[") stack.push(ch);
+		else if (ch === "}" || ch === "]") {
+			if (!stack.length) return null;
+			stack.pop();
+		}
+	}
+	if (inStr || !stack.length || stack.length > 8) return null;
+	return raw + [...stack].reverse().map((c) => (c === "{" ? "}" : "]")).join("");
 }
 
 function toolOutputFailed(output: unknown): boolean {
