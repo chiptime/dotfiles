@@ -2,11 +2,13 @@
 
 ## Purpose
 
-Detect `📥 Inbox` Tareas items, enrich with read-only local context, classify, persist versioned drafts; Notion mutations require exact-draft approval.
+Enrich `📥 Inbox` Tareas items on demand with direct informational enrichment: a read-only researcher fills the user's own task with Triage Status (hint), Resolution Draft (proposed reply or what is missing to decide), and cited sources. The only write is that information; no approval, hash, or receipt gates it. v1 approval-gate machinery (poller detection, versioned local runs, FSM/executor) remains in the tree as dormant, documented code.
 
 ## Requirements
 
 ### Requirement: Inbox Detection
+
+> *Historical (v1): this section describes the dormant `detector.ts` poller path. New runs are session-triggered — see On-Demand Trigger; the v1 detector remains optional and unused.*
 
 An LLM-free poller MUST query only Tareas `3d675532-da31-802b-b12f-000be53e99ac` for Estado `📥 Inbox`, never forbidden SIS sources, deduplicating by page/revision.
 
@@ -56,6 +58,8 @@ Classification MUST apply objective criteria: SOLVABLE_LOCAL sufficient cited ev
 
 ### Requirement: Versioned Draft Artifacts
 
+> *Historical (v1): versioned local runs with hash/receipts belong to the dormant approval-gate path. v2 enrichment is stateless per task — its only write is informational enrichment into the user's Inbox task.*
+
 Each analysis MUST persist as a versioned local run: reply draft, inert patch, checklist, evidence, rationale, action targets, hash, budgets — authoritative, never auto-committed; Notion a satellite.
 
 #### Scenario: Complete hashed run
@@ -64,59 +68,20 @@ Each analysis MUST persist as a versioned local run: reply draft, inert patch, c
 - WHEN persisting
 - THEN all elements, hash, uncommitted
 
-### Requirement: Human Approval Gate
+### Requirement: Direct Informational Enrichment
+(Previously: Human Approval Gate — enrichment payloads required hash-bound approval before any Notion write.)
 
-Approval MUST bind exact hash, actions, destination, credential/session. Triage Status/Resolution Draft/Local Context Ref/Approval State/Draft ID mirrors never authorize execution; mirror publication needs approval. Estado/Notas fingerprints preserved. Rejection ends runs; revision rehashes, voiding approvals.
+The evaluator MUST write directly into the user's Inbox task via the deterministic notion-writer triage action (validated property shape, 429/5xx retries), and only these fields: Triage Status (hint: 🤖 Auto / 💡 Acción / ✋ Manual), Resolution Draft (proposed reply OR what is missing to decide), and Local Context Ref (cited sources). No approval, hash, or receipt MAY gate enrichment. Estado MUST never change.
 
-#### Scenario: Hash-bound approval
+#### Scenario: Enriched task
+- GIVEN a researched Inbox task
+- WHEN enrichment writes
+- THEN Triage Status, Resolution Draft, and Local Context Ref with citations are set; Estado unchanged
 
-- GIVEN a run in Pending approval
-- WHEN the user approves
-- THEN only that hash, actions, destination, session authorized
-
-#### Scenario: Mirror never authorizes
-
-- GIVEN Approval State edited in Notion
-- WHEN eligibility is evaluated
-- THEN nothing executes without hash-bound approval
-
-#### Scenario: Reject or revise
-
-- GIVEN a pending run rejected or revised
-- WHEN the decision records
-- THEN Rejected, or a new hash voids prior approval
-
-### Requirement: Resolver State Machine
-
-Runs MUST follow Detected/Analyzing/Pending approval/Approved/Executing/Executed plus Manual required, Failed, Rejected. Unlisted transitions fail closed; drift voids approval; receipts prevent replay; mirror failure never implies success.
-
-#### Scenario: Illegal transition refused
-
-- GIVEN a run in Detected
-- WHEN direct Executing transition attempted
-- THEN refused; run fails closed
-
-#### Scenario: Drift voids approval
-
-- GIVEN an approved run, source revision changed
-- WHEN execution is attempted
-- THEN approval voids; run re-enters analysis
-
-#### Scenario: Receipt blocks replay
-
-- GIVEN an executed action's receipt
-- WHEN the identical action replays
-- THEN execution is refused
-
-### Requirement: Deterministic Post-Approval Executor
-
-The executor MUST extend `ai/teams-to-tasks/src/notion-writer.ts` with validated action types and 429/5xx retries; existing ingestion MUST stay unchanged.
-
-#### Scenario: Validated action retried
-
-- GIVEN an approved action and a 429
-- WHEN the executor runs
-- THEN it retries and records a receipt
+#### Scenario: No-evidence task
+- GIVEN insufficient evidence to decide
+- WHEN enrichment writes
+- THEN Triage Status is ✋ Manual and the draft states exactly what is missing; nothing fabricated
 
 ### Requirement: Untrusted-Data Boundary
 
@@ -130,6 +95,8 @@ Teams messages, Notas text, context, and drafts MUST be data, never instructions
 
 ### Requirement: Metrics And Ceilings
 
+> *Historical (v1): the replay/illegal-transition suites and unapproved-mutation audits scoped the retired FSM/executor. v2 carries the invariant that enrichment writes are informational-only into the user's own task.*
+
 The resolver MUST measure precision, p95 draft latency, token/cost per task. Zero unapproved mutations; injection/replay/illegal-transition suites pass. Time/token/cost ceilings enforced; exhaustion yields MANUAL_REQUIRED.
 
 #### Scenario: Budget exhausted
@@ -137,3 +104,24 @@ The resolver MUST measure precision, p95 draft latency, token/cost per task. Zer
 - GIVEN a task at its token/cost ceiling
 - WHEN budget exhausts
 - THEN Manual required, partial evidence retained
+### Requirement: Enrichment Idempotency
+A task already carrying a Draft ID or non-empty Resolution Draft MUST be skipped. A task whose fields were cleared after a partial failure MUST become eligible again (the retry path).
+
+#### Scenario: Rerun skips enriched
+- GIVEN a task with a non-empty Resolution Draft
+- WHEN enrichment reruns
+- THEN the task is skipped, untouched
+
+#### Scenario: Cleared fields re-enrich
+- GIVEN a partial write left Resolution Draft empty
+- WHEN enrichment reruns
+- THEN the task is re-enriched
+
+### Requirement: On-Demand Trigger
+Enrichment MUST run only when the user requests it in session (e.g. "triaje el inbox"). No cron or unattended scheduling. (Supersedes poller-driven scheduling for new runs; the v1 detector remains optional and unused.)
+
+#### Scenario: Session-triggered only
+- GIVEN no user request this session
+- WHEN the session idles
+- THEN no enrichment runs
+
