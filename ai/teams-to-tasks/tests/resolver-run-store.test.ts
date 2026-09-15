@@ -191,24 +191,25 @@ describe("the gate fails closed before persist (R2, R8)", () => {
 });
 
 describe("retention: prune terminal runs, never receipts (R4)", () => {
-	const mk = (id: string, state: RunState, ageDays: number) => {
+	const mk = (id: string, state: RunState, ageDays: number, now: number) => {
 		persistRun(baseInput({ draft_id: id, state }), stateDir);
 		const file = join(stateDir, "runs", id, "run.json");
 		const record = JSON.parse(readFileSync(file, "utf8"));
-		record.updated_at = new Date(Date.now() - ageDays * DAY_MS).toISOString();
+		record.updated_at = new Date(now - ageDays * DAY_MS).toISOString();
 		writeFileSync(file, JSON.stringify(record, null, "\t") + "\n", "utf8");
 	};
 
 	test("only terminal runs strictly older than retention are pruned", () => {
+		const now = Date.now();
 		const receipts = join(stateDir, "receipts.jsonl");
 		writeFileSync(receipts, '{"action_hash":"h1","ok":true}\n', "utf8");
 		markSeen("page-9", "rev-9", stateDir, "2026-09-01T00:00:00.000Z");
-		mk("old-terminal", "Executed", 100);
-		mk("edge-terminal", "Rejected", RUN_RETENTION_MS / DAY_MS);
-		mk("fresh-terminal", "Rejected", 1);
-		mk("old-live", "Pending approval", 100);
+		mk("old-terminal", "Executed", 100, now);
+		mk("edge-terminal", "Rejected", RUN_RETENTION_MS / DAY_MS, now);
+		mk("fresh-terminal", "Rejected", 1, now);
+		mk("old-live", "Pending approval", 100, now);
 
-		const pruned = pruneTerminalRuns(stateDir, Date.now());
+		const pruned = pruneTerminalRuns(stateDir, now);
 		expect(pruned).toEqual(["old-terminal"]);
 		expect(existsSync(join(stateDir, "runs", "old-terminal"))).toBe(false);
 		expect(existsSync(join(stateDir, "runs", "edge-terminal"))).toBe(true);
