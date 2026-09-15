@@ -472,6 +472,20 @@ def unit_json(u):
 
 sensor_projects = [unit_json(u) for u in units]
 
+# hub-state mirror (Phase 3): optional sibling index — facts only. The PAINTED
+# md already applies hub-wins precedence in the sweep; the json carries both
+# facts so consumers can see hub intent and local cache side by side.
+try:
+    with open(os.path.join(os.path.dirname(md_path), "hub-state.json"), encoding="utf-8") as f:
+        _hub_state = {p["slug"]: p for p in json.load(f).get("projects", [])}
+except (OSError, ValueError):
+    _hub_state = {}
+for _p in sensor_projects:
+    _h = _hub_state.get(_p["name"])
+    if _h:
+        _p["estado_hub"] = _h.get("estado")
+        _p["prioridad_hub"] = _h.get("prioridad")
+
 # dirty_history[7]: hecho rodante por repo (fecha, dirty) para el triaje
 # sostenido del hub. Estado local del sensor, cap 7 por fecha; los huecos
 # (PC apagado) viajan como ausencia y el drain falla cerrado.

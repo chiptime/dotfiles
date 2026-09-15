@@ -106,6 +106,36 @@ for n in "${!A_GROUP[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
+# 2b. Hub mirror (Phase 3 — hub-state-mirror): pull the vault clone and load
+# hub-state.json. HUB WINS: a repo with a hub note paints the hub's estado
+# (activo→active, pausa→paused, archivado→cold); status_local stays the cache
+# for repos without notes. Best-effort: any failure keeps the local cache.
+declare -A A_HUB_ESTADO A_HUB_PRIO
+HUB="$HOME/hub"
+if [ -d "$HUB/.git" ]; then
+  git -C "$HUB" pull --rebase --quiet 2>/dev/null || true
+  if [ -s "$HUB/hub/hub-state.json" ]; then
+    while IFS=$'\t' read -r slug estado prio; do
+      A_HUB_ESTADO["$slug"]="$estado"
+      A_HUB_PRIO["$slug"]="$prio"
+    done < <(python3 - "$HUB/hub/hub-state.json" <<'PYEOF'
+import json, sys
+for p in json.load(open(sys.argv[1])).get("projects", []):
+    print(f'{p["slug"]}\t{p["estado"]}\t{p.get("prioridad") or ""}')
+PYEOF
+    ) 2>/dev/null || true
+  fi
+fi
+hub_section() {  # effective section for a repo (hub wins, local fallback)
+  case "${A_HUB_ESTADO[$1]:-}" in
+    activo) echo active ;;
+    pausa) echo paused ;;
+    archivado) echo cold ;;
+    *) echo "${A_STATUS[$1]:-}" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # 3. Emit Markdown grouped by status
 # ---------------------------------------------------------------------------
 mkdir -p "$OUT_DIR"
@@ -131,7 +161,7 @@ section() {
   local title="$1" status="$2"
   local names=()
   for name in "${repos[@]}"; do
-    [ "${A_STATUS["$name"]:-}" = "$status" ] && names+=("$name")
+    [ "$(hub_section "$name")" = "$status" ] && names+=("$name")
   done
   [ "${#names[@]}" -eq 0 ] && return 0
   printf "\n## %s (%d)\n\n| Repo | Branch | Last commit | H(sem) | Notes |\n|---|---|---|---|---|\n" "$title" "${#names[@]}"
@@ -155,7 +185,7 @@ section() {
   # unclassified repos found by the sweep
   unclassified=()
   for name in "${repos[@]}"; do
-    [ -z "${A_STATUS["$name"]:-}" ] && unclassified+=("$name")
+    [ -z "${A_STATUS["$name"]:-}" ] && [ -z "${A_HUB_ESTADO["$name"]:-}" ] && unclassified+=("$name")
   done
   unclassified_count=${#unclassified[@]}
   if [ "$unclassified_count" -gt 0 ]; then
