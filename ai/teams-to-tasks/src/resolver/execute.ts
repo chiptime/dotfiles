@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Deterministic post-approval executor for the task-resolver (spec R5, R6, R7).
+ * DEPRECATED (v1, dormant): superseded by enrich.ts.
  *
  * ATTENDED ONLY. Execution authority lives exclusively in the local
  * machine-local `run.json` persisted by the evaluator (run-store): the

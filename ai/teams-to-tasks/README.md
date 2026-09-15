@@ -187,26 +187,13 @@ sequenceDiagram
 
 Datos locales (nunca en el repo): perfil de navegador en `~/.local/share/opencode/playwright-teams-profile`, estado y log en `~/.local/state/teams-to-tasks/`.
 
-## Task Resolver (HITL)
+## Task Resolver (enriquecimiento directo)
 
-Subsistema de dos procesos sobre la misma base Tareas, mismo patrón extractor/ejecutor que el resto del sistema:
+Sobre la misma base Tareas, la skill atendida `task-resolver` corre BAJO DEMANDA («triaje el inbox»): lee el Inbox en vivo (solo lectura), investiga con contexto local de SOLO lectura vía `src/resolver/read-cli.ts` (raíces aprobadas por `scripts/projects.yaml`, realpath-pinned, deny de `shell/private-env.sh` y ficheros adyacentes a credenciales) y clasifica cada tarea como pista (🤖 Auto / 💡 Acción / ✋ Manual).
 
-- **Detector (cron, LLM-free)**: `src/resolver/detector.ts` consulta Tareas por Estado `📥 Inbox` (jamás fuentes SIS), deduplica por página/revision con `seen.json` y añade a la cola. Lock single-instance y `PAUSE` con la misma semántica que teams-to-tasks. Instalador propio: `scripts/install-task-resolver.sh` (crontab laborable cada hora, minuto 10 para no chocar con el sweep de Teams; idempotente y separado del instalador de teams-to-tasks).
-- **Evaluador (skill atendida `task-resolver`)**: consume `pending-queue.json`, enriquece con contexto local de SOLO lectura vía `src/resolver/read-cli.ts` (raíces aprobadas por `scripts/projects.yaml`, realpath-pinned, deny de `shell/private-env.sh` y ficheros adyacentes a credenciales), clasifica (`SOLVABLE_LOCAL` / `ACTIONABLE_RECOMMENDED` / `MANUAL_REQUIRED`) y persiste runs versionados.
+La única escritura es informativa y por tarea, desde este directorio: `bun src/resolver/enrich.ts <page-id> --status <pista> --draft-file <f> [--refs <r>]`. Escribe SOLO Triage Status (pista), Resolution Draft (respuesta propuesta o qué falta para decidir) y Local Context Ref (citations); `Estado` JAMÁS cambia, y no hay approval, hashes ni receipts. Idempotente: una tarea con `Draft ID` (legado v1) o `Resolution Draft` no vacío se salta; el reintento documentado es limpiar esos campos. Cada escritura es un único PATCH atómico vía `notion-writer.ts` (acción `triage`, reintentos 429/5xx intactos).
 
-Estado en `~/.local/state/task-resolver/` — local de máquina, JAMÁS commiteado:
-
-```
-pending-queue.json   cola del detector
-seen.json            dedupe página/revision
-lock                 single-instance del detector
-runs/<draft-id>/     run.json, draft.md, evidence.json, patch.diff, actions.json
-receipts.jsonl       append-only; nunca se podan
-```
-
-**Gate de aprobación**: el borrador se previsualiza en el chat con su `h12`; solo un `approve <h12>` en ESA sesión autoriza — vincula hash exacto, acciones, destino y sesión. El espejo en Notion (Triage Status, Approval State, Draft ID) NUNCA autoriza ejecución: el ejecutor determinista (`src/resolver/execute.ts`) lee únicamente el `run.json` local y guarda receipts que bloquean replays. Deriva de revision ⇒ aprobación anulada y nuevo análisis.
-
-**Notificaciones**: `wsl-notify-send` saliente fire-and-forget (Executed / Manual required); sin listener ni webhook — nunca un canal de actuación entrante.
+**v1 dormant**: el detector (`src/resolver/detector.ts` + `scripts/install-task-resolver.sh`), el ejecutor post-aprobación (`src/resolver/execute.ts`) y su FSM/runs/receipts quedan sin invocar como legado. El estado bajo `~/.local/state/task-resolver/` (pending-queue.json, seen.json, lock, runs/, receipts.jsonl) es remanente de esa ruta dormida — local de máquina, JAMÁS commiteado.
 
 ## Instalación (máquina nueva o reparación)
 
