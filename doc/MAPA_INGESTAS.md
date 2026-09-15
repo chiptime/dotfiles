@@ -13,7 +13,7 @@ Mental map completo: qué alimenta al sistema, por dónde, quién ingiere y con 
 | 4 | **Engram** | `engram-sync` chunks vía git → réplica read-only en VPS (`ENGRAM_SYNC_PULL_ONLY=1`) | Gertru consulta | Contexto: memoria de sesiones, logs, resúmenes | ciclo por ejecución del sync (cron de engram-sync, continuo) | ✅ corriendo |
 | 5 | **Teams** | `teams-to-tasks` (cron) → Notion personal | vía #2 | Entrada de tareas del equipo | cron en horario laboral | ✅ vivo |
 | 6 | **Telegram** (decisiones de Bruno) | triaje del drain-inbox | clerk | Decisiones de estado/prioridad/ámbito | tiempo real (cuando respondes) | ✅ vivo |
-| 7 | **Sesiones de otros agentes** (pi, agy) | → sensor (multi-agente) | sensor → inbox | Actividad por proyecto de todos los agentes | heredaría la del sensor | 🔜 planificado — el panel del dashboard ya es multi-agente |
+| 7 | **Sesiones de otros agentes** (pi, agy) | `~/.pi/agent/sessions` (rutas codificadas) + `code_tracker/active` (nombre de proyecto) → sensor | panel multi-agente + `multi_agent` en `projects.json` | Actividad por proyecto de todos los agentes | la del sensor (ventana 14 días) | ✅ vivo (`feat(dashboard)` Phase 4) |
 | 8 | **RPi4 homelab** | `engram-sync` como nodo escritor + potencial sensor propio | réplica Engram / inbox | Cuarta máquina aportando memoria y hechos | heredaría engram-sync | 🔜 repo recién creado |
 | 9 | GitHub issues/PRs | *sin tubería* | ¿clerk? | Tareas de código | — | 💡 potencial — sin plan, no dibujado |
 
