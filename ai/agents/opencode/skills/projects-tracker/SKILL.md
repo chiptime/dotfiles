@@ -1,6 +1,6 @@
 ---
 name: projects-tracker
-description: "Trigger: actualizar estado de proyecto, cerrar sesión de proyecto, projects.yaml, tracker de proyectos, PROJECTS.md, dashboard de proyectos, unclassified, triaje de repos. Keep the global project tracker truthful: update scripts/projects.yaml after meaningful project work, triage newly discovered repos, and regenerate the snapshot."
+description: "Trigger: archiva y cierra, cierra sesión, done por hoy, listo, cerrar el día, actualizar estado de proyecto, projects.yaml, tracker de proyectos, PROJECTS.md, dashboard de proyectos, unclassified, triaje de repos. Session close and tracker update are ONE flow: after meaningful project work, capture AI hours and update scripts/projects.yaml — never close a session without it."
 license: Apache-2.0
 metadata:
   author: "bruno"
@@ -12,6 +12,8 @@ metadata:
 ## Activation Contract
 
 Load when a work session touched a project meaningfully (implementation, bugfix, decision, pause/resume/close) and the session is wrapping up, OR when the user asks about project status, the tracker, or "unclassified" repos.
+
+**Session-close phrases are a HARD trigger**: "archiva y cierra", "cierra", "cierra sesión", "done", "listo por hoy", "that's it" (or equivalents) MUST load this skill when the session did real project work — even though the user only asked to close. Updating the tracker, the time ledger and the snapshot is part of closing, not an extra step. Skipping it because "the user only said close" is a session-close bug.
 
 The tracker lives in `~/.dotfiles`:
 - `scripts/projects.yaml` — human layer: one block per repo basename (scope, status, desc, next)
