@@ -239,5 +239,45 @@ class HubStateMirrorTests(RendererTests):
         self.assertNotIn("estado_hub", entry)
         self.assertNotIn("prioridad_hub", entry)
 
+
+
+class MultiAgentTests(RendererTests):
+    """Phase 4: pi/agy session facts in the sensor json."""
+
+    MD = "## Active (1)\n| known | `main` | 2020-01-01 | — | |\n"
+
+    def run_with_fake_agents(self):
+        captured = {}
+        with tempfile.TemporaryDirectory(prefix="dashboard-test-", dir="/tmp/opencode") as tmp:
+            home = Path(tmp)
+            annotations = home / ".dotfiles/scripts/projects.yaml"
+            annotations.parent.mkdir(parents=True)
+            annotations.write_text("")
+            md = home / "PROJECTS.md"
+            md.write_text(self.MD)
+            # fake pi session store: encoded path dir with one recent file
+            pi = home / ".pi/agent/sessions/--tmp-proj-demo--"
+            pi.mkdir(parents=True)
+            (pi / "ses.jsonl").write_text("{}\n")
+            # fake agy code_tracker active project
+            agy = home / ".gemini/antigravity/code_tracker/active/demo-agent_0123456789abcdef00"
+            agy.mkdir(parents=True)
+            (agy / "tracked.ts").write_text("x\n")
+            with patch.dict(os.environ, {"HOME": tmp}), \
+                 patch("sys.argv", [str(RENDERER), str(md)]), \
+                 patch("urllib.request.urlopen", side_effect=lambda *a, **k: (_ for _ in ()).throw(OSError("offline"))), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                runpy.run_path(str(RENDERER), run_name="__main__")
+            captured["projects.json"] = json.loads((home / "projects.json").read_text())
+        return captured
+
+    def test_pi_and_agy_facts_collected(self):
+        cap = self.run_with_fake_agents()
+        ma = cap["projects.json"]["multi_agent"]
+        self.assertIn("demo", ma)         # pi: encoded path decoded, basename kept
+        self.assertIn("demo-agent", ma)        # agy: project name without hash suffix
+        self.assertIn("pi", ma["demo"])
+        self.assertIn("agy", ma["demo-agent"])
+
 if __name__ == "__main__":
     unittest.main()
