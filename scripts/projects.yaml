@@ -14,8 +14,8 @@
 dotfiles:
   scope: personal
   status: active
-  desc: Infra personal — skills OpenCode, notificaciones ntfy, teams-to-tasks, tools
-  next: vigilar digest teams-to-tasks con el stack nuevo (18:30; si vuelve a fallar por contexto, subagente lector con allowlist propia); notificaciones ntfy intermitentes en el móvil (batería/Doze de Android); documentar mapping ~/bin/projects en conf.linux.yaml; pc-eyes desplegada y validada (split-brain, gate de consentimiento) — pendiente commit + sesión de enseñanza
+  desc: Infra personal — skills OpenCode, notificaciones ntfy, teams-to-tasks + task-resolver (enriquecimiento a demanda), tools
+  next: primera prueba real de task-resolver ("triaje el inbox" sobre Inbox real, ver PATCH del espejo); vigilar sweep/digest teams-to-tasks (fallos intermitentes rc=0/124/1, preexistentes — no regresión); notificaciones ntfy intermitentes en el móvil (batería/Doze de Android); documentar mapping ~/bin/projects en conf.linux.yaml
 
 agy-bridge:
   scope: personal
