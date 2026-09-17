@@ -1,0 +1,15 @@
+id = "local.opencode-sync"
+name = "OpenCode Workspace Sync"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+description = "Syncs OpenCode Web projects and active sessions into Herdr workspaces automatically"
+
+[[startup]]
+command = ["bash", "-c", "/home/bruno/bin/herdr-sync-opencode"]
+
+[[actions]]
+id = "sync"
+title = "Sync OpenCode Workspaces"
+contexts = ["workspace"]
+command = ["bash", "-c", "/home/bruno/bin/herdr-sync-opencode"]

@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# ╔═══════════════════════════════════════════════════════════╗
+# ║  herdr-workspace — Quick workspace launcher              ║
+# ║  Creates a herdr workspace with a predefined layout      ║
+# ╚═══════════════════════════════════════════════════════════╝
+#
+# Usage:
+#   herdr-workspace <project-dir> [layout]
+#   herdr-workspace .                     # default layout in cwd
+#   herdr-workspace ~/Code/myapp dev      # 70/30 editor + shell
+#   herdr-workspace ~/Code/myapp agents   # main + 2 agent slots
+#   herdr-workspace ~/Code/myapp monitor  # main + logs + htop
+#   herdr-workspace ~/Code/myapp full     # main + agent + server + logs
+#
+# Layouts:
+#   default   — single pane (shell)
+#   dev       — main left (70%) + shell right (30%)
+#   agents    — main left (60%) + 2 agent slots right (50/50)
+#   monitor   — main left (60%) + logs top-right + htop bottom-right
+#   full      — 4 panes: main + agent + server + logs
+#   opencode  — main left (40%) + opencode attach right (60%) to central server
+
+set -euo pipefail
+
+PROJECT_DIR="${1:-.}"
+LAYOUT="${2:-default}"
+
+# Resolve to absolute path
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+PROJECT_NAME="$(basename "$PROJECT_DIR")"
+
+echo "🚀 Creating workspace: ${PROJECT_NAME} (${LAYOUT} layout)"
+
+# ─── Create workspace ───────────────────────────────────────
+result=$(herdr workspace create --cwd "$PROJECT_DIR" --label "$PROJECT_NAME" --focus 2>/dev/null)
+WORKSPACE_ID=$(echo "$result" | jq -r '.result.workspace.workspace_id')
+TAB_ID=$(echo "$result" | jq -r '.result.tab.tab_id')
+ROOT_PANE=$(echo "$result" | jq -r '.result.root_pane.pane_id')
+
+if [[ -z "$WORKSPACE_ID" || "$WORKSPACE_ID" == "null" ]]; then
+  echo "Error: Failed to create workspace" >&2
+  echo "$result" >&2
+  exit 1
+fi
+
+echo "   Workspace: ${WORKSPACE_ID} (${PROJECT_NAME})"
+
+# ─── Helper: split and optionally name a pane ───────────────
+split_pane() {
+  local parent="$1" direction="$2" ratio="$3" name="${4:-}"
+  local split_result pane_id
+
+  split_result=$(herdr pane split \
+    --pane "$parent" \
+    --direction "$direction" \
+    --ratio "$ratio" \
+    --cwd "$PROJECT_DIR" \
+    --no-focus 2>/dev/null)
+
+  pane_id=$(echo "$split_result" | jq -r '.result.pane.pane_id')
+
+  if [[ -n "$name" && "$pane_id" != "null" ]]; then
+    herdr pane rename "$pane_id" "$name" 2>/dev/null || true
+  fi
+
+  echo "$pane_id"
+}
+
+# ─── Apply layout ───────────────────────────────────────────
+case "$LAYOUT" in
+  default)
+    herdr pane rename "$ROOT_PANE" "shell" 2>/dev/null || true
+    echo "   Layout: single pane ✓"
+    ;;
+
+  dev)
+    herdr pane rename "$ROOT_PANE" "editor" 2>/dev/null || true
+    RIGHT=$(split_pane "$ROOT_PANE" right 0.7 "shell")
+    echo "   ┌──────────┬──────┐"
+    echo "   │  editor  │shell │"
+    echo "   │  (70%)   │(30%) │"
+    echo "   └──────────┴──────┘"
+    echo "   Panes: editor=${ROOT_PANE}, shell=${RIGHT} ✓"
+    ;;
+
+  agents)
+    herdr pane rename "$ROOT_PANE" "main" 2>/dev/null || true
+    RIGHT=$(split_pane "$ROOT_PANE" right 0.6 "agent-1")
+    BOTTOM_RIGHT=$(split_pane "$RIGHT" down 0.5 "agent-2")
+    echo "   ┌──────────┬────────┐"
+    echo "   │          │agent-1 │"
+    echo "   │   main   ├────────┤"
+    echo "   │  (60%)   │agent-2 │"
+    echo "   └──────────┴────────┘"
+    echo "   Panes: main=${ROOT_PANE}, agent-1=${RIGHT}, agent-2=${BOTTOM_RIGHT} ✓"
+    ;;
+
+  monitor)
+    herdr pane rename "$ROOT_PANE" "main" 2>/dev/null || true
+    RIGHT=$(split_pane "$ROOT_PANE" right 0.6 "logs")
+    BOTTOM_RIGHT=$(split_pane "$RIGHT" down 0.5 "htop")
+    herdr pane run "$BOTTOM_RIGHT" "htop" 2>/dev/null || true
+    echo "   ┌──────────┬────────┐"
+    echo "   │          │  logs  │"
+    echo "   │   main   ├────────┤"
+    echo "   │  (60%)   │  htop  │"
+    echo "   └──────────┴────────┘"
+    echo "   Panes: main=${ROOT_PANE}, logs=${RIGHT}, htop=${BOTTOM_RIGHT} ✓"
+    ;;
+
+  full)
+    herdr pane rename "$ROOT_PANE" "main" 2>/dev/null || true
+
+    # Split main | right (60/40)
+    RIGHT=$(split_pane "$ROOT_PANE" right 0.6 "agent")
+
+    # Split main into main | bottom (70/30)
+    BOTTOM_LEFT=$(split_pane "$ROOT_PANE" down 0.7 "server")
+
+    # Split right into agent | logs (60/40)
+    BOTTOM_RIGHT=$(split_pane "$RIGHT" down 0.6 "logs")
+
+    echo "   ┌──────────┬────────┐"
+    echo "   │   main   │ agent  │"
+    echo "   │  (60%)   │ (40%)  │"
+    echo "   ├──────────┼────────┤"
+    echo "   │  server  │  logs  │"
+    echo "   │  (30%)   │ (40%)  │"
+    echo "   └──────────┴────────┘"
+    echo "   Panes: main=${ROOT_PANE}, agent=${RIGHT},"
+    echo "          server=${BOTTOM_LEFT}, logs=${BOTTOM_RIGHT} ✓"
+    ;;
+
+  opencode|oc)
+    herdr pane rename "$ROOT_PANE" "editor" 2>/dev/null || true
+    RIGHT=$(split_pane "$ROOT_PANE" right 0.6 "opencode")
+    herdr pane run "$RIGHT" "opencode attach http://localhost:4096 --dir \"$PROJECT_DIR\"" 2>/dev/null || true
+    echo "   ┌──────────┬──────────┐"
+    echo "   │  editor  │ opencode │"
+    echo "   │  (40%)   │ (attach) │"
+    echo "   └──────────┴──────────┘"
+    echo "   Panes: editor=${ROOT_PANE}, opencode=${RIGHT} ✓"
+    ;;
+
+  *)
+    echo "Unknown layout: ${LAYOUT}" >&2
+    echo "Available: default, dev, agents, monitor, full, opencode" >&2
+    exit 1
+    ;;
+esac
+
+echo "✅ Workspace '${PROJECT_NAME}' ready"
+
+# Output JSON for scripting
+echo ""
+echo "# Pane IDs for scripting:"
+echo "# herdr pane run <pane_id> '<command>'"
+echo "# herdr agent start <name> --kind <agent> --pane <pane_id>"

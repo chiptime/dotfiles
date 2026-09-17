@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# ╔═══════════════════════════════════════════════════════════╗
+# ║  herdr-sync-opencode — Sync OpenCode Web projects to Herdr║
+# ║  Mirrors all projects from OpenCode Web into Herdr        ║
+# ║  workspaces, with optional opencode attach.               ║
+# ╚═══════════════════════════════════════════════════════════╝
+#
+# Usage:
+#   herdr-sync-opencode [--all] [--limit N] [--no-attach] [--dry-run]
+#
+# Options:
+#   --all         Sync all projects from OpenCode Web (default)
+#   --limit N     Sync only the N most recently updated projects
+#   --no-attach   Create workspaces without launching opencode attach (saves RAM)
+#   --dry-run     Preview what would be created without making changes
+
+set -euo pipefail
+
+DB_PATH="${HOME}/.local/share/opencode/opencode.db"
+SERVER_URL="http://localhost:4096"
+LIMIT=0
+ATTACH=false
+DRY_RUN=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --all|-a)     LIMIT=0; shift ;;
+    --limit|-l)   LIMIT="$2"; shift 2 ;;
+    --attach)     ATTACH=true; shift ;;
+    --no-attach)  ATTACH=false; shift ;;
+    --dry-run|-n) DRY_RUN=true; shift ;;
+    --help|-h)
+      echo "Usage: herdr-sync-opencode [--all] [--limit N] [--attach] [--no-attach] [--dry-run]"
+      exit 0
+      ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ ! -f "$DB_PATH" ]]; then
+  echo "Error: OpenCode database not found at ${DB_PATH}" >&2
+  exit 1
+fi
+
+# The 11 core projects from OpenCode Web
+declare -a CORE_PROJECTS=(
+  "/home/bruno|.dotfiles"
+  "/home/bruno/.dotfiles|.dotfiles"
+  "/home/bruno/Code/Work/Stratesys/Clece/sis/apps-workspaces/associations|associations"
+  "/home/bruno/Code/Work/Stratesys/Clece/sis/apps-workspaces/entities-portal|entities-portal"
+  "/home/bruno/Code/Work/Stratesys/Clece/sis/apps-workspaces/operational-centers|operational-centers"
+  "/home/bruno/Code/personal/hungry/compare-prices|compare-prices"
+  "/home/bruno/Code/personal/voice-assistant|voice-assistant"
+  "/home/bruno/Code/personal/odata-batch|odata-batch"
+  "/home/bruno/Code/personal/ai-stack|ai-stack"
+  "/home/bruno/Code/personal/llm-hub|llm-hub"
+  "/home/bruno/Code/personal/vps|vps"
+)
+
+echo "🔍 Scanning OpenCode Web projects..."
+
+# Get existing workspaces in Herdr to avoid duplicates
+EXISTING_CWDS=""
+if existing_json=$(herdr workspace list 2>/dev/null); then
+  EXISTING_CWDS=$(echo "$existing_json" | jq -r '.result.workspaces[]?.workspace_id' 2>/dev/null || true)
+fi
+
+COUNT=0
+
+for item in "${CORE_PROJECTS[@]}"; do
+  dir="${item%%|*}"
+  default_label="${item##*|}"
+
+  # Fix: if directory is /home/bruno, label is "bruno"
+  if [[ "$dir" == "/home/bruno" ]]; then
+    default_label="bruno"
+  fi
+
+  # Skip if directory does not exist on disk
+  if [[ ! -d "$dir" ]]; then
+    continue
+  fi
+
+  # Check limit if set
+  if [[ "$LIMIT" -gt 0 && "$COUNT" -ge "$LIMIT" ]]; then
+    break
+  fi
+
+  # Look up latest session for this directory in DB
+  session_info=$(sqlite3 "$DB_PATH" "
+    SELECT s.id || '|' || s.title 
+    FROM session s 
+    WHERE s.directory = '$dir' AND s.parent_id IS NULL 
+    ORDER BY s.time_updated DESC 
+    LIMIT 1;
+  " 2>/dev/null || true)
+
+  session_id="${session_info%%|*}"
+  session_title="${session_info##*|}"
+
+  echo ""
+  echo "📂 [${default_label}] ${dir}"
+  if [[ -n "$session_id" ]]; then
+    echo "   Última sesión: ${session_title} (${session_id})"
+  else
+    echo "   Sin sesión previa registrada"
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "   [dry-run] Workspace '${default_label}' (attach=${ATTACH})"
+    COUNT=$((COUNT + 1))
+    continue
+  fi
+
+  # Check if workspace already exists in Herdr with this cwd or label
+  already_exists=false
+  for ws_id in $EXISTING_CWDS; do
+    ws_info=$(herdr workspace get "$ws_id" 2>/dev/null || true)
+    ws_cwd=$(echo "$ws_info" | jq -r '.result.workspace.cwd // empty' 2>/dev/null || true)
+    ws_lbl=$(echo "$ws_info" | jq -r '.result.workspace.label // empty' 2>/dev/null || true)
+    if [[ "$ws_cwd" == "$dir" || "$ws_lbl" == "$default_label" ]]; then
+      already_exists=true
+      echo "   ✓ Ya existe en Herdr (${ws_id}: ${ws_lbl}) — saltando"
+      break
+    fi
+  done
+
+  if [[ "$already_exists" == true ]]; then
+    continue
+  fi
+
+  # Create Herdr workspace
+  create_res=$(herdr workspace create --cwd "$dir" --label "$default_label" --no-focus 2>/dev/null)
+  ws_id=$(echo "$create_res" | jq -r '.result.workspace.workspace_id // empty')
+  root_pane=$(echo "$create_res" | jq -r '.result.root_pane.pane_id // empty')
+
+  if [[ -z "$ws_id" || -z "$root_pane" ]]; then
+    echo "   ⚠️ Error creando workspace para ${dir}"
+    continue
+  fi
+
+  # Rename root pane to editor
+  herdr pane rename "$root_pane" "editor" 2>/dev/null || true
+
+  if [[ "$ATTACH" == true ]]; then
+    # Split pane: 40% editor (left), 60% opencode (right)
+    split_res=$(herdr pane split --pane "$root_pane" --direction right --ratio 0.6 --cwd "$dir" --no-focus 2>/dev/null)
+    agent_pane=$(echo "$split_res" | jq -r '.result.pane.pane_id // empty')
+
+    if [[ -n "$agent_pane" ]]; then
+      herdr pane rename "$agent_pane" "opencode" 2>/dev/null || true
+
+      if [[ -n "$session_id" ]]; then
+        herdr pane run "$agent_pane" "opencode attach ${SERVER_URL} -s \"${session_id}\" --dir \"${dir}\"" 2>/dev/null || true
+      else
+        herdr pane run "$agent_pane" "opencode attach ${SERVER_URL} --dir \"${dir}\"" 2>/dev/null || true
+      fi
+    fi
+    echo "   ✅ Creado workspace ${ws_id} (${default_label}) con OpenCode adjuntado"
+  else
+    echo "   ✅ Creado workspace ${ws_id} (${default_label}) [modo ligero: usa 'oca' para conectar]"
+  fi
+
+  COUNT=$((COUNT + 1))
+done
+
+echo ""
+if [[ "$DRY_RUN" == true ]]; then
+  echo "🏁 Dry-run completado: ${COUNT} proyectos verificados."
+else
+  echo "🎉 Sincronización completa: ${COUNT} workspace(s) nuevos procesados."
+fi
