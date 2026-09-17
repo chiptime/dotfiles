@@ -83,12 +83,16 @@ send_ntfy() {
 
   if [[ -n "$audio_path" && -f "$audio_path" && -s "$audio_path" ]]; then
     local safe_body="${body//$'\n'/ · }"
+    local audio_bytes
+    audio_bytes=$(stat -c%s "$audio_path" 2>/dev/null || echo "unknown")
     headers+=(
       -H "Message: ${safe_body}"
       -H "Filename: ${pane_id//:/_}-response.mp3"
     )
+    echo "  [ntfy] 📤 Enviando notificación con audio adjunto (${audio_bytes} bytes) para ${pane_id}"
     curl -s "${headers[@]}" -T "${audio_path}" "${NTFY_URL}" > /dev/null 2>&1 || true
   else
+    echo "  [ntfy] 📤 Enviando notificación de texto plano para ${pane_id}"
     curl -s "${headers[@]}" -d "${body}" "${NTFY_URL}" > /dev/null 2>&1 || true
   fi
 }
@@ -104,10 +108,11 @@ notify_state_change() {
   fi
 
   local audio_file=""
-  local tmp_audio="/tmp/herdr-ntfy-${pane_id//:/_}-$$.mp3"
+  local tmp_audio="/tmp/herdr-ntfy-${pane_id//:/_}-${BASHPID:-$$}-$RANDOM.mp3"
 
   case "$new_state" in
     done)
+      sleep 0.6
       if command -v herdr-tts >/dev/null 2>&1; then
         if herdr-tts --render-pane "$pane_id" "$tmp_audio" >/dev/null 2>&1 && [[ -s "$tmp_audio" ]]; then
           audio_file="$tmp_audio"
@@ -127,6 +132,7 @@ notify_state_change() {
         "${pane_id}"
       ;;
     blocked)
+      sleep 0.6
       if command -v herdr-tts >/dev/null 2>&1; then
         if herdr-tts --render-pane "$pane_id" "$tmp_audio" >/dev/null 2>&1 && [[ -s "$tmp_audio" ]]; then
           audio_file="$tmp_audio"
