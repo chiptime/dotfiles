@@ -87,14 +87,20 @@ full      →  4 panes: main + agent + server + logs
 opencode  →  editor (40%) + opencode attach al servidor central (60%)
 ```
 
-## Notificaciones móvil
+## Notificaciones móvil & Feedback por Voz (herdr-tts)
 
-```
-Topic ntfy: bruno-herdr-4VHsmCGC
+El servicio `herdr-tts` gestiona tanto la vocalización local (Edge TTS) como las notificaciones push al móvil vía `ntfy.sh` con el reproductor de audio `.mp3` incrustado y enlace directo a Collie:
 
-systemctl --user start herdr-ntfy     # iniciar
-systemctl --user stop herdr-ntfy      # parar
-journalctl --user -u herdr-ntfy -f    # ver logs
+```bash
+# Estado unificado y configuración
+htts                                  # Ver estado de voz, lock y push móvil (o hn)
+herdr-tts --ntfy-topic <topic>        # Cambiar topic de ntfy (o 'off')
+herdr-tts --collie-url <url>          # Cambiar URL de Collie
+
+# Control del servicio systemd
+systemctl --user status herdr-tts     # estado del servicio
+systemctl --user restart herdr-tts    # reiniciar daemon
+journalctl --user -u herdr-tts -f     # ver logs en vivo
 ```
 
 ## Feedback por Voz (Neural TTS)
