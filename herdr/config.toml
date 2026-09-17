@@ -92,6 +92,41 @@ key = "prefix+ctrl+v"
 type = "shell"
 command = "herdr-tts --toggle-auto"
 
+# Voice Feedback (TTS) — Pause / Resume audio playback
+[[keys.command]]
+key = "prefix+p"
+type = "shell"
+command = "herdr-tts --toggle-pause"
+
+[[keys.command]]
+key = "prefix+ctrl+p"
+type = "shell"
+command = "herdr-tts --toggle-pause"
+
+# Voice Feedback (TTS) — Seek forward 10 seconds
+[[keys.command]]
+key = "prefix+]"
+type = "shell"
+command = "herdr-tts --forward"
+
+# Voice Feedback (TTS) — Seek backward 10 seconds
+[[keys.command]]
+key = "prefix+["
+type = "shell"
+command = "herdr-tts --rewind"
+
+# Voice Feedback (TTS) — Increase speed (+10%)
+[[keys.command]]
+key = "prefix+="
+type = "shell"
+command = "herdr-tts --rate-up"
+
+# Voice Feedback (TTS) — Decrease speed (-10%)
+[[keys.command]]
+key = "prefix+-"
+type = "shell"
+command = "herdr-tts --rate-down"
+
 
 # ─── UI ──────────────────────────────────────────────────────
 [ui]
