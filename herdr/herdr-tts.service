@@ -1,0 +1,16 @@
+[Unit]
+Description=Herdr Neural TTS Agent Voice Service
+After=herdr.service
+PartOf=default.target
+
+[Service]
+Type=simple
+ExecStart=/home/bruno/bin/herdr-tts
+Restart=on-failure
+RestartSec=5
+Environment=PATH=/home/bruno/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PULSE_SERVER=unix:/mnt/wslg/PulseServer
+Environment=HERDR_SOCKET_PATH=/home/bruno/.config/herdr/herdr.sock
+
+[Install]
+WantedBy=default.target

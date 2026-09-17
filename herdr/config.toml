@@ -1,0 +1,182 @@
+# ╔═══════════════════════════════════════════════════════════╗
+# ║  Herdr — Terminal workspace manager config               ║
+# ║  ~/.dotfiles/herdr/config.toml → ~/.config/herdr/config.toml
+# ╚═══════════════════════════════════════════════════════════╝
+
+# Skip onboarding wizard
+onboarding = false
+
+# ─── Keybindings ─────────────────────────────────────────────
+# Prefix: ctrl+b (same as tmux muscle memory). prefix+? shows all.
+[keys]
+prefix = "ctrl+b"
+
+# Workspace switching — direct access without prefix mode
+switch_workspace = "ctrl+alt+1..9"
+switch_tab = "prefix+1..9"
+
+# Navigation — quick workspace/agent cycling
+previous_workspace = "ctrl+alt+left"
+next_workspace = "ctrl+alt+right"
+previous_agent = "ctrl+alt+up"
+next_agent = "ctrl+alt+down"
+
+# Tab movement — reorder tabs
+move_tab_previous = "alt+shift+left"
+move_tab_next = "alt+shift+right"
+
+# Pane resize without entering resize mode — direct chords
+resize_pane_left = "ctrl+shift+alt+left"
+resize_pane_down = "ctrl+shift+alt+down"
+resize_pane_up = "ctrl+shift+alt+up"
+resize_pane_right = "ctrl+shift+alt+right"
+
+# Quick pane toggle (last focused)
+last_pane = "prefix+`"
+
+# ─── Custom command keybindings ──────────────────────────────
+# lazygit popup
+[[keys.command]]
+key = "prefix+g"
+type = "popup"
+command = "lazygit"
+width = "90%"
+height = "90%"
+
+# htop popup
+[[keys.command]]
+key = "prefix+alt+h"
+type = "popup"
+command = "htop"
+width = "80%"
+height = "80%"
+
+# fzf file finder in popup
+[[keys.command]]
+key = "prefix+f"
+type = "popup"
+command = "fzf --preview 'batcat --color=always {}' --preview-window=right:50%"
+width = "80%"
+height = "80%"
+
+# Voice Feedback (TTS) — Play / Stop toggle on focused chat
+[[keys.command]]
+key = "prefix+r"
+type = "shell"
+command = "herdr-tts --toggle-play"
+
+[[keys.command]]
+key = "prefix+ctrl+r"
+type = "shell"
+command = "herdr-tts --toggle-play"
+
+# Voice Feedback (TTS) — Stop audio immediately
+[[keys.command]]
+key = "prefix+s"
+type = "shell"
+command = "herdr-tts --stop"
+
+[[keys.command]]
+key = "prefix+ctrl+s"
+type = "shell"
+command = "herdr-tts --stop"
+
+# Voice Feedback (TTS) — Toggle automatic background reading
+[[keys.command]]
+key = "prefix+v"
+type = "shell"
+command = "herdr-tts --toggle-auto"
+
+[[keys.command]]
+key = "prefix+ctrl+v"
+type = "shell"
+command = "herdr-tts --toggle-auto"
+
+
+# ─── UI ──────────────────────────────────────────────────────
+[ui]
+# Full UI: borders, gaps, scrollbars, agent labels — todo visible
+pane_borders = "always"
+pane_outer_borders = true
+pane_scrollbars = true
+pane_gaps = true
+
+# Show detected agent names on pane borders
+show_agent_labels_on_pane_borders = true
+
+# Tab bar
+hide_tab_bar_when_single_tab = false
+tab_bar_position = "top"
+
+# Status bar: hostname + datetime at the right edge
+tab_bar_right = [
+  { type = "zoom" },
+  { type = "hostname" },
+  { type = "datetime", format = "%a %H:%M" },
+]
+tab_bar_right_separator = " │ "
+
+# Window title for the outer terminal
+window_title = "{hostname}: {workspace} — {tab}"
+
+# Agent panel: group by workspace
+agent_panel_sort = "spaces"
+
+# Distinct glyphs instead of colored dots for agent states
+status_indicators = "symbols"
+
+# Accent color (Gruvbox aqua to match your FZF theme)
+accent = "#8ec07c"
+
+# Don't prompt for names on quick creation
+prompt_new_tab_name = false
+prompt_new_workspace_name = false
+
+# ─── Sidebar ────────────────────────────────────────────────
+# Wide enough for workspace names + git info
+sidebar_width = 30
+sidebar_min_width = 22
+sidebar_max_width = 40
+
+[ui.sidebar.agents]
+row_gap = 0
+rows = [["state_icon", "workspace", "tab"], ["agent"]]
+
+[ui.sidebar.spaces]
+row_gap = 0
+rows = [["state_icon", "workspace"], ["branch", "git_status"]]
+
+# ─── Toast notifications ────────────────────────────────────
+[ui.toast]
+delivery = "herdr"
+delay_seconds = 1
+
+[ui.toast.herdr]
+position = "bottom-right"
+
+[ui.toast.clipboard]
+enabled = true
+position = "bottom-center"
+
+# ─── Sound notifications ────────────────────────────────────
+[ui.sound]
+enabled = true
+# Custom mp3 paths can be set if desired:
+# path = "sounds/notification.mp3"
+# done_path = "sounds/done.mp3"
+# request_path = "sounds/request.mp3"
+
+# ─── Session ────────────────────────────────────────────────
+[session]
+# Resume AI agents into their native sessions after server restart
+resume_agents_on_restore = true
+
+# ─── Experimental ───────────────────────────────────────────
+[experimental]
+# Save pane screen history across server restarts
+pane_history = true
+
+# ─── Advanced ───────────────────────────────────────────────
+[advanced]
+# 10 MB scrollback per pane (default)
+scrollback_limit_bytes = 10000000
