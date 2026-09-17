@@ -22,6 +22,9 @@
 
 set -euo pipefail
 
+export PATH="/home/bruno/bin:/home/linuxbrew/.linuxbrew/bin:${PATH}"
+export HERDR_SOCKET_PATH="${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}"
+
 NTFY_TOPIC="${HERDR_NTFY_TOPIC:-}"
 NTFY_SERVER="${HERDR_NTFY_SERVER:-https://ntfy.sh}"
 WATCH_AGENT=""
@@ -65,82 +68,133 @@ COLLIE_URL="${HERDR_COLLIE_URL:-https://desktop-q02omrn.tail2640fd.ts.net}"
 # ─── Notification helpers ────────────────────────────────────
 
 send_ntfy() {
-  local title="$1" body="$2" priority="${3:-default}" tags="${4:-robot}" actions="${5:-}"
+  local title="$1" body="$2" priority="${3:-default}" tags="${4:-robot}" actions="${5:-}" audio_path="${6:-}" pane_id="${7:-}"
+  local pane_url="${COLLIE_URL}${pane_id:+/pane/${pane_id}}"
+
   local -a headers=(
     -H "Title: ${title}"
     -H "Priority: ${priority}"
     -H "Tags: ${tags}"
-    -H "Click: ${COLLIE_URL}"
+    -H "Click: ${pane_url}"
   )
   if [[ -n "$actions" ]]; then
     headers+=(-H "Actions: ${actions}")
   fi
-  curl -s "${headers[@]}" -d "${body}" "${NTFY_URL}" > /dev/null 2>&1
+
+  if [[ -n "$audio_path" && -f "$audio_path" && -s "$audio_path" ]]; then
+    local safe_body="${body//$'\n'/ · }"
+    headers+=(
+      -H "Message: ${safe_body}"
+      -H "Filename: ${pane_id//:/_}-response.mp3"
+    )
+    curl -s "${headers[@]}" -T "${audio_path}" "${NTFY_URL}" > /dev/null 2>&1 || true
+  else
+    curl -s "${headers[@]}" -d "${body}" "${NTFY_URL}" > /dev/null 2>&1 || true
+  fi
 }
 
 notify_state_change() {
-  local agent="$1" prev_state="$2" new_state="$3" workspace="${4:-}"
-  local focus_cmd="herdr agent focus ${agent}"
-  local action_buttons="view, 📱 Abrir Collie, ${COLLIE_URL}; view, 📋 Copiar comando, ${focus_cmd}, clear=true"
+  local pane_id="$1" agent="$2" prev_state="$3" new_state="$4" workspace="${5:-}" title_desc="${6:-}"
+  local focus_cmd="herdr agent focus ${pane_id}"
+  local pane_url="${COLLIE_URL}/pane/${pane_id}"
+  local action_buttons="view, 📱 Abrir Collie, ${pane_url}; view, 📋 Copiar comando, ${focus_cmd}, clear=true"
+  local display_name="${agent} (${pane_id})"
+  if [[ -n "$title_desc" && "$title_desc" != "$agent" ]]; then
+    display_name="${agent} [${title_desc}] (${pane_id})"
+  fi
+
+  local audio_file=""
+  local tmp_audio="/tmp/herdr-ntfy-${pane_id//:/_}-$$.mp3"
 
   case "$new_state" in
     done)
+      if command -v herdr-tts >/dev/null 2>&1; then
+        if herdr-tts --render-pane "$pane_id" "$tmp_audio" >/dev/null 2>&1 && [[ -s "$tmp_audio" ]]; then
+          audio_file="$tmp_audio"
+        fi
+      fi
+
+      local ntfy_tags="white_check_mark,robot"
+      [[ -n "$audio_file" ]] && ntfy_tags="white_check_mark,robot,loudspeaker"
+
       send_ntfy \
-        "✅ ${agent} terminó" \
-        "Agente ${agent}${workspace:+ en ${workspace}} finalizó su tarea.\n\n→ Para ver: ${focus_cmd}" \
+        "✅ ${display_name} terminó" \
+        "Agente ${display_name}${workspace:+ en ${workspace}} finalizó su tarea.\n\n→ Para ver: ${focus_cmd}" \
         "default" \
-        "white_check_mark,robot" \
-        "${action_buttons}"
+        "${ntfy_tags}" \
+        "${action_buttons}" \
+        "${audio_file}" \
+        "${pane_id}"
       ;;
     blocked)
+      if command -v herdr-tts >/dev/null 2>&1; then
+        if herdr-tts --render-pane "$pane_id" "$tmp_audio" >/dev/null 2>&1 && [[ -s "$tmp_audio" ]]; then
+          audio_file="$tmp_audio"
+        fi
+      fi
+
+      local ntfy_tags="rotating_light,warning"
+      [[ -n "$audio_file" ]] && ntfy_tags="rotating_light,warning,loudspeaker"
+
       send_ntfy \
-        "🔴 ${agent} necesita atención" \
-        "Agente ${agent}${workspace:+ en ${workspace}} está bloqueado y espera input.\n\n→ Para ver: ${focus_cmd}" \
+        "🔴 ${display_name} necesita atención" \
+        "Agente ${display_name}${workspace:+ en ${workspace}} está bloqueado y espera input.\n\n→ Para ver: ${focus_cmd}" \
         "high" \
-        "rotating_light,warning" \
-        "${action_buttons}"
+        "${ntfy_tags}" \
+        "${action_buttons}" \
+        "${audio_file}" \
+        "${pane_id}"
       ;;
     idle)
       if [[ "$prev_state" == "working" ]]; then
         send_ntfy \
-          "💤 ${agent} idle" \
-          "Agente ${agent}${workspace:+ en ${workspace}} pasó a idle." \
+          "💤 ${display_name} idle" \
+          "Agente ${display_name}${workspace:+ en ${workspace}} pasó a idle." \
           "low" \
-          "zzz"
+          "zzz" \
+          "" \
+          "" \
+          "${pane_id}"
       fi
       ;;
   esac
+
+  [[ -n "$audio_file" && -f "$audio_file" ]] && rm -f "$audio_file"
 }
 
-# ─── Single agent watcher (event-driven via herdr agent wait) ─
+# ─── Single pane watcher (event-driven via herdr agent wait) ──
 
-watch_agent() {
-  local agent="$1"
+watch_pane() {
+  local pane_id="$1"
+  local agent_name="$2"
   local prev_state=""
 
   # Get initial state
-  prev_state=$(herdr agent get "$agent" 2>/dev/null | jq -r '.result.agent_status // "unknown"') || prev_state="unknown"
+  local info
+  info=$(herdr agent get "$pane_id" 2>/dev/null) || true
+  prev_state=$(echo "$info" | jq -r '.result.agent.agent_status // .result.agent_status // "unknown"' 2>/dev/null || echo "unknown")
 
-  echo "  👀 Watching ${agent} (current: ${prev_state})"
+  echo "  👀 Watching ${agent_name} [${pane_id}] (current: ${prev_state})"
 
   while true; do
-    # Block until agent reaches done, blocked, or idle (default behavior)
-    # This uses the socket API internally — zero polling, zero CPU
-    wait_result=$(herdr agent wait "$agent" 2>/dev/null) || {
-      # Agent might have disappeared; sleep and retry
-      sleep 5
+    # Block until agent reaches done, blocked, or idle (socket event-driven)
+    herdr agent wait "$pane_id" --until done --until blocked --until idle 2>/dev/null || {
+      sleep 4
       continue
     }
 
-    # Get new state after wait returns
-    new_state=$(herdr agent get "$agent" 2>/dev/null | jq -r '.result.agent_status // "unknown"') || continue
+    info=$(herdr agent get "$pane_id" 2>/dev/null) || { sleep 4; continue; }
+    local new_state
+    new_state=$(echo "$info" | jq -r '.result.agent.agent_status // .result.agent_status // "unknown"' 2>/dev/null || echo "unknown")
 
-    if [[ "$new_state" != "$prev_state" && -n "$prev_state" ]]; then
-      # Get workspace for context
-      workspace=$(herdr agent get "$agent" 2>/dev/null | jq -r '.result.workspace_id // ""') || workspace=""
+    if [[ "$new_state" != "$prev_state" && -n "$prev_state" && "$new_state" != "unknown" ]]; then
+      local workspace
+      workspace=$(echo "$info" | jq -r '.result.agent.workspace_id // .result.workspace_id // ""' 2>/dev/null || true)
+      local title_desc
+      title_desc=$(echo "$info" | jq -r '.result.agent.terminal_title_stripped // .result.agent.terminal_title // .result.terminal_title // ""' 2>/dev/null || true)
 
-      echo "[$(date +%H:%M:%S)] ${agent}: ${prev_state} → ${new_state}"
-      notify_state_change "$agent" "$prev_state" "$new_state" "$workspace"
+      echo "[$(date +%H:%M:%S)] ${agent_name} [${pane_id}]: ${prev_state} → ${new_state}"
+      notify_state_change "$pane_id" "$agent_name" "$prev_state" "$new_state" "$workspace" "$title_desc"
 
       if [[ "$ONCE" == true ]]; then
         echo "  --once: exiting after notification"
@@ -152,7 +206,7 @@ watch_agent() {
 
     # If agent is done/blocked/idle, wait for it to go back to working before looping
     if [[ "$new_state" == "done" || "$new_state" == "blocked" || "$new_state" == "idle" ]]; then
-      herdr agent wait "$agent" --until working 2>/dev/null || sleep 5
+      herdr agent wait "$pane_id" --until working 2>/dev/null || sleep 4
       prev_state="working"
     fi
   done
@@ -163,42 +217,50 @@ watch_agent() {
 echo "🔔 herdr-ntfy → ${NTFY_URL}"
 
 if [[ -n "$WATCH_AGENT" ]]; then
-  # Watch a single named agent
-  watch_agent "$WATCH_AGENT"
+  if [[ "$WATCH_AGENT" =~ ^w[0-9]+:p[0-9]+$ ]]; then
+    watch_pane "$WATCH_AGENT" "agent"
+  else
+    target_pane=$(herdr agent list 2>/dev/null | jq -r --arg a "$WATCH_AGENT" '.result.agents[]? | select(.agent == $a) | .pane_id' | head -n 1)
+    if [[ -n "$target_pane" ]]; then
+      watch_pane "$target_pane" "$WATCH_AGENT"
+    else
+      echo "Error: No se encontró ningún pane para el agente $WATCH_AGENT" >&2
+      exit 1
+    fi
+  fi
 else
-  # Watch all agents — discover and spawn watchers
-  echo "  Discovering agents..."
+  echo "  Discovering agents across all panes..."
 
-  # Track child PIDs for cleanup
   CHILD_PIDS=()
   cleanup() {
-    for pid in "${CHILD_PIDS[@]}"; do
+    for pid in "${CHILD_PIDS[@]:-}"; do
       kill "$pid" 2>/dev/null || true
     done
+    rm -f /tmp/herdr-ntfy-*.lock 2>/dev/null || true
     exit 0
   }
   trap cleanup EXIT INT TERM
 
-  # Discovery loop: check for new agents periodically
   while true; do
-    agents=$(herdr agent list 2>/dev/null | jq -r '.result.agents[]?.agent' 2>/dev/null) || { sleep 5; continue; }
+    raw_agents=$(herdr agent list 2>/dev/null) || { sleep 5; continue; }
 
-    for agent in $agents; do
-      # Skip if we're already watching this agent
-      lock_file="/tmp/herdr-ntfy-${agent}.lock"
-      if [[ -f "$lock_file" ]] && kill -0 "$(cat "$lock_file")" 2>/dev/null; then
-        continue
+    while IFS=$'\t' read -r pane_id agent_name; do
+      [[ -z "$pane_id" || "$pane_id" == "null" ]] && continue
+
+      lock_file="/tmp/herdr-ntfy-${pane_id//:/_}.lock"
+      if [[ -f "$lock_file" ]]; then
+        existing_pid=$(cat "$lock_file" 2>/dev/null || true)
+        if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+          continue
+        fi
       fi
 
-      # Spawn watcher in background
-      (
-        echo "$$" > "$lock_file"
-        watch_agent "$agent"
-      ) &
-      CHILD_PIDS+=($!)
-    done
+      watch_pane "$pane_id" "$agent_name" &
+      child_pid=$!
+      echo "$child_pid" > "$lock_file"
+      CHILD_PIDS+=("$child_pid")
+    done < <(echo "$raw_agents" | jq -r '.result.agents[]? | "\(.pane_id)\t\(.agent)"' 2>/dev/null || true)
 
-    # Re-scan for new agents every 10 seconds
-    sleep 10
+    sleep 6
   done
 fi
