@@ -27,13 +27,13 @@ herdr-tts:
   scope: personal
   status: active
   desc: Voz para agentes en Herdr — host conector ligero (Visión B), gating snooze/mute/debounce v0.9.0 pre-forward, mutex encola sin interrumpir, push ntfy con audio
-  next: commit+push 15:00 (fechas escalonadas GIT_AUTHOR/COMMITTER_DATE, ahora incluye Sprint 1); reiniciar herdr-tts _daemon para activar el gating; decidir si idle ntfy pasa por el gate
+  next: reiniciar herdr-tts _daemon para activar el gating; decidir si idle ntfy pasa por el gate; siguiente: dashboard TUI (P2)
 
 agent-tts:
   scope: personal
   status: active
   desc: Capa de voz universal para agentes CLI (Visión B) — conectores OpenCode/Claude/Antigravity/Codex/Aider + redact.py de secretos + streaming por frases
-  next: commit+push 15:00; normalizar estilo de tests (pytest vs unittest); decidir si redact.py se aplica sobre --raw; publicar ambos repos en chiptime
+  next: normalizar estilo de tests; decidir si redact.py se aplica sobre --raw; streaming universal (ElevenLabs/OpenAI/Piper) + --llm-summary (P1); publicar en chiptime
 
 compare-prices:
   scope: personal
