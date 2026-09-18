@@ -115,6 +115,18 @@ key = "prefix+["
 type = "shell"
 command = "herdr-tts --rewind"
 
+# Voice Feedback (TTS) — Next spoken sentence
+[[keys.command]]
+key = "prefix+n"
+type = "shell"
+command = "herdr-tts --next-sentence"
+
+# Voice Feedback (TTS) — Previous spoken sentence
+[[keys.command]]
+key = "prefix+N"
+type = "shell"
+command = "herdr-tts --prev-sentence"
+
 # Voice Feedback (TTS) — Increase speed (+10%)
 [[keys.command]]
 key = "prefix+="
