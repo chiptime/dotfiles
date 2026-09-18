@@ -70,6 +70,17 @@ key = "prefix+ctrl+r"
 type = "shell"
 command = "herdr-tts --toggle-play"
 
+# Voice Feedback (TTS) — TL;DR Quick Summary on focused chat
+[[keys.command]]
+key = "prefix+t"
+type = "shell"
+command = "herdr-tts --tldr"
+
+[[keys.command]]
+key = "prefix+ctrl+t"
+type = "shell"
+command = "herdr-tts --tldr"
+
 # Voice Feedback (TTS) — Stop audio immediately
 [[keys.command]]
 key = "prefix+s"
