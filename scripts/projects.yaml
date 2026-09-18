@@ -23,6 +23,18 @@ agy-bridge:
   desc: Bridge agy para hosts CLI (opencode 0.5.0 + pi 0.4.0) — soporte de imagen publicado en npm; pipeline compartido en el engine
   next: habilitar imageInput por proyecto (.pi/agy-bridge.json o ~/.pi/agent/); follow-up flake session-store (1ms timestamp)
 
+herdr-tts:
+  scope: personal
+  status: active
+  desc: Voz para agentes en Herdr — host conector ligero (Visión B), gating snooze/mute/debounce v0.9.0 pre-forward, mutex encola sin interrumpir, push ntfy con audio
+  next: commit+push 15:00 (fechas escalonadas GIT_AUTHOR/COMMITTER_DATE, ahora incluye Sprint 1); reiniciar herdr-tts _daemon para activar el gating; decidir si idle ntfy pasa por el gate
+
+agent-tts:
+  scope: personal
+  status: active
+  desc: Capa de voz universal para agentes CLI (Visión B) — conectores OpenCode/Claude/Antigravity/Codex/Aider + redact.py de secretos + streaming por frases
+  next: commit+push 15:00; normalizar estilo de tests (pytest vs unittest); decidir si redact.py se aplica sobre --raw; publicar ambos repos en chiptime
+
 compare-prices:
   scope: personal
   status: active
@@ -174,8 +186,8 @@ sis:
   status: active
   name: Clece SIS
   desc: Monorepo Clece (Angular + SAP CAP) — apps organizadas como streams
-  streams: operational-centers (estable) · associations (cerrado 19/08) · entities-portal (cerrado 09/09) · ep-comments (pendiente de arrancar, workspace listo 21/08)
-  next: revisar qué quedó a medio hacer en deploy-develop (9 dirty); arrancar ep-comments cuando toque
+  streams: operational-centers (backoffice SIS: hub lanzador + radar como sub-app, autocomplete búsqueda — sin commit en p3) · associations (cerrado 19/08) · entities-portal (cerrado 09/09) · ep-comments (pendiente de arrancar, workspace listo 21/08)
+  next: revisar y commitear el trabajo backoffice sin commit en p3 (hub + autocomplete + fix /api, 10+13 ficheros); decidir rama (p3 vs nueva) y PR; revisar qué quedó a medio hacer en deploy-develop (9 dirty); arrancar ep-comments cuando toque
 
 recruiting-frontend:
   scope: work
