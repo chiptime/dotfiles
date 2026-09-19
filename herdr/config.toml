@@ -125,6 +125,17 @@ key = "prefix+ctrl+o"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-palette"
 
+# Voice Feedback (TTS) — Voice menu (simulated leader: one key opens, next key commands)
+[[keys.command]]
+key = "prefix+u"
+type = "shell"
+command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-menu"
+
+[[keys.command]]
+key = "prefix+ctrl+u"
+type = "shell"
+command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-menu"
+
 # Voice Feedback (TTS) — Mute / Snooze (v0.9, nunca cableadas en esta config)
 [[keys.command]]
 key = "prefix+m"
