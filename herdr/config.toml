@@ -114,6 +114,33 @@ key = "prefix+ctrl+d"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-dashboard"
 
+# Voice Feedback (TTS) — Voice palette (fzf: turns per chat, focus/mute/snooze)
+[[keys.command]]
+key = "prefix+o"
+type = "shell"
+command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-palette"
+
+[[keys.command]]
+key = "prefix+ctrl+o"
+type = "shell"
+command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-palette"
+
+# Voice Feedback (TTS) — Mute / Snooze (v0.9, nunca cableadas en esta config)
+[[keys.command]]
+key = "prefix+m"
+type = "shell"
+command = "herdr-tts --mute-pane"
+
+[[keys.command]]
+key = "prefix+z"
+type = "shell"
+command = "herdr-tts --snooze-pane"
+
+[[keys.command]]
+key = "prefix+Z"
+type = "shell"
+command = "herdr-tts --snooze-global"
+
 # Voice Feedback (TTS) — Pause / Resume audio playback
 [[keys.command]]
 key = "prefix+p"
