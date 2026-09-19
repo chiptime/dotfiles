@@ -20,8 +20,8 @@ dotfiles:
 agy-bridge:
   scope: personal
   status: active
-  desc: Bridge agy para hosts CLI (opencode 0.5.0 + pi 0.4.0) — soporte de imagen publicado en npm; pipeline compartido en el engine
-  next: habilitar imageInput por proyecto (.pi/agy-bridge.json o ~/.pi/agent/); follow-up flake session-store (1ms timestamp)
+  desc: Bridge agy para hosts CLI (opencode + pi) — Rev2 sin commit termination_unconfirmed no reintentable, terminación acotada SIGTERM→SIGKILL, lock por conversación, concurrencia 10 sesiones probada
+  next: reconstruir dist + commit/PR de la Rev2 (851 tests verdes, 3 typechecks); slice 3 sigue bloqueado en evidencia de resume-safety del CLI
 
 herdr-tts:
   scope: personal
