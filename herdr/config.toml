@@ -103,6 +103,17 @@ key = "prefix+ctrl+v"
 type = "shell"
 command = "herdr-tts --toggle-auto"
 
+# Voice Feedback (TTS) — Dashboard TUI (plugin popup, closes with q)
+[[keys.command]]
+key = "prefix+d"
+type = "shell"
+command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-dashboard"
+
+[[keys.command]]
+key = "prefix+ctrl+d"
+type = "shell"
+command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-dashboard"
+
 # Voice Feedback (TTS) — Pause / Resume audio playback
 [[keys.command]]
 key = "prefix+p"
