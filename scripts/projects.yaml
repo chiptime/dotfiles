@@ -26,14 +26,13 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr — host conector ligero (Visión B), gating snooze/mute/debounce v0.9.0 pre-forward, mutex encola sin interrumpir, push ntfy con audio
-  next: reiniciar herdr-tts _daemon para activar el gating; decidir si idle ntfy pasa por el gate; siguiente: dashboard TUI (P2)
+  desc: Voz para agentes en Herdr — host conector (Visión B) v0.11 con dashboard TUI v3, gating snooze/mute/debounce, push ntfy con audio, TTS_PLAYBACK a Windows (winhost/wsl-ps/auto)
+  next: commitear overhaul de docs/ARCHITECTURE.md (Estado de Implementación) pendiente de la sesión dashboard
 
 agent-tts:
   scope: personal
   status: active
-  desc: Capa de voz universal para agentes CLI (Visión B) — conectores OpenCode/Claude/Antigravity/Codex/Aider + redact.py de secretos + streaming por frases
-  next: normalizar estilo de tests; decidir si redact.py se aplica sobre --raw; streaming universal (ElevenLabs/OpenAI/Piper) + --llm-summary (P1); publicar en chiptime
+  desc: Capa de voz universal para agentes CLI (Visión B) — 5 conectores + redact.py + streaming Edge/OpenAI/ElevenLabs + kokoro opcional ([kokoro]) + transportes Windows (winhost/wsl-ps/auto)
 
 compare-prices:
   scope: personal
