@@ -26,13 +26,13 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr — host conector (Visión B) v0.11 con dashboard TUI v3, gating snooze/mute/debounce, push ntfy con audio, TTS_PLAYBACK a Windows (winhost/wsl-ps/auto)
-  next: commitear overhaul de docs/ARCHITECTURE.md (Estado de Implementación) pendiente de la sesión dashboard
+  desc: Voz para agentes en Herdr (v0.14.1) — host conector (Visión B): gating snooze/mute/debounce, dashboard TUI v3.1, paleta fzf, glifos ambientales en títulos, keymap declarativo init/check/emit/apply/adopt, menú de voz, takeover de daemon singleton, push ntfy, TTS_PLAYBACK a Windows (winhost/wsl-ps/auto)
+  next: commitear overhaul de docs/ARCHITECTURE.md (Estado de Implementación, sesión Windows); replay de audios (retención de MP3); validar popups dashboard/paleta/menú en uso diario; E2E kokoro (espeak-ng + voice install)
 
 agent-tts:
   scope: personal
   status: active
-  desc: Capa de voz universal para agentes CLI (Visión B) — 5 conectores + redact.py + streaming Edge/OpenAI/ElevenLabs + kokoro opcional ([kokoro]) + transportes Windows (winhost/wsl-ps/auto)
+  desc: Capa de voz universal para agentes CLI (Visión B) — 5 conectores + redact.py de secretos + --llm-summary con fallback --tldr + streaming Edge/OpenAI/ElevenLabs + Kokoro opcional ([kokoro]) + voice store + transportes Windows (winhost/wsl-ps/auto)
 
 compare-prices:
   scope: personal
@@ -60,8 +60,8 @@ ai-stack:
 voice-assistant:
   scope: personal
   status: paused
-  desc: Asistente de voz (Electron + Whisper, podman)
-  next: falta test E2E manual; 13 ficheros dirty
+  desc: Asistente de voz (Electron + Whisper) + puente Pipecat validado
+  next: Gate B (conexión viva wss) pendiente de autorización; E2E manual en Windows
 
 busqueda-vacaciones:
   scope: personal
