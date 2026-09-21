@@ -166,12 +166,15 @@ drain job via jobs.yaml + drift gate. Human steps only for pre-existing content:
 
 ## Production incidents & hardenings (2026-09-14, all fixed with RED-GREEN tests)
 
-1. **Gateway death on transient fetch failure** — upstream OpenClaw 2026.7.1-2 bug:
-   unhandled TLSSocket `'error'` in the SSRF guard; its custom lookup dials api.z.ai
-   AAAA records. Three-layer mitigation: `NODE_OPTIONS=--dns-result-order=ipv4first` +
-   `net.ipv6.conf.all.disable_ipv6=1` + `/etc/hosts` pin (`extra_hosts`) — the hosts
-   file is the only lookup layer nothing can bypass. Deployed image has since moved to
-   `2026.9.4` (digest-pinned); upstream report + unpin still pending.
+ 1. **Gateway death on transient fetch failure** — upstream OpenClaw 2026.7.1-2 bug:
+    unhandled TLSSocket `'error'` in the SSRF guard; its custom lookup dials api.z.ai
+    AAAA records. Mitigated at the time with three layers: `NODE_OPTIONS=--dns-result-order=ipv4first`
+    + `net.ipv6.conf.all.disable_ipv6=1` + a temporary `/etc/hosts` pin (`extra_hosts`).
+    RESOLVED 2026-09-21: the bug was fixed upstream (openclaw#113905, merged 2026-07-27;
+    upstream openclaw#148556 confirms containment) and the pinned `2026.9.4` image
+    includes the fix (verified: tag contains commit `40c17e7`). The rot-prone hosts pin
+    was dropped (ai-stack `b9f3ad2`); `ipv4first` + the IPv6 sysctl remain as
+    defense-in-depth. Takes effect on the VPS at the next `compose up` (recreation).
 2. **Dokploy re-clone inode race** — direct `./openclaw/hub` bind captured an empty
    pre-clone inode; the drain ran with "validador ausente" and correctly fail-closed
    everything to `_triage`. Fix: stable `/opt/ai-stack/openclaw-hub` mirror (the same
@@ -202,8 +205,9 @@ drain job via jobs.yaml + drift gate. Human steps only for pre-existing content:
   `7b9b197`) and the drain runs it post-apply (`automations/payloads/drain-inbox.md`),
   so migrated notes now reach `dashboard.md`. Caveat: the rebuild is LLM-mediated;
   there is no deterministic regeneration script yet.
-- **Upstream report** to OpenClaw for the SSRF-guard unhandled error; unpin
-  `extra_hosts` when fixed.
+- **Upstream report / unpin** for the SSRF-guard crash: CLOSED 2026-09-21 — already
+  fixed upstream (openclaw#113905, in image 2026.9.4; openclaw#148556); pin dropped,
+  no report needed (would duplicate a closed, fixed class).
 - Plan phase 4: formal pause/archive of dormant projects + absorb `projects.yaml`.
 
 ## Non-goals
