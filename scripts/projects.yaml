@@ -65,9 +65,9 @@ ai-stack:
 
 voice-assistant:
   scope: personal
-  status: paused
-  desc: Asistente de voz (Electron + Whisper) + puente Pipecat validado
-  next: Gate B (conexión viva wss) pendiente de autorización; E2E manual en Windows
+  status: active
+  desc: Asistente de voz (Electron + Whisper) + Pipecat con TTS Edge local; bucle completo validado en vivo
+  next: Oir respuesta en renderer (beep probe + salida por-app de Windows); fix fuga tareas en stop (Task-83); latencia 1ª respuesta 8-21 s (UX pensando ya puesto); guion 6 turnos pendiente
 
 busqueda-vacaciones:
   scope: personal

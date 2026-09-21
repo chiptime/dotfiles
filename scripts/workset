@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# workset — daily-driver UX layer on top of manage-apps-workspaces.sh.
+# Lifecycle (create/list/doctor/remove/recover) is owned by the manage script;
+# this wrapper adds dependency install and multiplexer session opening.
+
+MANAGE_SCRIPT="${WORKSET_MANAGE_SCRIPT:-$HOME/Code/Work/Stratesys/Clece/sis/recruiting-frontend/scripts/manage-apps-workspaces.sh}"
+
+usage() {
+  cat <<'EOF'
+workset — daily-driver layer for Clece SIS app worksets.
+
+Usage:
+  workset create <set> [--skip-install] [--no-open]
+      Create the workset, run npm ci in both worktrees, open a session.
+  workset open <set>
+      Attach to the workset session (create it if missing).
+  workset path <set>
+      Print the workset directory.
+  workset list | doctor <set> [args...] | remove <set> [args...] | recover <set> [args...]
+      Passed through to manage-apps-workspaces.sh unchanged.
+  workset help
+      Show this help.
+
+Environment:
+  WORKSET_MANAGE_SCRIPT  Path to manage-apps-workspaces.sh (default: Clece sis path)
+  APPS_WORKTREES_DIR     Worktrees root (default: derived, same as manage script)
+  WORKSET_MUX            Force multiplexer: tmux | zellij | none
+
+Session backend: zellij if installed, else tmux. Without a terminal, workset
+prints the directory instead of opening a session.
+EOF
+}
+
+die() {
+  printf 'ERROR %s\n' "$*" >&2
+  exit 1
+}
+
+info() {
+  printf 'INFO %s\n' "$1"
+}
+
+warn() {
+  printf 'WARN %s\n' "$1" >&2
+}
+
+[[ -x "$MANAGE_SCRIPT" ]] || die "manage script not found or not executable: $MANAGE_SCRIPT (set WORKSET_MANAGE_SCRIPT)"
+
+manage_dir="$(dirname "$(dirname "$(dirname "$MANAGE_SCRIPT")")")" # .../sis
+worktrees_root="${APPS_WORKTREES_DIR:-$(dirname "$manage_dir")/$(basename "$manage_dir")-app-worktrees}"
+
+resolve_workset_dir() {
+  local set_name="$1"
+  [[ -d "$worktrees_root/$set_name" ]] || \
+    die "workset directory does not exist: $worktrees_root/$set_name (run: workset create $set_name)"
+  printf '%s\n' "$worktrees_root/$set_name"
+}
+
+npm_ci_in() {
+  local dir="$1" label="$2"
+  if [[ ! -f "$dir/package-lock.json" ]]; then
+    warn "$label has no package-lock.json; skipping install: $dir"
+    return 0
+  fi
+  info "npm ci in $label: $dir"
+  if ! (cd "$dir" && npm ci --no-audit --no-fund); then
+    warn "$label install failed; the workset itself is fine — run npm ci manually in $dir"
+    return 1
+  fi
+}
+
+open_session() {
+  local set_name="$1" dir="$2" mux="${WORKSET_MUX:-}"
+
+  if [[ "$mux" == "none" ]]; then
+    printf 'cd %s\n' "$dir"
+    return 0
+  fi
+  if [[ -z "$mux" ]]; then
+    if command -v zellij >/dev/null 2>&1; then
+      mux="zellij"
+    elif command -v tmux >/dev/null 2>&1; then
+      mux="tmux"
+    else
+      warn "no zellij or tmux found; cd manually:"
+      printf 'cd %s\n' "$dir"
+      return 0
+    fi
+  fi
+
+  if [[ ! -t 0 ]]; then
+    info "no interactive terminal here; open it with: workset open $set_name"
+    return 0
+  fi
+
+  case "$mux" in
+    tmux)
+      if [[ -n "${TMUX:-}" ]]; then
+        tmux new-session -Ad -s "$set_name" -c "$dir"
+        tmux switch-client -t "$set_name"
+      else
+        exec tmux new-session -A -s "$set_name" -c "$dir"
+      fi
+      ;;
+    zellij)
+      (cd "$dir" && exec zellij attach --create "$set_name")
+      ;;
+    *)
+      die "unknown WORKSET_MUX value: $mux (use tmux | zellij | none)"
+      ;;
+  esac
+}
+
+cmd="${1:-help}"
+case "$cmd" in
+  create)
+    shift
+    [[ $# -ge 1 ]] || { usage >&2; exit 1; }
+    set_name="$1"
+    shift
+    skip_install=0
+    no_open=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --skip-install) skip_install=1 ;;
+        --no-open) no_open=1 ;;
+        *) die "unknown create option: $1" ;;
+      esac
+      shift
+    done
+
+    "$MANAGE_SCRIPT" create "$set_name"
+    workset_dir="$(resolve_workset_dir "$set_name")"
+
+    install_failed=0
+    if [[ "$skip_install" -eq 0 ]]; then
+      npm_ci_in "$workset_dir/recruiting-frontend" "frontend worktree" || install_failed=1
+      npm_ci_in "$workset_dir/recruiting-backend" "backend worktree" || install_failed=1
+    fi
+
+    if [[ "$no_open" -eq 0 ]]; then
+      open_session "$set_name" "$workset_dir"
+    fi
+    printf 'Workset ready: %s\n' "$workset_dir"
+    exit "$install_failed"
+    ;;
+  open)
+    [[ $# -ge 2 ]] || { usage >&2; exit 1; }
+    workset_dir="$(resolve_workset_dir "$2")"
+    open_session "$2" "$workset_dir"
+    ;;
+  path)
+    [[ $# -ge 2 ]] || { usage >&2; exit 1; }
+    resolve_workset_dir "$2"
+    ;;
+  list|doctor|remove|recover)
+    exec "$MANAGE_SCRIPT" "$@"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage >&2
+    die "unknown command: $cmd"
+    ;;
+esac
