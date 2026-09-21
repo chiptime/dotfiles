@@ -1,0 +1,333 @@
+{
+  "labeler": "bruno",
+  "labeled_at": "2026-09-18T15:05:00",
+  "labeling_method": "gemini_flash_3.8_high_assisted_human_verified",
+  "covers": "all 24 historical frames (superset of the 14 baseline frames)",
+  "normalization": [
+    "timestamps restored from media/manifest.json (were null in submitted file)",
+    "extensions corrected to on-disk .png names (submitted file mixed .jpg/.png)",
+    "[cite: N] artifacts stripped from notes",
+    "per-frame sha256 added from manifest for binding"
+  ],
+  "frames": [
+    {
+      "frame": "frame_01.png",
+      "timestamp_seconds": 0.0,
+      "sha256": "6c6b28610135362d8d78cf643172213d35b1250d6cd0831d52e16500ee1b8ded",
+      "text_regions": {
+        "top": "",
+        "middle": "",
+        "bottom": "",
+        "code_or_url": ""
+      },
+      "overlays": "",
+      "notes": "Sin texto legible en pantalla; monitores de fondo desenfocados"
+    },
+    {
+      "frame": "frame_02.png",
+      "timestamp_seconds": 1.6,
+      "sha256": "72479298e10d658ac6dee16290a10be286cf94ba96d89b35f1ceb0f50397d126",
+      "text_regions": {
+        "top": "",
+        "middle": "",
+        "bottom": "",
+        "code_or_url": ""
+      },
+      "overlays": "",
+      "notes": "Transición de escena; sin texto visible"
+    },
+    {
+      "frame": "frame_03.png",
+      "timestamp_seconds": 4.2,
+      "sha256": "50396f636c17c728bff6bf09631add9f00b1693ec6c6b92f1d4778ea9338df66",
+      "text_regions": {
+        "top": "",
+        "middle": "archify",
+        "bottom": "",
+        "code_or_url": ""
+      },
+      "overlays": "",
+      "notes": "Logo y nombre 'archify' centrados sobre fondo desenfocado en fade-in"
+    },
+    {
+      "frame": "frame_04.png",
+      "timestamp_seconds": 5.4,
+      "sha256": "32eebf5c409b7aaca5754a4f2707d53e716a0c9bc245a1be70896bd669efc43a",
+      "text_regions": {
+        "top": "fix(viewer): embed the viewer font so delivered pages stay sel...\nREADME   Contributing   MIT license   Security\nEnglish · 简体中文\n1   GITHUB TRENDING\n#1 Repository Of The Day",
+        "middle": "Archify\nFrom plain English\nto architecture\nin seconds.\nDark   Light   Export",
+        "bottom": "Archify\nTurn a codebase or system description into a polished, interactive system map — directly in chat.\nArchify is a Node.js rendering and validation system for Cursor, Claude Code, Codex CLI, and OpenCode. Age[cut]\nproduce typed JSON IR; Archify deterministically compiles it into HTML/SVG.\n• Open it and present — five diagram types, four presets, dark/light themes, built-in brand marks, and fin[cut]\n• Review architecture changes before merge — compare two validated snapshots as Before / Delta / Afte[cut]\nexact added, removed, changed, moved, and rerouted facts\n• Every interaction stays grounded — search nodes, optionally open revision-verified source, trace\nupstream/downstream authored reach and exact routes, compare roles, and play guided stories without\ntopology",
+        "code_or_url": "archify.zip\narchify.dev"
+      },
+      "overlays": "Marca de agua 'archify' con isotipo superpuesta en el centro sobre el diagrama",
+      "notes": "Texto de nodos del diagrama central parcialmente ilegible; viñetas de la lista cortadas en margen derecho"
+    },
+    {
+      "frame": "frame_05.png",
+      "timestamp_seconds": 17.4,
+      "sha256": "eecf8abbc4cd5af9f3fb19efa3fb9c352d377c337cd418c0656e3fef490e0cd2",
+      "text_regions": {
+        "top": "README   Contributing   MIT license   Security\nSee Archify in action\nThese are generated Archify artifacts, not product mockups. Click a frame to open its live, shareable state.",
+        "middle": "ARCHIFY • LIVE PROOF\nAPI\nrequest handler\nAuth\nRedis\ncache\nPostgres\nread cache\nmiss\nquery profile + metrics\nSEQUENCE • CLASSIC\nCache Miss Request\nGENERATED • CHECKED •\n7 participants • [cut]\nThree real generated artifacts. Signal Flow • Blueprint • Classic • open the interactive Proof Lab ↗\nGuided story   Route probe   Semantic lens\nPlay one finite named chapter.   Inspect the shortest authored directed path.   Compare real traffic betwee[cut]\nsemantic roles.",
+        "bottom": "The Proof Lab contains all 11 checked-in scenarios, their JSON sources, named views, and validation receipts.\nA real repository, mapped from source\nMCP Runtime Architecture\nARCHIFY • [cut]\n[cut] explicit provider policy · parallel invocation · durable raw answers",
+        "code_or_url": "sets/archify-readme-hero.png[cut]"
+      },
+      "overlays": "",
+      "notes": "Tooltip con ruta de imagen visible en la esquina inferior izquierda; textos cortados en extremo derecho"
+    },
+    {
+      "frame": "frame_06.png",
+      "timestamp_seconds": 29.4,
+      "sha256": "73a35b257d96a59e901a6253837be401e8d6d8e05d2f65d6a93b042a315052bb",
+      "text_regions": {
+        "top": "• Cache Miss Request Sequence\nGUIDED VIEWS 0 / 3\nExplore this system\n▶ Play story   01 Request and identity",
+        "middle": "ROUTE PROBE\nWeb App to Postgres\nCopy link   Clear\nWeb App - API - Postgres\n▶ Journey   Overview\n3 nodes · 2 directed hops · shortest authored route\nAPI\nrequest handler\nAuth",
+        "bottom": "query profile + [cut]",
+        "code_or_url": "GET /dashboard"
+      },
+      "overlays": "",
+      "notes": "Diagrama interactivo de secuencia con ruta trazada; texto inferior cortado"
+    },
+    {
+      "frame": "frame_07.png",
+      "timestamp_seconds": 41.4,
+      "sha256": "b06f680fa44f61b4044b565c0317fd513247e16782c95d891279e1c55f144029",
+      "text_regions": {
+        "top": "README   Code of conduct   Contributing   MIT license   Security\nProviders\nSearch Providers   Configured only\nAPI Key Compatible Providers\nFree Tier Providers\nOAuth Providers",
+        "middle": "🚀 OmniRoute — The Free AI Gateway\nOMNIROUTE - THE FREE AI GATEWAY   ONE ENDPOINT /v1\nNever stop coding.\nEvery AI tool → 356 providers — 150+ free — through one endpoint.\nClaude Code · Codex · Cursor · Cline · Copilot · Antigravity → FREE Claude / GPT / Gemini · auto-fallback",
+        "bottom": "RTX + CAVEMAN · STACKED COMPRESSION\nSave 15–95% tokens\n-89% avg on tool-heavy sessions\nnever hit limits\nauto-fallback keeps you coding\n352   90+   ~1.47B   15-95%   19   $0",
+        "code_or_url": "$ npm i -g omniroute\n/v1"
+      },
+      "overlays": "",
+      "notes": "Página README con panel de proveedores y métricas; múltiples etiquetas pequeñas en sección superior"
+    },
+    {
+      "frame": "frame_08.png",
+      "timestamp_seconds": 53.4,
+      "sha256": "9454d6cb6c84c1a37608945a54f43983284d9501bf499a57cdf5047181bb8506",
+      "text_regions": {
+        "top": "README   Code of conduct   Contributing   MIT license   Security\nOmniRoute — Smart Router\nRFK + Caveman compression · 20 routing strategies\nCircuit breakers · TLS stealth · MCP · AIX · Guardrails\nTIER 1 · SUBSCRIPTION\nClaude Code\nCodex\nCopilot\nTIER 2 · API KEY\nDeepSeek\nGroq\nxAI\nTIER 3 · CHEAP\nGLM 10.1\nMiniMax 0.2\nTIER 4 · FREE\nKiro\nQoder\nPollinations\nAUTO-FALLBACK CASCADE · UPSTREAM AVAILABILITY VARIES",
+        "middle": "🤝 Supported by our Open Source Friends\nK KIMI\nKimi K3:\nOpen Frontier\nIntelligence\n2.8T parameters · 1M-token context\n3",
+        "bottom": "Want to join as an Open Source Friend? These are the companies that back open source and help keep\nOmniRoute moving — and we say publicly where every token they give us goes. Reach out:\nKimi\nMoonshot AI\nFounding Friend\nThanks to Kimi (Moonshot AI), our founding Open Source Friend, for backing this project!\nKimi is the AI lab behind the open-weight K2 and K3 model families — Kimi K3 delivers a\n1M-token context window, native vision and frontier-level coding at a fraction of closed-\nmodel prices, and works out of the box with Claude Code, Codex and every coding tool\nOmniRoute serves.\nWhat Kimi's support powers: Kimi's API credits power OmniRoute's AI-validated release\npipeline — the merge validation powered by Kimi K3 stage that reviews every pull request\nbefore it ships — plus day-to-day feature development. First-class Kimi support ships on\nboth rails: the direct Kimi API ( kimi-k3 ) and the Kimi Code coding plan (OAuth and API key).",
+        "code_or_url": "diegosouza.pw@outlook.com\nkimi-k3"
+      },
+      "overlays": "",
+      "notes": "Documentación técnica con diagrama de niveles de fallback y sección de patrocinador Kimi K3"
+    },
+    {
+      "frame": "frame_09.png",
+      "timestamp_seconds": 66.32,
+      "sha256": "cd92dcae8bebd7fe5244dae38771a5f475615016870fa355bef7d61e1eb36d8d",
+      "text_regions": {
+        "top": "",
+        "middle": "ORCA ADE",
+        "bottom": "",
+        "code_or_url": ""
+      },
+      "overlays": "Número '3' grande dorado semitransparente superpuesto en el centro",
+      "notes": "Rótulo y logotipo de ORCA ADE centrado con número superpuesto en transición"
+    },
+    {
+      "frame": "frame_10.png",
+      "timestamp_seconds": 71.2,
+      "sha256": "6b6dc04f1a4c07de2b3df3b46b38d986548bbc3784574ea2851a621ae3e7f3fc",
+      "text_regions": {
+        "top": "[cut] orca [cut]\ncodex-pane",
+        "middle": "Agent Statuses\n▾ AGENTS (2)\nWhat does orca do?\nDoes orca integrate with linear?",
+        "bottom": "codex-hook-test\nPR #1547 fix(codex): register hook trus[cut]\nsmart-worktree-order-new-design",
+        "code_or_url": "brennanb2025/codex-pane\nbrennanb2025/agent-status-demo\nbrennanb2025/codex-hook-test\nbrennanb2025/smart-worktree-order-new-[cut]"
+      },
+      "overlays": "Texto 'ORCA ADE' en negro semitransparente superpuesto en la mitad inferior durante transición",
+      "notes": "Doble exposición / fundido entre lista de tareas de Git/agentes y rótulo ORCA ADE; textos cortados en margen derecho"
+    },
+    {
+      "frame": "frame_11.png",
+      "timestamp_seconds": 79.88,
+      "sha256": "b72bf840e4f75fe8a10e58ecb02a1e091a0be1e1b8bd2c6a931e433aea121dbd",
+      "text_regions": {
+        "top": "",
+        "middle": "Orca ADE\nmulti agent cockpit\nCodex\nClaude\nOpenCode\nPi\nGrok",
+        "bottom": "",
+        "code_or_url": ""
+      },
+      "overlays": "",
+      "notes": "Tarjeta flotante central sobre fondo de editor desenfocado"
+    },
+    {
+      "frame": "frame_12.png",
+      "timestamp_seconds": 83.44,
+      "sha256": "177437388da99684f39e26c48dac5e96e10249f839a60e6de65179049809c7c0",
+      "text_regions": {
+        "top": "notes / launch-plan.md",
+        "middle": "Launch plan\nA quick note for the team — pulling together what's left before we ship.\n• Smoke-test the install flow on a fresh machine.\n• Update the docs index once the new tile lands.\n/|\nworktree\nOrca\nmulti age[cut]",
+        "bottom": "Type / for blocks · ⌘B bold · ⌘I italic",
+        "code_or_url": "launch-plan.md"
+      },
+      "overlays": "",
+      "notes": "Editor de notas flotante superpuesto a tarjeta 'worktree' y panel de Orca ADE cortado a la derecha"
+    },
+    {
+      "frame": "frame_13.png",
+      "timestamp_seconds": 93.12,
+      "sha256": "87a76bdfd6f5d0b221c419c12c1b97165a5421e1afae60a9997ecdd6b8e173c1",
+      "text_regions": {
+        "top": "Download for Windows   View on GitHub\nAlso for Apple Silicon · Intel · Linux",
+        "middle": "macOS Apple Silicon\nM-series Macs (.dmg)\nmacOS Intel\nIntel Macs (.dmg)\nLinux\nAppImage (.AppImage)\nfleet of agents   w AI output   Git integrati[cut]\nverifying[cut]   Terminal 2",
+        "bottom": "",
+        "code_or_url": "orca ~/work/acme/checks[cut]\n$ gh api repos/acme-int[cut]\nhttps://github.com/acm[cut]\nsrc/integrations/gith[cut]\nPOST /repos/acme-intern[cut]\nchecks.ts:88\nhref={check.details_url}\nchecks.test.ts:41"
+      },
+      "overlays": "Cursor de ratón seleccionando 'macOS Intel'",
+      "notes": "Menú desplegable sobre interfaz de terminal dividida en dos paneles; texto en extremos cortado por los bordes"
+    },
+    {
+      "frame": "frame_14.png",
+      "timestamp_seconds": 102.84,
+      "sha256": "6e8c7bf797c0a6849fd351bb5025b1a989bba592784f60f6039c1032afd7a596",
+      "text_regions": {
+        "top": "Tuesday 15:07",
+        "middle": "RAILS",
+        "bottom": "",
+        "code_or_url": ""
+      },
+      "overlays": "Logotipo e isotipo de Ruby on Rails en franja blanca inferior-central; figura de Tux a la derecha de la persona",
+      "notes": "Persona (DHH) frente a monitor con terminal de sistema; texto de la terminal superior en su mayoría ilegible por desenfoque"
+    },
+    {
+      "frame": "frame_15.png",
+      "timestamp_seconds": 104.52,
+      "sha256": "201945bde0cdf960de137a5efbd3941834188cbb840346c09fe7d0ce77799f35",
+      "text_regions": {
+        "top": "2 3 4 5   Tuesday 18:08\n0 Omarchy — An opinion",
+        "middle": "OMARCHY\nAn opinionated Arch + Hyprland Setup by DHH\nGITHUB   DISCORD   MANUAL\nMERCH",
+        "bottom": "Omarchy   Copy link",
+        "code_or_url": "omarchy.org\nwget -qO- https://omarchy.org/install | bash"
+      },
+      "overlays": "",
+      "notes": "Página web de Omarchy en ventana de navegador"
+    },
+    {
+      "frame": "frame_16.png",
+      "timestamp_seconds": 106.64,
+      "sha256": "cb7d0a30dc07569a0c08b1fa4bb4f055c6ffe4b087156be880057229031b126f",
+      "text_regions": {
+        "top": "",
+        "middle": "OMARCHY\nOMARCHY\nHyprland Done\nRIGHT",
+        "bottom": "",
+        "code_or_url": ""
+      },
+      "overlays": "Rótulo tipográfico estilizado 'OMARCHY / Hyprland Done / RIGHT' superpuesto",
+      "notes": "Transición con texto grande centrado sobre navegador desenfocado"
+    },
+    {
+      "frame": "frame_17.png",
+      "timestamp_seconds": 108.44,
+      "sha256": "44f303c3a787b7a4a3b16d76ec40c80ce9f67b18dacd5b8be05a1d452e5e909d",
+      "text_regions": {
+        "top": "21:27:50   BAT 98% 2.89W   2000ms\nRyzen AI 9 HX   1.8 GHz\nCPU 0% 51°C",
+        "middle": "disks   root   proc filter   tree   cpu lazy\nPid: Program:   User:   MemB   Cpu%",
+        "bottom": "upload d\n9.15 KiB/s\nTop: (2.37 MiB)\nTotal: 749 MiB\n309 Byte/s\nTop: (116 Kibp)\nTotal: 179 MiB\nselect   0/456",
+        "code_or_url": ""
+      },
+      "overlays": "Rótulo 'OMARCHY / Hyprland Done / RIGHT' superpuesto en el centro en transición",
+      "notes": "Monitor de sistema en terminal cubierto parcialmente por texto de transición"
+    },
+    {
+      "frame": "frame_18.png",
+      "timestamp_seconds": 110.6,
+      "sha256": "ec474da8a5f599a79585274692595a15802ddbb8de7b6cd1e1f0def0f0718bf0",
+      "text_regions": {
+        "top": "?",
+        "middle": "?   ?",
+        "bottom": "",
+        "code_or_url": ""
+      },
+      "overlays": "Ilustración vectorial blanca de persona pensativa y tres signos de interrogación superpuestos sobre fondo oscuro",
+      "notes": "Líneas de código de fondo completamente desenfocadas e ilegibles"
+    },
+    {
+      "frame": "frame_19.png",
+      "timestamp_seconds": 114.8,
+      "sha256": "b5bc0295937ab9f0ee9d5e24493a03de970b75a3992a0c37fcc12949eb85c4c4",
+      "text_regions": {
+        "top": "title: Omarchy 2.0 - Indicado pra Iniciant[cut]\ndate: \"2025-09-12T12:00:00-03:00\"\nslug: omarchy-2-0-indicado-pra-iniciantes\ntags:\n• omarchy\n• distrobox\n• ventoy\n• balena\n• arch\ndraft: false",
+        "middle": "• MD013/line-length Line length [Expe[cut]\n{{< youtube id=\"D3L8I0ncLkg\" >}}\nAs perguntas que eu mais recebo, literalme[cut]\nfaculdade?, \"Akita, o que você acha que eu[cut]\nVelho, eu não te conheço, nunca vou saber[cut]\nsuas aspirações, ambições, gostos, preferê[cut]\nmelhor pra você. Se não sabe, trate de pro[cut]\n• MD013/line-length Line length [Expe[cut]\nO que você não admite é que quer que algué[cut]\nescolha e dizendo que está certo.",
+        "bottom": "• MD013/line-length Line length [Expe[cut]\nNunca espere isso de mim, eu nunca vou te[cut]\n• MD013/line-length Line length [Expe[cut]\nSempre vou dizer: SE VIRA. Foi assim que e[cut]\nNORMAL   master",
+        "code_or_url": "content/.../omarchy-2-0-indicado-[cut]"
+      },
+      "overlays": "",
+      "notes": "Editor de texto (Vim/Neovim) con archivo Markdown y diagnósticos de linter; texto cortado en margen derecho"
+    },
+    {
+      "frame": "frame_20.png",
+      "timestamp_seconds": 126.96,
+      "sha256": "e5b0861ed41a9a755d3f63c09a2b5d4b71689232a4813b35d0b4e852e6f2b82c",
+      "text_regions": {
+        "top": "refactor: rustfmt config, clippy fixes, shared list assembly   2 months ago\nREADME   MIT license\nanydoc\ncrates.io v0.2.4   npm v0.2.4   pypi v0.2.4   license MIT   Skills 8.2K\nFast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into\nclean GitHub-Flavored Markdown. Includes bindings for Node.js, Python, and the browser (WebAssembly).\nBuilt by Firecrawl to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one\nconsistent output no matter which format goes in. It powers Firecrawl Parse, so if you'd rather not run it yourself, the\nhosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.\nTry it in your browser: the demo page runs the library as WebAssembly, so files are converted locally and never leave\nyour machine.",
+        "middle": "Quick start\nAgent skill\nanydoc ships as an Agent Skill, so your agent can read any document it runs into:\nThe skill teaches the agent to convert documents with the anydoc CLI. Works with Claude Code, Codex, Cursor,\nOpenCode, and any other compatible agent.\nCLI",
+        "bottom": "npx downloads the prebuilt binary for your platform on first run. For a permanent anydoc command, install globally\nwith npm install -g @firecrawl/anydoc . Run anydoc --help for all options.\nNode.js",
+        "code_or_url": "rustfmt.toml\nnpx skills add firecrawl/anydoc\nnpx @firecrawl/anydoc report.docx          # Markdown to stdout\nnpx @firecrawl/anydoc slides.pptx -o slides.md  # or to a file\nnpx @firecrawl/anydoc - --format csv < data.csv # read stdin\nnpx @firecrawl/anydoc scan.pdf --ocr hosted    # scanned pages via Firecrawl Parse\nnpm install -g @firecrawl/anydoc\nanydoc --help\nnpm install @firecrawl/anydoc"
+      },
+      "overlays": "",
+      "notes": "Página README de repositorio GitHub con badges, texto explicativo y comandos CLI"
+    },
+    {
+      "frame": "frame_21.png",
+      "timestamp_seconds": 139.08,
+      "sha256": "512249be0a2b0199069ed3767654a3ec01170e0d4295e11ab95c633d3205d22b",
+      "text_regions": {
+        "top": "[illegible]",
+        "middle": "Markdown documentation comment[cut]\nReplace constructor with factory method\nShow word definition\nTranslate with [cut]",
+        "bottom": "Breakpoints Locals Watch Threads\nLoading...",
+        "code_or_url": ""
+      },
+      "overlays": "Gráfico holográfico de red neuronal / cerebro con texto 'AI' sobre monitor izquierdo",
+      "notes": "Doble exposición con código flotante desenfocado y menú contextual de IDE; la mayor parte del texto de fondo es [illegible]"
+    },
+    {
+      "frame": "frame_22.png",
+      "timestamp_seconds": 148.4,
+      "sha256": "749efa840f89ab30d5842985d45b3c8f17865a101c89e030e9c87cfb5c028929",
+      "text_regions": {
+        "top": "README   MIT license\ndocling   4/14   313.6   21   37   80   95   21   31\nmammoth   1/14   52.5   8   70   84   71   75   51\nPer format, like for like:",
+        "middle": "format   anydoc   libreoffice   unstructured   markitdown   pandoc   docling   mammoth\ndoc   87   57   67\ndocm   84   48\ndocx   88   56   53   71   68   71   70\nepub   77   72   72   52\nodp   86   23\nods   82   38\nodt   80   51   68   60\nppt   80   26\npptx   74   24   66   52\nrtf   88   53   46   45\nxls   80   38   66   62\nxlsm   76   32\nxlsx   72   30   66   55   47",
+        "bottom": "How quality was scored: an LLM judge (Claude Sonnet 5) compares two tools' outputs blind against ground truth: the\ndocument's first six pages, rendered to images by LibreOffice. Each output is scored on completeness, structure,\nformatting, and cleanliness. Every pair is judged twice with the outputs swapped to cancel position bias, for 482\nverdicts in total. Each tool's score averages its per-format scores over the formats it supports, so a corpus heavy in\none format can't skew it. It also means each row averages a different set of formats (mammoth's 69 is docx alone,\nwhile anydoc's 81 spans all fourteen), so the per-format table is the fair comparison.\nSpeed is one warm conversion per document on a Ryzen 9 9950X3D (Windows 11, 64 GB DDR5-6400). anydoc and the\nPython libraries are timed with process spawn excluded; the CLI tools include it, since that is how they are used. The\nharness lives in bench/ ; the corpus is not redistributable and is not in the repo.\nBest fit: pipelines that receive a mixed bag of office documents and need one consistent, structured Markdown output.\nIn this comparison, anydoc was the only tool to cover all fourteen formats, scored highest on every judged format, and\nconverted documents an order of magnitude faster than the next-fastest tool.\nFormat detection",
+        "code_or_url": "bench/"
+      },
+      "overlays": "Silueta / reflejo de persona superpuesta a la pantalla durante transición",
+      "notes": "Tabla comparativa de rendimiento y benchmarks de conversión de documentos"
+    },
+    {
+      "frame": "frame_23.png",
+      "timestamp_seconds": 155.56,
+      "sha256": "b8b474037c9984a3aef98e3502defb5686167d876bccf35086db1ebe93c7f151",
+      "text_regions": {
+        "top": "README   MIT license\nResourceLimit   Crossed a fixed safety limit (decompression, nesting, node count)\nMissingPart   A part required for any meaningful output is absent\nIo   The file could not be read, from to_markdown only\nNode and wasm publish the variant name on error.code ; Python raises one anydoc.ConvertError subclass per\nvariant, or OSError when the file cannot be read.\nanydoc converts locally and does not do OCR, so a PDF with scanned pages fails with NeedsOcr . Opt in with ocr:\n'hosted' in Node, ocr=\"hosted\" in Python or --ocr hosted on the CLI to send that document to Firecrawl Parse. No\nsignup needed. Set FIRECRAWL_API_KEY for higher limits.",
+        "middle": "How it works\ndocument bytes\nformat detection → content markers, not the extension\nformat parser → one per format (doc, docx, ppt, pptx, xls,\nxlsx, odt/ods/odp, rtf, epub, csv)\nDocument → shared model: blocks, inlines, tables,\nfootnotes, assets\nGFM serializer → Markdown\nPDF → pdf-inspector → Markdown directly\nBecause every format funnels through the same document model and serializer, output quirks get fixed once. A table-\nescaping fix for docx is automatically a table-escaping fix for rtf, odt, and everything else.",
+        "bottom": "Development\nA committed fixture corpus under tests/fixtures/ is snapshot-tested, tests/robustness.rs mutation-tests every\nfixture, and fuzz/ carries cargo-fuzz targets per format. The speed and quality benchmark lives in bench/ .\nReleases are tagged v<version> , which publishes the crate, the npm package, and the PyPI wheels from\n[cut] The version lives in three places bumped together for a release",
+        "code_or_url": "cargo test\ncd node && npm install && npm run build && npm test\ncd python && pip install maturin && maturin develop && python -m unittest discover -s tests\nwasm-pack build wasm --release --target web --scope firecrawl && node --test wasm/test.mjs   # see wasm/R[cut]"
+      },
+      "overlays": "",
+      "notes": "Diagrama de flujo de arquitectura en bloque de texto y comandos bash de desarrollo"
+    },
+    {
+      "frame": "frame_24.png",
+      "timestamp_seconds": 162.0,
+      "sha256": "cd51698a441bee452932fb4c9e5c27fae13dca2c7fde57fb2eadca2dcbae864b",
+      "text_regions": {
+        "top": "10 REPOS\nIA\nNUEVOS",
+        "middle": "Repositories   Pull requests   Issues   Codespaces   Explore   Search repositories...\nRepositories\nPull requests\nIssues\nCodespaces\nExplore\nTrending\nTopics\nMarketplace\nvercel / next.js\nThe React Framework for the Web   119k\nsupabase / supabase\nThe open source Firebase alternative   72.4k\nopenai / whisper\nRobust Speech Recognition   67.9k\nmicrosoft / vscode\nVisual Studio Code   162k\nautomatisch / automatisch\nOpen source workflow automation   12.6k",
+        "bottom": "",
+        "code_or_url": "youtube.com/@fazttech"
+      },
+      "overlays": "Isotipo de GitHub con resplandor verde; cursor de ratón sobre botón azul de búsqueda",
+      "notes": "Pantalla final con títulos promocionales, miniatura de UI de GitHub y barra de búsqueda con canal de YouTube"
+    }
+  ],
+  "provenance_note": "Transcriptions were produced with Gemini Flash 3.8 High assistance (frames were processed by an external cloud VLM by the user's own decision), then reviewed by the human labeler who reports no significant divergence from on-screen reality. This is therefore a STRONG-MODEL REFERENCE verified by a human, NOT independent blind human ground truth. Comparisons against local VLM outputs measure agreement with a cloud VLM reference, not absolute correctness.",
+  "human_verification": {
+    "verified_by": "bruno",
+    "verified_at": "2026-09-18",
+    "statement": "User confirmed the labels match on-screen reality (\"ya lo verifique\").",
+    "status": "human_verified_reference (assisted transcription, non-blind) — usable as experiment reference; blind human ground truth was not produced"
+  }
+}
