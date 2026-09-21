@@ -26,13 +26,14 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr (v0.14.1) — host conector (Visión B): gating snooze/mute/debounce, dashboard TUI v3.1, paleta fzf, glifos ambientales en títulos, keymap declarativo init/check/emit/apply/adopt, menú de voz, takeover de daemon singleton, push ntfy, TTS_PLAYBACK a Windows (winhost/wsl-ps/auto)
-  next: commitear overhaul de docs/ARCHITECTURE.md (Estado de Implementación, sesión Windows); replay de audios (retención de MP3); validar popups dashboard/paleta/menú en uso diario; E2E kokoro (espeak-ng + voice install)
+  desc: Voz para agentes en Herdr (v0.15.0) — replay de audios (almacén persistente, 6.º campo en history, ▶ en dashboard, ctrl-r en paleta), retención opt-in + purga horaria del daemon, ajustes en el menú de voz (prefix+u → a: proveedor/destino/retención), retención caliente (watcher re-lee config.env), --restart-daemon + tecla R, takeover singleton, keymap declarativo, push ntfy
+  next: publicar 8 commits en main; validar replay + ajustes en uso diario; migrar provider/destino a lectura caliente si hace falta
 
 agent-tts:
   scope: personal
   status: active
-  desc: Capa de voz universal para agentes CLI (Visión B) — 5 conectores + redact.py de secretos + --llm-summary con fallback --tldr + streaming Edge/OpenAI/ElevenLabs + Kokoro opcional ([kokoro]) + voice store + transportes Windows (winhost/wsl-ps/auto)
+  desc: Capa de voz universal para agentes CLI (v0.3.0) — Kokoro real verificado E2E (input_ids/rank/f32 negotiation, variante quantized opt-in, IPA español 100%), audio_store con retención opt-in (default 0) + persistencia de streaming (--stream --output y auto-store), --play-file con targets remotos (wsl-ps/winhost/windows), redact.py, --llm-summary, transportes Windows, CI ubuntu+windows experimental
+  next: publicar 3 commits en main; persistir turnos de la paleta cuando la sesión paralela aterrice; revisar resultados del CI Windows
 
 compare-prices:
   scope: personal
