@@ -26,8 +26,13 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr (v0.15.0) — replay de audios (almacén persistente, 6.º campo en history, ▶ en dashboard, ctrl-r en paleta), retención opt-in + purga horaria del daemon, ajustes en el menú de voz (prefix+u → a: proveedor/destino/retención), retención caliente (watcher re-lee config.env), --restart-daemon + tecla R, takeover singleton, keymap declarativo, push ntfy
-  next: publicar 8 commits en main; validar replay + ajustes en uso diario; migrar provider/destino a lectura caliente si hace falta
+  desc: Voz para agentes en Herdr — settle window anti pasos intermedios (TTS_SETTLE_SECONDS, knob s en Ajustes), popups del menú arreglados (ui_busy + setsid + log de reintentos), dashboard v3.1 / paleta fzf / menú de voz / ajustes, keymap declarativo, push ntfy, glifos de título, docs y comparativa redibujadas
+  next: verificar en el móvil que desaparecen las notificaciones duplicadas en tareas con pasos; valorar detección semántica del done real; streaming frame-level de Piper
+
+herdr-brain:
+  scope: personal
+  status: active
+  desc: Cerebro conversacional para hablar con agentes de Herdr — servicio HTTP+CLI + PWA instalable (voz en el navegador → /ask → texto y mp3 hablado en el móvil), disciplina sw no-cache + URLs versionadas
 
 agent-tts:
   scope: personal
