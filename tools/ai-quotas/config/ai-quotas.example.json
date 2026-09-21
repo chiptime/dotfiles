@@ -1,0 +1,40 @@
+{
+  "order": [
+    "claude",
+    "zai",
+    "chatgpt",
+    "opencode",
+    "gemini",
+    "gemini-3p",
+    "deepseek"
+  ],
+  "capacity": {
+    "claude": 1.0,
+    "zai": 20.0,
+    "chatgpt": 1.0,
+    "opencode": 1.0,
+    "gemini": 1.0,
+    "gemini-3p": 1.0
+  },
+  "file_providers": [
+    {
+      "id": "gemini",
+      "display_name": "Google Gemini"
+    },
+    {
+      "id": "gemini-3p",
+      "display_name": "Antigravity (Claude)"
+    }
+  ],
+  "main_labels": [
+    "5h window",
+    "weekly",
+    "monthly",
+    "daily",
+    "3p 5h window",
+    "3p weekly"
+  ],
+  "weekly_labels": {
+    "gemini-3p": "3p weekly"
+  }
+}

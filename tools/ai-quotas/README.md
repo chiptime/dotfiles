@@ -88,3 +88,51 @@ Any tool that can run a shell command can feed the dashboard. Example: a Claude 
 ```
 
 `$USED` is the number of requests used; `$RESETS_ISO` the window reset as an RFC 3339 UTC timestamp (e.g. `date -u -d '+3 hours' +%Y-%m-%dT%H:%M:%SZ`). Within a second the card appears at `http://127.0.0.1:47623`.
+
+## Adding a new provider
+
+### 1. File mode (Auto-discovery — zero code required)
+
+Any tool, hook, or script can drop a JSON record file into `$AI_QUOTAS_STATE_DIR` (by default `~/.local/state/ai-quotas/`) or use `ai-quotas stamp`.
+
+**The dashboard automatically discovers and renders new files without recompiling or restarting:**
+- **Grouping:** Records are grouped by their `"provider"` field.
+- **Group Title:** Uses the record's `"display_name"` (falling back to the provider ID).
+- **Cards Placement:** Standard window labels (`5h window`, `Weekly`, `Monthly`, `Daily`) automatically render as main cards in the group's primary row. Any other label falls into *"Otras cuotas"*.
+- **Visual Order:** Providers not listed in the default ordering appear at the end of the dashboard, sorted alphabetically.
+
+#### Declarative configuration (`~/.config/ai-quotas/config.json`):
+You can customize ordering, placeholders, capacity, and custom window labels purely via JSON without editing code or recompiling:
+
+```json
+{
+  "order": ["claude", "zai", "chatgpt", "opencode", "gemini", "gemini-3p", "myai", "deepseek"],
+  "capacity": { "claude": 1.0, "zai": 20.0, "gemini": 1.0, "myai": 2.0 },
+  "file_providers": [
+    { "id": "gemini", "display_name": "Google Gemini" },
+    { "id": "gemini-3p", "display_name": "Antigravity (Claude)" },
+    { "id": "myai", "display_name": "My Custom AI" }
+  ],
+  "main_labels": ["5h window", "weekly", "monthly", "daily", "myai 12h"],
+  "weekly_labels": { "myai": "myai weekly" }
+}
+```
+
+- **`order`**: Exact column ordering of providers in the dashboard.
+- **`capacity`**: Relative capacity weight for the weekly pace ranking.
+- **`file_providers`**: File-mode providers that should display a `Sin datos` (Missing) card when their file is absent.
+- **`main_labels`**: Labels treated as primary cards (preventing them from falling into *"Otras cuotas"*).
+- **`weekly_labels`**: Per-provider custom weekly label for ritmo sparkline and closes (defaults to `"weekly"`).
+- **Path**: Resolved from `$AI_QUOTAS_CONFIG`, else `~/.config/ai-quotas/config.json`. Changes apply immediately on the next page refresh without restarting the service.
+
+> 📖 **Guía en español para no técnicos:** Consulta [docs/CONFIG_GUIDE.md](docs/CONFIG_GUIDE.md) para ver ejemplos ilustrativos y recetas paso a paso.
+
+### 2. API Pull mode (Native Rust adapter)
+
+If `ai-quotas` should query an upstream provider API directly over HTTP:
+1. **Adapter:** Create `src/providers/<provider>.rs` implementing `QuotaSource` (`fetch()`, credentials resolution, and HTTP query with `fetch_with_retry`).
+2. **Manager:** Expose the module in `src/providers/mod.rs` and add a `CachedSource` field to `PullManager`.
+3. **Registry:** Add `KnownProvider { id: "...", display_name: "...", mode: Mode::Pull }` to `KNOWN_PROVIDERS` in `src/reader.rs`.
+4. **UI:** Add to `ORDER` and `CAPACITY` in `static/index.html`.
+5. **Incidents (optional):** If the provider has a public status page (Statuspage.io or OneUptime), add a row to `STATUS_PAGES` in `src/status.rs`.
+

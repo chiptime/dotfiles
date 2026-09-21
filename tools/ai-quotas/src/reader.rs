@@ -25,21 +25,27 @@ pub enum Mode {
 pub struct KnownProvider {
     pub id: &'static str,
     pub display_name: &'static str,
+    #[allow(dead_code)]
     pub mode: Mode,
 }
 
 pub const KNOWN_PROVIDERS: &[KnownProvider] = &[
     KnownProvider { id: "claude", display_name: "Claude Pro", mode: Mode::Pull },
     KnownProvider { id: "gemini", display_name: "Google Gemini", mode: Mode::File },
+    KnownProvider { id: "gemini-3p", display_name: "Antigravity (Claude)", mode: Mode::File },
     KnownProvider { id: "chatgpt", display_name: "ChatGPT Plus", mode: Mode::Pull },
     KnownProvider { id: "opencode", display_name: "OpenCode Go", mode: Mode::Pull },
     KnownProvider { id: "deepseek", display_name: "DeepSeek API", mode: Mode::Pull },
     KnownProvider { id: "zai", display_name: "Z.ai Coding Plan MAX", mode: Mode::Pull },
 ];
 
-/// Display name from the static provider list, if known.
-pub fn known_display_name(id: &str) -> Option<&'static str> {
-    KNOWN_PROVIDERS.iter().find(|p| p.id == id).map(|p| p.display_name)
+/// Display name from user configuration, falling back to static known providers.
+pub fn known_display_name(id: &str) -> Option<String> {
+    let config = crate::config::AppConfig::load();
+    if let Some(fp) = config.file_providers.iter().find(|p| p.id == id) {
+        return Some(fp.display_name.clone());
+    }
+    KNOWN_PROVIDERS.iter().find(|p| p.id == id).map(|p| p.display_name.to_string())
 }
 
 /// Freshness of a record relative to its TTL window.
@@ -136,30 +142,43 @@ pub fn read_dir_status(dir: &Path) -> Vec<Status> {
             // the file stem is only a fallback (unreadable/invalid files) and
             // a naming hint. Multiple files may share one provider (one file
             // per window, e.g. gemini-5h.json + gemini-weekly.json).
-            let provider = status
+            let raw_provider = status
                 .record
                 .as_ref()
                 .map(|r| r.provider.trim().to_string())
                 .filter(|p| !p.is_empty())
                 .unwrap_or_else(|| stem.clone());
+            // Automatic remapping: Gemini records whose label starts with "3P"
+            // (case-insensitive) belong to the separate gemini-3p group. This
+            // lets the hook write `provider: "gemini"` without changes — the
+            // split is handled here at read time.
+            let provider = remap_provider(&raw_provider, status.record.as_ref());
             status.provider = provider.clone();
+            if provider == "gemini-3p" {
+                status.display_name = known_display_name(&provider);
+                if let Some(ref mut rec) = status.record {
+                    rec.provider = provider.clone();
+                    rec.display_name = known_display_name(&provider);
+                }
+            }
             by_provider.entry(provider).or_default().push(status);
         }
     }
 
-    // Known file-mode providers first, in list order; synthesized Missing for
+    // Configured file-mode providers first, in list order; synthesized Missing for
     // those without any record, then any remaining custom/unknown files.
+    let config = crate::config::AppConfig::load();
     let mut out = Vec::new();
-    for known in KNOWN_PROVIDERS.iter().filter(|k| k.mode == Mode::File) {
-        match by_provider.remove(known.id) {
+    for fp in &config.file_providers {
+        match by_provider.remove(&fp.id) {
             Some(mut statuses) => out.append(&mut statuses),
             None => out.push(Status {
-                provider: known.id.to_string(),
+                provider: fp.id.clone(),
                 state: State::Missing,
                 record: None,
                 age_seconds: None,
                 detail: None,
-                display_name: Some(known.display_name.to_string()),
+                display_name: Some(fp.display_name.clone()),
             }),
         }
     }
@@ -169,6 +188,24 @@ pub fn read_dir_status(dir: &Path) -> Vec<Status> {
     out
 }
 
+/// Remap a raw provider id using the record label. `"gemini"` records whose
+/// label starts with `"3p"` (ASCII case-insensitive) are promoted to
+/// `"gemini-3p"` so they appear as a separate group in the dashboard without
+/// requiring any change to the hook that writes the state files.
+fn remap_provider(provider: &str, record: Option<&crate::schema::Record>) -> String {
+    if provider == "gemini" {
+        let is_3p = record
+            .and_then(|r| r.label.as_deref())
+            .map(|l| l.len() >= 2 && l[..2].eq_ignore_ascii_case("3p"))
+            .unwrap_or(false);
+        if is_3p {
+            return "gemini-3p".to_string();
+        }
+    }
+    provider.to_string()
+}
+
+
 /// Classify a single record file.
 fn file_status(path: &Path, provider: &str, now: DateTime<Utc>) -> Status {
     let error = |detail: String| Status {
@@ -177,7 +214,7 @@ fn file_status(path: &Path, provider: &str, now: DateTime<Utc>) -> Status {
         record: None,
         age_seconds: None,
         detail: Some(detail),
-        display_name: known_display_name(provider).map(str::to_string),
+        display_name: known_display_name(provider),
     };
 
     let bytes = match fs::read(path) {
@@ -353,9 +390,10 @@ mod tests {
     fn absent_dir_yields_all_file_providers_missing() {
         let statuses = read_dir_status(Path::new("/nonexistent-ai-quotas-dir"));
         let file_mode: Vec<&Status> = statuses.iter().filter(|s| s.state == State::Missing).collect();
-        assert_eq!(file_mode.len(), 1, "one Missing per known file-mode provider");
+        assert_eq!(file_mode.len(), 2, "one Missing per known file-mode provider");
         assert!(statuses.iter().all(|s| s.state == State::Missing));
         assert!(file_mode.iter().any(|s| s.provider == "gemini"));
+        assert!(file_mode.iter().any(|s| s.provider == "gemini-3p"));
         // Pull-mode providers are never synthesized as Missing.
         assert!(statuses.iter().all(|s| s.provider != "deepseek" && s.provider != "zai" && s.provider != "claude" && s.provider != "chatgpt" && s.provider != "opencode"));
     }
@@ -366,5 +404,36 @@ mod tests {
         fs::write(dir.path().join("claude.txt"), "garbage").unwrap();
         let statuses = read_dir_status(dir.path());
         assert!(statuses.iter().all(|s| s.state == State::Missing));
+    }
+
+    #[test]
+    fn gemini_3p_labels_are_remapped_to_gemini_3p() {
+        let dir = tempdir().unwrap();
+        let now = Utc::now();
+        for (file, label) in [
+            ("gemini-5h.json", "5h window"),
+            ("gemini-weekly.json", "Weekly"),
+            ("gemini-3p-5h.json", "3P 5h window"),
+            ("gemini-3p-weekly.json", "3P Weekly"),
+        ] {
+            let json = format!(
+                r#"{{"provider":"gemini","kind":"window","used":10.0,"limit":100.0,"unit":"percent","label":"{label}","display_name":"Google Gemini","fetched_at":"{now}","source":"local-log"}}"#
+            );
+            fs::write(dir.path().join(file), json).unwrap();
+        }
+
+        let statuses = read_dir_status(dir.path());
+        let gemini: Vec<&Status> = statuses.iter().filter(|s| s.provider == "gemini").collect();
+        assert_eq!(gemini.len(), 2, "1P records stay under gemini");
+        assert_eq!(gemini[0].display_name.as_deref(), Some("Google Gemini"));
+
+        let gemini_3p: Vec<&Status> = statuses.iter().filter(|s| s.provider == "gemini-3p").collect();
+        assert_eq!(gemini_3p.len(), 2, "3P records remapped to gemini-3p");
+        assert_eq!(gemini_3p[0].display_name.as_deref(), Some("Antigravity (Claude)"));
+        assert_eq!(gemini_3p[0].record.as_ref().unwrap().provider, "gemini-3p");
+        assert_eq!(gemini_3p[0].record.as_ref().unwrap().display_name.as_deref(), Some("Antigravity (Claude)"));
+
+        // Neither is Missing
+        assert!(!statuses.iter().any(|s| (s.provider == "gemini" || s.provider == "gemini-3p") && matches!(s.state, State::Missing)));
     }
 }
