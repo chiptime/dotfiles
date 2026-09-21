@@ -1,0 +1,1147 @@
+{
+  "video_path": "/work/media/source-7684788219510033665.mp4",
+  "time_base": "1/12800",
+  "total_2fps_candidates_generated": 325,
+  "uniform_coverage_candidates_count": 41,
+  "scene_change_candidates_count": 20,
+  "text_region_change_candidates_count": 44,
+  "merged_before_budget_count": 68,
+  "final_retained_count": 64,
+  "budget_cap": 64,
+  "crop_candidate_cap": 16,
+  "crop_candidate_count": 16,
+  "parameters": {
+    "uniform_fps": 2,
+    "uniform_min_gap_seconds": 4.0,
+    "scene_change_threshold": 0.3,
+    "text_region_scene_threshold": 0.15,
+    "dedup_match_window_seconds": 0.08,
+    "pts_formula": "timestamp_seconds = pts * time_base"
+  },
+  "sub_0_5s_coverage_gap_note": "Uniform candidates are sampled at ~2fps (500ms native gap). Any on-screen text/URL/code with a visible duration under ~0.5s can fall entirely between two uniform samples. Scene-change and text-region-change candidates partially mitigate this by catching hard cuts and lower-third content changes, but this remains a documented coverage gap for very short on-screen text.",
+  "text_region_crop_heuristic_note": "Text-region-change detection crops a lower-third band (0.35 of frame height, y offset 0.65) before scene detection, since on-screen captions/subtitles typically live there. This is a starting heuristic, not guaranteed to cover all on-screen text placement -- e.g. terminal windows or code editors can be centered or full-frame.",
+  "frames": [
+    {
+      "index": 1,
+      "filename": "hybrid_001.png",
+      "pts": 0,
+      "timestamp_seconds_computed": 0.0,
+      "timestamp_seconds_ffmpeg_reported": 0.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "6c6b28610135362d8d78cf643172213d35b1250d6cd0831d52e16500ee1b8ded",
+      "size_bytes": 641539
+    },
+    {
+      "index": 2,
+      "filename": "hybrid_002.png",
+      "pts": 20480,
+      "timestamp_seconds_computed": 1.6,
+      "timestamp_seconds_ffmpeg_reported": 1.6,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_001.png",
+        "sha256": "448e453a73b623d6f8447b5fbf1c120e594d14767d106c4a0833ca2309c69ae5",
+        "size_bytes": 255627,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "72479298e10d658ac6dee16290a10be286cf94ba96d89b35f1ceb0f50397d126",
+      "size_bytes": 626045
+    },
+    {
+      "index": 3,
+      "filename": "hybrid_003.png",
+      "pts": 51200,
+      "timestamp_seconds_computed": 4.0,
+      "timestamp_seconds_ffmpeg_reported": 4.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "03ec3d78bb3591e5bca7ceae134b09200ff0d634db62333670ee2691f6c6f695",
+      "size_bytes": 846624
+    },
+    {
+      "index": 4,
+      "filename": "hybrid_004.png",
+      "pts": 53760,
+      "timestamp_seconds_computed": 4.2,
+      "timestamp_seconds_ffmpeg_reported": 4.2,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_002.png",
+        "sha256": "d114f442a81b38ab7f11baf2135677a8f158d9f9ac5be1fa265df5383abbe011",
+        "size_bytes": 73131,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "50396f636c17c728bff6bf09631add9f00b1693ec6c6b92f1d4778ea9338df66",
+      "size_bytes": 214978
+    },
+    {
+      "index": 5,
+      "filename": "hybrid_005.png",
+      "pts": 69120,
+      "timestamp_seconds_computed": 5.4,
+      "timestamp_seconds_ffmpeg_reported": 5.4,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_003.png",
+        "sha256": "d6e95aae3ab92cdaeef7229346cb3f2e971ef75d9ac5adb4df70fcb8ca84f225",
+        "size_bytes": 90670,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "32eebf5c409b7aaca5754a4f2707d53e716a0c9bc245a1be70896bd669efc43a",
+      "size_bytes": 233341
+    },
+    {
+      "index": 6,
+      "filename": "hybrid_006.png",
+      "pts": 102400,
+      "timestamp_seconds_computed": 8.0,
+      "timestamp_seconds_ffmpeg_reported": 8.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "8d33ffec5ac64da08e7550bc3216ca66c2f085a0922dbb4658f7ead8634dc962",
+      "size_bytes": 203403
+    },
+    {
+      "index": 7,
+      "filename": "hybrid_007.png",
+      "pts": 134656,
+      "timestamp_seconds_computed": 10.52,
+      "timestamp_seconds_ffmpeg_reported": 10.52,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_004.png",
+        "sha256": "2a30c1b37815e0493d384a5ea575faf617d816d91c5edb49f36f596e2ba0485d",
+        "size_bytes": 74867,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "613c5c3594eaa4bce12ac8467f569f1c13a03e117776e570979a4941b2a5b490",
+      "size_bytes": 243221
+    },
+    {
+      "index": 8,
+      "filename": "hybrid_008.png",
+      "pts": 153600,
+      "timestamp_seconds_computed": 12.0,
+      "timestamp_seconds_ffmpeg_reported": 12.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "fffac5e07cd70cd376d19c4d0e2932828c68f20023d2d3a8c6d4ec54dd7a2f0b",
+      "size_bytes": 246964
+    },
+    {
+      "index": 9,
+      "filename": "hybrid_009.png",
+      "pts": 204800,
+      "timestamp_seconds_computed": 16.0,
+      "timestamp_seconds_ffmpeg_reported": 16.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "ffbb40cc8d04e3a1a6dfb946383487624519333737101e32915cb455cfe8e6a8",
+      "size_bytes": 188530
+    },
+    {
+      "index": 10,
+      "filename": "hybrid_010.png",
+      "pts": 256000,
+      "timestamp_seconds_computed": 20.0,
+      "timestamp_seconds_ffmpeg_reported": 20.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "a2b4def1faf1db25d51b25ffc28aee20359ee3ec2df8cefbeec745887fb3c33d",
+      "size_bytes": 243949
+    },
+    {
+      "index": 11,
+      "filename": "hybrid_011.png",
+      "pts": 257536,
+      "timestamp_seconds_computed": 20.12,
+      "timestamp_seconds_ffmpeg_reported": 20.12,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_005.png",
+        "sha256": "52f8a2dc9c79074f9f69ca21ec3fa0234149af5fab712db8049ea3fe865530f5",
+        "size_bytes": 74666,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "7233b79d8ed1e553db5bc12b96d48d98e15333dfff279aa0826f09e4a1e6d153",
+      "size_bytes": 208037
+    },
+    {
+      "index": 12,
+      "filename": "hybrid_012.png",
+      "pts": 307200,
+      "timestamp_seconds_computed": 24.0,
+      "timestamp_seconds_ffmpeg_reported": 24.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "b1cab033284127580c722e32fa06d7be105f46f18d3e7da1f737c734715858e7",
+      "size_bytes": 165038
+    },
+    {
+      "index": 13,
+      "filename": "hybrid_013.png",
+      "pts": 358400,
+      "timestamp_seconds_computed": 28.0,
+      "timestamp_seconds_ffmpeg_reported": 28.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "a5443b2dba249d9d210e386a13d26582f4731c582db8f2206e2de80b981f2ce1",
+      "size_bytes": 146012
+    },
+    {
+      "index": 14,
+      "filename": "hybrid_014.png",
+      "pts": 409600,
+      "timestamp_seconds_computed": 32.0,
+      "timestamp_seconds_ffmpeg_reported": 32.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "246fcc07ac0ba923ffe908584f369a502def5f60d8970b52884bcd161fd2566f",
+      "size_bytes": 144110
+    },
+    {
+      "index": 15,
+      "filename": "hybrid_015.png",
+      "pts": 512000,
+      "timestamp_seconds_computed": 40.0,
+      "timestamp_seconds_ffmpeg_reported": 40.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "57f30b94973ce8419c37e3055d5e2bffff0f830f6b03ed114ea494492513c299",
+      "size_bytes": 200155
+    },
+    {
+      "index": 16,
+      "filename": "hybrid_016.png",
+      "pts": 563200,
+      "timestamp_seconds_computed": 44.0,
+      "timestamp_seconds_ffmpeg_reported": 44.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "ca1bb6a6f38e0b8aacd9469b3672222b30c15e313812e47c0eb45c6143122819",
+      "size_bytes": 221058
+    },
+    {
+      "index": 17,
+      "filename": "hybrid_017.png",
+      "pts": 591872,
+      "timestamp_seconds_computed": 46.24,
+      "timestamp_seconds_ffmpeg_reported": 46.24,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_006.png",
+        "sha256": "b4772682a8dd189235118644fcd24308f81d77b0bb837e844d504216de1a3515",
+        "size_bytes": 71825,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "7b1006455cc83ad363ad344cdda56cc6d0e708bb93047200c065738db01c28f3",
+      "size_bytes": 228584
+    },
+    {
+      "index": 18,
+      "filename": "hybrid_018.png",
+      "pts": 614400,
+      "timestamp_seconds_computed": 48.0,
+      "timestamp_seconds_ffmpeg_reported": 48.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "88e6e69cc72dc5bf99d6559de04b628fd8118a22c6b8b0d51beac58cf9ff5dd9",
+      "size_bytes": 231681
+    },
+    {
+      "index": 19,
+      "filename": "hybrid_019.png",
+      "pts": 628224,
+      "timestamp_seconds_computed": 49.08,
+      "timestamp_seconds_ffmpeg_reported": 49.08,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_007.png",
+        "sha256": "553e5e80cc7be1a58d711af9d882df92e93b4c43c28803691950cad62e39cc8a",
+        "size_bytes": 49903,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "cf3882489f795349c22db5d9c52929fd4d166c7fdc8dcfef93f88af92ef2bf14",
+      "size_bytes": 229552
+    },
+    {
+      "index": 20,
+      "filename": "hybrid_020.png",
+      "pts": 654336,
+      "timestamp_seconds_computed": 51.120000000000005,
+      "timestamp_seconds_ffmpeg_reported": 51.12,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_008.png",
+        "sha256": "6f52c5072c4668020979303b9f359f6ac447d6ef1ba799c0e9ea9b894b5ab432",
+        "size_bytes": 42300,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "8ed6f7823fa9b595b203a8b976c1b08936db57d29db6ccb84c093eda3667dbf5",
+      "size_bytes": 148575
+    },
+    {
+      "index": 21,
+      "filename": "hybrid_021.png",
+      "pts": 665600,
+      "timestamp_seconds_computed": 52.0,
+      "timestamp_seconds_ffmpeg_reported": 52.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "663490bc67ce6cd93e9dcc3851ddbd1e1d5570f72dc4433f0cec70bad3c8cec5",
+      "size_bytes": 154723
+    },
+    {
+      "index": 22,
+      "filename": "hybrid_022.png",
+      "pts": 672768,
+      "timestamp_seconds_computed": 52.56,
+      "timestamp_seconds_ffmpeg_reported": 52.56,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_009.png",
+        "sha256": "80d5e25bc54d04895485ff3a2b216622057b14db30a5e4b37fc175adbe08434f",
+        "size_bytes": 46692,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "8284026e551a374646a0625caa51ebe2dec2c5a91fc18898bd70a30959cc5d57",
+      "size_bytes": 157270
+    },
+    {
+      "index": 23,
+      "filename": "hybrid_023.png",
+      "pts": 716800,
+      "timestamp_seconds_computed": 56.0,
+      "timestamp_seconds_ffmpeg_reported": 56.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "c94e642374fc863a06519c983422426bf5ebae595db005bc5dc1f61017112ec3",
+      "size_bytes": 104955
+    },
+    {
+      "index": 24,
+      "filename": "hybrid_024.png",
+      "pts": 768000,
+      "timestamp_seconds_computed": 60.0,
+      "timestamp_seconds_ffmpeg_reported": 60.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "1d6941b7d9b9af149a56fee5a64bead37615f7b13772ecb4c9fb4565b3986cc6",
+      "size_bytes": 562686
+    },
+    {
+      "index": 25,
+      "filename": "hybrid_025.png",
+      "pts": 819200,
+      "timestamp_seconds_computed": 64.0,
+      "timestamp_seconds_ffmpeg_reported": 64.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "ba3909d59557669c2ec1df1013ddd470572812ee962033767199792db14f9d6b",
+      "size_bytes": 546130
+    },
+    {
+      "index": 26,
+      "filename": "hybrid_026.png",
+      "pts": 848896,
+      "timestamp_seconds_computed": 66.32000000000001,
+      "timestamp_seconds_ffmpeg_reported": 66.32,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_010.png",
+        "sha256": "56cb5a8e1093eecc160e0117d3502df9f7da6cf7b2cf647007e90d3cdb32d765",
+        "size_bytes": 42366,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "cd92dcae8bebd7fe5244dae38771a5f475615016870fa355bef7d61e1eb36d8d",
+      "size_bytes": 166076
+    },
+    {
+      "index": 27,
+      "filename": "hybrid_027.png",
+      "pts": 870400,
+      "timestamp_seconds_computed": 68.0,
+      "timestamp_seconds_ffmpeg_reported": 68.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "320ddfb370d5c755895c4c2bfbeb2d43f62ca5738cedf36c1c909e3a4c9f19e4",
+      "size_bytes": 144129
+    },
+    {
+      "index": 28,
+      "filename": "hybrid_028.png",
+      "pts": 911360,
+      "timestamp_seconds_computed": 71.2,
+      "timestamp_seconds_ffmpeg_reported": 71.2,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_011.png",
+        "sha256": "e01419507b3f4275b977f074d9e9769083365f93f3c74d19166f0e2424d677d1",
+        "size_bytes": 73472,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "6b6dc04f1a4c07de2b3df3b46b38d986548bbc3784574ea2851a621ae3e7f3fc",
+      "size_bytes": 200690
+    },
+    {
+      "index": 29,
+      "filename": "hybrid_029.png",
+      "pts": 921600,
+      "timestamp_seconds_computed": 72.0,
+      "timestamp_seconds_ffmpeg_reported": 72.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "2a98dd6d4804b8613d7805c367c92b68b56c64186f10ed36ed7979f956caa2db",
+      "size_bytes": 176421
+    },
+    {
+      "index": 30,
+      "filename": "hybrid_030.png",
+      "pts": 1022464,
+      "timestamp_seconds_computed": 79.88,
+      "timestamp_seconds_ffmpeg_reported": 79.88,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_012.png",
+        "sha256": "06b3d5c7c541cd6e3c7ff82b471ba89621f7021e45d64d730179da013fb2e4a9",
+        "size_bytes": 41092,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "b72bf840e4f75fe8a10e58ecb02a1e091a0be1e1b8bd2c6a931e433aea121dbd",
+      "size_bytes": 184664
+    },
+    {
+      "index": 31,
+      "filename": "hybrid_031.png",
+      "pts": 1024000,
+      "timestamp_seconds_computed": 80.0,
+      "timestamp_seconds_ffmpeg_reported": 80.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage",
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_013.png",
+        "sha256": "a1e3e7447a33fea10e2e267238b4f8b4ced5b65381d07d2a322f7aae033b51f9",
+        "size_bytes": 23208,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "037cfbe99aba0e71d9be576eaabb738aee74b3692fcf8248eca043b21242530b",
+      "size_bytes": 129048
+    },
+    {
+      "index": 32,
+      "filename": "hybrid_032.png",
+      "pts": 1068032,
+      "timestamp_seconds_computed": 83.44,
+      "timestamp_seconds_ffmpeg_reported": 83.44,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_014.png",
+        "sha256": "fcad3c8a176bcc60060295e957183058762a3712efc9b308edad55a152f77c5d",
+        "size_bytes": 5440,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "177437388da99684f39e26c48dac5e96e10249f839a60e6de65179049809c7c0",
+      "size_bytes": 76350
+    },
+    {
+      "index": 33,
+      "filename": "hybrid_033.png",
+      "pts": 1075200,
+      "timestamp_seconds_computed": 84.0,
+      "timestamp_seconds_ffmpeg_reported": 84.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "9db739984ef4da6253653f9ca5490e36beb6ad19084654b1bb5b915195e7ed9f",
+      "size_bytes": 39977
+    },
+    {
+      "index": 34,
+      "filename": "hybrid_034.png",
+      "pts": 1126400,
+      "timestamp_seconds_computed": 88.0,
+      "timestamp_seconds_ffmpeg_reported": 88.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "d7877b3d21ae61b67c4f0f8e19edac95e2d8d2dc75a770ebd9f470f7200014fa",
+      "size_bytes": 51060
+    },
+    {
+      "index": 35,
+      "filename": "hybrid_035.png",
+      "pts": 1177600,
+      "timestamp_seconds_computed": 92.0,
+      "timestamp_seconds_ffmpeg_reported": 92.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "2f743ffa9b5275c7ae327a7b1f66c8406ae467e653e7cff488aa45b3bc9201d7",
+      "size_bytes": 98621
+    },
+    {
+      "index": 36,
+      "filename": "hybrid_036.png",
+      "pts": 1228800,
+      "timestamp_seconds_computed": 96.0,
+      "timestamp_seconds_ffmpeg_reported": 96.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "549cbdec47ca2112ba75f5b85cf9981932d0151305c93c19a88253a21e52a140",
+      "size_bytes": 170291
+    },
+    {
+      "index": 37,
+      "filename": "hybrid_037.png",
+      "pts": 1280000,
+      "timestamp_seconds_computed": 100.0,
+      "timestamp_seconds_ffmpeg_reported": 100.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "1255608dbaa210d96a4bb828e27baa32ddcf1adda10acb9db473e25e20923f0c",
+      "size_bytes": 192769
+    },
+    {
+      "index": 38,
+      "filename": "hybrid_038.png",
+      "pts": 1291776,
+      "timestamp_seconds_computed": 100.92,
+      "timestamp_seconds_ffmpeg_reported": 100.92,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_015.png",
+        "sha256": "209aec4317cbb7b3dae07c1be999781f575d53b29af503e1c6cbde59c9dad094",
+        "size_bytes": 109707,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "0e3740694c2c8a01648846b39c3d1c69f634b0c58afe7592359f5aba244b35c2",
+      "size_bytes": 370527
+    },
+    {
+      "index": 39,
+      "filename": "hybrid_039.png",
+      "pts": 1316352,
+      "timestamp_seconds_computed": 102.84,
+      "timestamp_seconds_ffmpeg_reported": 102.84,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": true,
+      "suggested_crop": "lower_third",
+      "crop_artifact": {
+        "filename": "crop_016.png",
+        "sha256": "2ebe86e720ab68e0dd1f00af8e640903152dcd38c7bb7ce9812d093443650bc9",
+        "size_bytes": 96054,
+        "crop": "iw:ih*0.35:0:ih*0.65"
+      },
+      "sha256": "6e8c7bf797c0a6849fd351bb5025b1a989bba592784f60f6039c1032afd7a596",
+      "size_bytes": 402687
+    },
+    {
+      "index": 40,
+      "filename": "hybrid_040.png",
+      "pts": 1331200,
+      "timestamp_seconds_computed": 104.0,
+      "timestamp_seconds_ffmpeg_reported": 104.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "cb75f374c7269fc3fe1741a5eb749b3ffcc57d7aecfbe1e62de204dfa4302292",
+      "size_bytes": 404051
+    },
+    {
+      "index": 41,
+      "filename": "hybrid_041.png",
+      "pts": 1337856,
+      "timestamp_seconds_computed": 104.52,
+      "timestamp_seconds_ffmpeg_reported": 104.52,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "201945bde0cdf960de137a5efbd3941834188cbb840346c09fe7d0ce77799f35",
+      "size_bytes": 314543
+    },
+    {
+      "index": 42,
+      "filename": "hybrid_042.png",
+      "pts": 1364992,
+      "timestamp_seconds_computed": 106.64,
+      "timestamp_seconds_ffmpeg_reported": 106.64,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "cb7d0a30dc07569a0c08b1fa4bb4f055c6ffe4b087156be880057229031b126f",
+      "size_bytes": 174148
+    },
+    {
+      "index": 43,
+      "filename": "hybrid_043.png",
+      "pts": 1382400,
+      "timestamp_seconds_computed": 108.0,
+      "timestamp_seconds_ffmpeg_reported": 108.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "eb9a33b317ffb91d272a8e58c9891be80541f892f2841b72e3e938fac8045407",
+      "size_bytes": 143067
+    },
+    {
+      "index": 44,
+      "filename": "hybrid_044.png",
+      "pts": 1388032,
+      "timestamp_seconds_computed": 108.44,
+      "timestamp_seconds_ffmpeg_reported": 108.44,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "44f303c3a787b7a4a3b16d76ec40c80ce9f67b18dacd5b8be05a1d452e5e909d",
+      "size_bytes": 276980
+    },
+    {
+      "index": 45,
+      "filename": "hybrid_045.png",
+      "pts": 1415680,
+      "timestamp_seconds_computed": 110.60000000000001,
+      "timestamp_seconds_ffmpeg_reported": 110.6,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "ec474da8a5f599a79585274692595a15802ddbb8de7b6cd1e1f0def0f0718bf0",
+      "size_bytes": 118385
+    },
+    {
+      "index": 46,
+      "filename": "hybrid_046.png",
+      "pts": 1433600,
+      "timestamp_seconds_computed": 112.0,
+      "timestamp_seconds_ffmpeg_reported": 112.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "0bb54875bbcbc8f111f6862c0155b720dcafa490ec36ff18903617baf2ea756a",
+      "size_bytes": 64454
+    },
+    {
+      "index": 47,
+      "filename": "hybrid_047.png",
+      "pts": 1440256,
+      "timestamp_seconds_computed": 112.52,
+      "timestamp_seconds_ffmpeg_reported": 112.52,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "b7f3af5a4e57f5689ed3b7485d34395d311f3e4bc39f799fa34721f0036e340d",
+      "size_bytes": 125032
+    },
+    {
+      "index": 48,
+      "filename": "hybrid_048.png",
+      "pts": 1469440,
+      "timestamp_seconds_computed": 114.8,
+      "timestamp_seconds_ffmpeg_reported": 114.8,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "b5bc0295937ab9f0ee9d5e24493a03de970b75a3992a0c37fcc12949eb85c4c4",
+      "size_bytes": 437838
+    },
+    {
+      "index": 49,
+      "filename": "hybrid_049.png",
+      "pts": 1484800,
+      "timestamp_seconds_computed": 116.0,
+      "timestamp_seconds_ffmpeg_reported": 116.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "3d3d41496713c5cf2c383c72b98692b79df575ab1529f468710737ecf1b06f6b",
+      "size_bytes": 818416
+    },
+    {
+      "index": 50,
+      "filename": "hybrid_050.png",
+      "pts": 1538560,
+      "timestamp_seconds_computed": 120.2,
+      "timestamp_seconds_ffmpeg_reported": 120.2,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "03ef857f22461f613e9f05e1b10beec8d7f3ad034e6016a0aa71da988936adfa",
+      "size_bytes": 650583
+    },
+    {
+      "index": 51,
+      "filename": "hybrid_051.png",
+      "pts": 1555968,
+      "timestamp_seconds_computed": 121.56,
+      "timestamp_seconds_ffmpeg_reported": 121.56,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "e1ef780b7284259dd135551e9edd4a11d253e1ba713395f2031f7613f2a3004c",
+      "size_bytes": 851778
+    },
+    {
+      "index": 52,
+      "filename": "hybrid_052.png",
+      "pts": 1587200,
+      "timestamp_seconds_computed": 124.0,
+      "timestamp_seconds_ffmpeg_reported": 124.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "9e376f21f808b4f4fb36fd5f53fc9e7ae3971c68cee78a715e4336169428cc53",
+      "size_bytes": 876439
+    },
+    {
+      "index": 53,
+      "filename": "hybrid_053.png",
+      "pts": 1595392,
+      "timestamp_seconds_computed": 124.64,
+      "timestamp_seconds_ffmpeg_reported": 124.64,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "73d9c90ca3826ca78b1ff2f3ccc62ffb69bed79686a15a97f14654c36ba05d73",
+      "size_bytes": 457544
+    },
+    {
+      "index": 54,
+      "filename": "hybrid_054.png",
+      "pts": 1638400,
+      "timestamp_seconds_computed": 128.0,
+      "timestamp_seconds_ffmpeg_reported": 128.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "bc703296dbbeb47425335f69554beb16340b9e6a34ecb25b271ddd363e00538e",
+      "size_bytes": 195598
+    },
+    {
+      "index": 55,
+      "filename": "hybrid_055.png",
+      "pts": 1671168,
+      "timestamp_seconds_computed": 130.56,
+      "timestamp_seconds_ffmpeg_reported": 130.56,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "667ba565a6b7a08955118cfd0cff39c530d42734cdba13065e72d3ea81a9634b",
+      "size_bytes": 160960
+    },
+    {
+      "index": 56,
+      "filename": "hybrid_056.png",
+      "pts": 1689600,
+      "timestamp_seconds_computed": 132.0,
+      "timestamp_seconds_ffmpeg_reported": 132.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "164641329c1abf60ebea8e1f89219f6df2669b996fd21b549f415fbfe86dd928",
+      "size_bytes": 142181
+    },
+    {
+      "index": 57,
+      "filename": "hybrid_057.png",
+      "pts": 1740800,
+      "timestamp_seconds_computed": 136.0,
+      "timestamp_seconds_ffmpeg_reported": 136.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "41951ec1afcd79b8db1669b7a2f0cbf5d105f2ce16aef9e2d5ca4fca3672438c",
+      "size_bytes": 244617
+    },
+    {
+      "index": 58,
+      "filename": "hybrid_058.png",
+      "pts": 1780224,
+      "timestamp_seconds_computed": 139.08,
+      "timestamp_seconds_ffmpeg_reported": 139.08,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "512249be0a2b0199069ed3767654a3ec01170e0d4295e11ab95c633d3205d22b",
+      "size_bytes": 581905
+    },
+    {
+      "index": 59,
+      "filename": "hybrid_059.png",
+      "pts": 1792000,
+      "timestamp_seconds_computed": 140.0,
+      "timestamp_seconds_ffmpeg_reported": 140.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "de23739dab303618914ddd2a64138ef6ba9f394f99bd994e9f008a8024e4d2dd",
+      "size_bytes": 646512
+    },
+    {
+      "index": 60,
+      "filename": "hybrid_060.png",
+      "pts": 1843200,
+      "timestamp_seconds_computed": 144.0,
+      "timestamp_seconds_ffmpeg_reported": 144.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "79e783d17ee17b253494bc201947c2aefe473ba510e87ee3999746803fdb612b",
+      "size_bytes": 649963
+    },
+    {
+      "index": 61,
+      "filename": "hybrid_061.png",
+      "pts": 1894400,
+      "timestamp_seconds_computed": 148.0,
+      "timestamp_seconds_ffmpeg_reported": 148.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "69f90b6b8096a3d4f5e3d32832c20010eb6d3aeb4695ec515a396dbd271f0685",
+      "size_bytes": 690216
+    },
+    {
+      "index": 62,
+      "filename": "hybrid_062.png",
+      "pts": 1899520,
+      "timestamp_seconds_computed": 148.4,
+      "timestamp_seconds_ffmpeg_reported": 148.4,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "scene_change",
+        "text_region_change"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "749efa840f89ab30d5842985d45b3c8f17865a101c89e030e9c87cfb5c028929",
+      "size_bytes": 339733
+    },
+    {
+      "index": 63,
+      "filename": "hybrid_063.png",
+      "pts": 1945600,
+      "timestamp_seconds_computed": 152.0,
+      "timestamp_seconds_ffmpeg_reported": 152.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "5cc2829d036d8d74280da1c54f581cc069f27d4408d6d0d93a2cd3a23c53f813",
+      "size_bytes": 185330
+    },
+    {
+      "index": 64,
+      "filename": "hybrid_064.png",
+      "pts": 1996800,
+      "timestamp_seconds_computed": 156.0,
+      "timestamp_seconds_ffmpeg_reported": 156.0,
+      "pts_time_mismatch_warning": false,
+      "selection_reasons": [
+        "uniform_coverage"
+      ],
+      "is_crop_candidate": false,
+      "suggested_crop": null,
+      "crop_artifact": null,
+      "sha256": "79ad86e7d5b5ae50c49f3bc146d3f91d0d33a683a15f8973a6edcb7136645884",
+      "size_bytes": 128012
+    }
+  ],
+  "errors": []
+}

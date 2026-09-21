@@ -1,0 +1,4369 @@
+{
+  "status": "completed",
+  "started_at": "2026-09-18T06:56:07.325056+00:00",
+  "completed_at": "2026-09-18T06:56:27.968067+00:00",
+  "runtime": {
+    "faster_whisper": "1.2.1",
+    "ctranslate2": "4.8.1",
+    "model": "large-v3",
+    "model_path": "/root/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": "cuda",
+    "compute_type": "float16",
+    "beam_size": 3,
+    "model_load_seconds": 3.442847
+  },
+  "input": {
+    "path": "/work/media/audio.wav",
+    "decoded_samples": 2600680,
+    "sample_rate": 16000
+  },
+  "vad_selection": {
+    "purpose": "select useful vocal windows only; transcription uses the untouched original WAV",
+    "parameters": {
+      "threshold": 0.5,
+      "neg_threshold": null,
+      "min_speech_duration_ms": 250,
+      "max_speech_duration_s": "inf",
+      "min_silence_duration_ms": 2000,
+      "speech_pad_ms": 400
+    },
+    "voiced_intervals_seconds": [
+      [
+        0.0,
+        162.5425
+      ]
+    ],
+    "selected_windows": [
+      {
+        "start_seconds": 0.0,
+        "end_seconds": 30.0,
+        "voiced_coverage_seconds": 30.0
+      },
+      {
+        "start_seconds": 98.27125,
+        "end_seconds": 128.27125,
+        "voiced_coverage_seconds": 30.000000000000014
+      }
+    ]
+  },
+  "configuration_a_autodetect": {
+    "elapsed_seconds": 8.65418,
+    "language": "es",
+    "language_probability_uncalibrated": 0.998046875,
+    "duration": 162.5425,
+    "duration_after_vad": 162.5425,
+    "full_text": "Estos son 5 proyectos open source que han llamado la atención a muchos desarrolladores esta semana. El primero es Archify. Este es básicamente un skill para agentes como Cloud Code, Cursor, Codex, Open Code y muchos otros más en donde le puedes pasar un repo o simplemente le describes el sistema y este te va a devolver un diagrama de arquitectura con flujo de secuencia o ciclo de vida. Y lo interesante es que no es un dibujito, en realidad es básicamente toda una interfaz escrita en HTML en donde puedes navegar entre este tipo de diagramas avanzados en donde puedes exportarlos a PNG, SVG y otros formatos. puedes comparar entre múltiples versiones y son diagramas que lucen bastante bien y te pueden ayudar a entender lo que sería una arquitectura grande a través de una forma visual. El segundo es OmniRoute. Este es básicamente un endpoint para todos tus modelos de IA. Se le conoce como un gateway y es básicamente un proyecto que tiene la idea de poder enrutar a cientos de proveedores de IA con la idea de que la cuota nunca se acabe. Es decir, lo puedes instalar, lo ejecutas y a partir de allí puedes conectarlo con cualquier herramienta de IA que básicamente esta repo se va a encargar de intercambiar entre cuentas gratuitas para que tu suscripción nunca se acabe, y en la práctica es como tener una suscripción de IA completamente gratis, sin registros sin tokens y sin ningún tipo de login necesario, y luego también tenemos este proyecto llamado Orca, que se define como un ADE, de Agent Development Environment es básicamente un entorno gráfico donde puedes controlar distintos agentes al mismo tiempo y si bien el software es gratuito, tú tienes que traer tu suscripción de agentes como Cloud Code Codex u Open Code, y lo que hace Orca es poder comunicarlos a todos y poder orquestarlos, también trae un editor al estilo de Visual Studio Code, integración con Git y Linear, posee soporte a WordTree SSH, y hasta tiene una aplicación móvil que te permite controlarlo remotamente además es un proyecto abierto que está para Mac, Windows y Linux, por lo que también puedes instalarlo donde quieras. Número 4, Omarchi este no es un repo nuevo, pero sigue creciendo Omarchi es la distro de DHH el creador de Ruby on Rails y esta distro está basada en Arch Linux, pero tiene soporte con Hyperland y tiene una enorme cantidad de programas ya instalados y esto responde a un problema muy en concreto ¿quieres utilizar Linux pero te suena complicado? bueno, puedes llegar a instalar simplemente Omarchi Y ya trae todos los programas listos para que simplemente empieces a utilizarlo Viene con Alacrity, NeoBean, LazyBean, Docker y muchos otros más Y finalmente tenemos a AnyDoc Que probablemente lo vas a utilizar más de lo que crees Y es que esta es una biblioteca de RAS que permite convertir cualquier tipo de archivo Ya sea Word, PowerPoint, Excel, Open Document o lo que quieras En archivos de Markdown listos para poder utilizarse en milisegundos Y es que en esta época de día donde tratas de cargar información dentro de un modelo inteligente La conversión de un formato a otro es muy importante Sobre todo porque muchos modelos inteligentes pueden leer Markdowns Así que esta biblioteca lo que hace es que en promedio puede llegar a convertir cualquier tipo de archivo en 4 milisegundos Además que también viene con un skill para que tu agente pueda saber cómo utilizarlo por ti Pero estos son tan solamente 5 proyectos de los muchos que puedes llegar a encontrar Así que también te dejo un video en el canal",
+    "segments": [
+      {
+        "id": 1,
+        "seek": 0,
+        "start": 0.0,
+        "end": 3.24,
+        "text": " Estos son 5 proyectos open source que han llamado la atención a muchos desarrolladores",
+        "tokens": [
+          50365,
+          4410,
+          329,
+          1872,
+          1025,
+          23832,
+          329,
+          1269,
+          4009,
+          631,
+          7276,
+          47055,
+          635,
+          33488,
+          257,
+          17061,
+          32501,
+          11856,
+          50527
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 2,
+        "seek": 0,
+        "start": 3.24,
+        "end": 4.24,
+        "text": " esta semana.",
+        "tokens": [
+          50527,
+          5283,
+          20205,
+          13,
+          50577
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 3,
+        "seek": 0,
+        "start": 4.24,
+        "end": 5.24,
+        "text": " El primero es Archify.",
+        "tokens": [
+          50577,
+          2699,
+          21289,
+          785,
+          10984,
+          2505,
+          13,
+          50627
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 4,
+        "seek": 0,
+        "start": 5.24,
+        "end": 9.4,
+        "text": " Este es básicamente un skill para agentes como Cloud Code, Cursor, Codex, Open Code",
+        "tokens": [
+          50627,
+          16105,
+          785,
+          48282,
+          517,
+          5389,
+          1690,
+          623,
+          9240,
+          2617,
+          8061,
+          15549,
+          11,
+          383,
+          2156,
+          284,
+          11,
+          15549,
+          87,
+          11,
+          7238,
+          15549,
+          50835
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 5,
+        "seek": 0,
+        "start": 9.4,
+        "end": 13.620000000000001,
+        "text": " y muchos otros más en donde le puedes pasar un repo o simplemente le describes el sistema",
+        "tokens": [
+          50835,
+          288,
+          17061,
+          16422,
+          3573,
+          465,
+          10488,
+          476,
+          19010,
+          25344,
+          517,
+          49040,
+          277,
+          33190,
+          476,
+          15626,
+          806,
+          13245,
+          51046
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 6,
+        "seek": 0,
+        "start": 13.620000000000001,
+        "end": 17.92,
+        "text": " y este te va a devolver un diagrama de arquitectura con flujo de secuencia o ciclo de vida.",
+        "tokens": [
+          51046,
+          288,
+          4065,
+          535,
+          2773,
+          257,
+          1905,
+          401,
+          331,
+          517,
+          10686,
+          64,
+          368,
+          40258,
+          5739,
+          2991,
+          416,
+          932,
+          4579,
+          78,
+          368,
+          907,
+          47377,
+          277,
+          27464,
+          752,
+          368,
+          7644,
+          13,
+          51261
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 7,
+        "seek": 0,
+        "start": 17.92,
+        "end": 21.8,
+        "text": " Y lo interesante es que no es un dibujito, en realidad es básicamente toda una interfaz",
+        "tokens": [
+          51261,
+          398,
+          450,
+          36396,
+          785,
+          631,
+          572,
+          785,
+          517,
+          46621,
+          3528,
+          11,
+          465,
+          25635,
+          785,
+          48282,
+          11687,
+          2002,
+          14510,
+          921,
+          51455
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 8,
+        "seek": 0,
+        "start": 21.8,
+        "end": 26.0,
+        "text": " escrita en HTML en donde puedes navegar entre este tipo de diagramas avanzados en donde",
+        "tokens": [
+          51455,
+          49865,
+          2786,
+          465,
+          17995,
+          465,
+          10488,
+          19010,
+          39376,
+          2976,
+          3962,
+          4065,
+          9746,
+          368,
+          10686,
+          296,
+          42444,
+          4181,
+          465,
+          10488,
+          51665
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 9,
+        "seek": 0,
+        "start": 26.0,
+        "end": 29.32,
+        "text": " puedes exportarlos a PNG, SVG y otros formatos.",
+        "tokens": [
+          51665,
+          19010,
+          10725,
+          39734,
+          257,
+          430,
+          30237,
+          11,
+          31910,
+          38,
+          288,
+          16422,
+          7877,
+          329,
+          13,
+          51831
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 10,
+        "seek": 2932,
+        "start": 29.32,
+        "end": 33.34,
+        "text": " puedes comparar entre múltiples versiones y son diagramas que lucen bastante bien y te pueden",
+        "tokens": [
+          50365,
+          19010,
+          6311,
+          289,
+          3962,
+          275,
+          43447,
+          72,
+          2622,
+          3037,
+          279,
+          288,
+          1872,
+          10686,
+          296,
+          631,
+          21296,
+          268,
+          14651,
+          3610,
+          288,
+          535,
+          14714,
+          50566
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 11,
+        "seek": 2932,
+        "start": 33.34,
+        "end": 37.36,
+        "text": " ayudar a entender lo que sería una arquitectura grande a través de una forma visual. El segundo",
+        "tokens": [
+          50566,
+          38759,
+          257,
+          20054,
+          450,
+          631,
+          23679,
+          2002,
+          40258,
+          5739,
+          2991,
+          8883,
+          257,
+          24463,
+          368,
+          2002,
+          8366,
+          5056,
+          13,
+          2699,
+          17954,
+          50767
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 12,
+        "seek": 2932,
+        "start": 37.36,
+        "end": 41.84,
+        "text": " es OmniRoute. Este es básicamente un endpoint para todos tus modelos de IA. Se le conoce como",
+        "tokens": [
+          50767,
+          785,
+          9757,
+          3722,
+          49,
+          14040,
+          13,
+          16105,
+          785,
+          48282,
+          517,
+          35795,
+          1690,
+          6321,
+          20647,
+          2316,
+          329,
+          368,
+          286,
+          32,
+          13,
+          1100,
+          476,
+          33029,
+          384,
+          2617,
+          50991
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 13,
+        "seek": 2932,
+        "start": 41.84,
+        "end": 46.08,
+        "text": " un gateway y es básicamente un proyecto que tiene la idea de poder enrutar a cientos de proveedores",
+        "tokens": [
+          50991,
+          517,
+          28532,
+          288,
+          785,
+          48282,
+          517,
+          32285,
+          631,
+          7066,
+          635,
+          1558,
+          368,
+          8152,
+          465,
+          24316,
+          289,
+          257,
+          269,
+          20370,
+          368,
+          7081,
+          292,
+          2706,
+          51203
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 14,
+        "seek": 2932,
+        "start": 46.08,
+        "end": 51.0,
+        "text": " de IA con la idea de que la cuota nunca se acabe. Es decir, lo puedes instalar, lo ejecutas y a",
+        "tokens": [
+          51203,
+          368,
+          286,
+          32,
+          416,
+          635,
+          1558,
+          368,
+          631,
+          635,
+          2702,
+          5377,
+          13768,
+          369,
+          696,
+          4488,
+          13,
+          2313,
+          10235,
+          11,
+          450,
+          19010,
+          1058,
+          12031,
+          11,
+          450,
+          39564,
+          6672,
+          296,
+          288,
+          257,
+          51449
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 15,
+        "seek": 2932,
+        "start": 51.0,
+        "end": 55.120000000000005,
+        "text": " partir de allí puedes conectarlo con cualquier herramienta de IA que básicamente esta repo se",
+        "tokens": [
+          51449,
+          13906,
+          368,
+          34294,
+          19010,
+          30458,
+          19457,
+          416,
+          21004,
+          38271,
+          64,
+          368,
+          286,
+          32,
+          631,
+          48282,
+          5283,
+          49040,
+          369,
+          51655
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 16,
+        "seek": 2932,
+        "start": 55.120000000000005,
+        "end": 58.66,
+        "text": " va a encargar de intercambiar entre cuentas gratuitas para que tu suscripción nunca se",
+        "tokens": [
+          51655,
+          2773,
+          257,
+          2058,
+          289,
+          2976,
+          368,
+          728,
+          66,
+          2173,
+          9448,
+          3962,
+          46414,
+          296,
+          38342,
+          296,
+          1690,
+          631,
+          2604,
+          40405,
+          39859,
+          13768,
+          369,
+          51832
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 17,
+        "seek": 5866,
+        "start": 58.660000000000004,
+        "end": 60.82000000000001,
+        "text": " acabe, y en la práctica es como tener una suscripción",
+        "tokens": [
+          50365,
+          696,
+          4488,
+          11,
+          288,
+          465,
+          635,
+          27300,
+          29041,
+          785,
+          2617,
+          11640,
+          2002,
+          40405,
+          39859,
+          50473
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 18,
+        "seek": 5866,
+        "start": 60.82000000000001,
+        "end": 62.78,
+        "text": " de IA completamente gratis, sin registros",
+        "tokens": [
+          50473,
+          368,
+          286,
+          32,
+          28381,
+          10158,
+          271,
+          11,
+          3343,
+          11376,
+          2635,
+          50571
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 19,
+        "seek": 5866,
+        "start": 62.78,
+        "end": 64.7,
+        "text": " sin tokens y sin ningún tipo de login",
+        "tokens": [
+          50571,
+          3343,
+          22667,
+          288,
+          3343,
+          30394,
+          9746,
+          368,
+          24276,
+          50667
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 20,
+        "seek": 5866,
+        "start": 64.7,
+        "end": 66.76,
+        "text": " necesario, y luego también tenemos este proyecto",
+        "tokens": [
+          50667,
+          44095,
+          11,
+          288,
+          17222,
+          6407,
+          9914,
+          4065,
+          32285,
+          50770
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 21,
+        "seek": 5866,
+        "start": 66.76,
+        "end": 68.62,
+        "text": " llamado Orca, que se define como",
+        "tokens": [
+          50770,
+          47055,
+          1610,
+          496,
+          11,
+          631,
+          369,
+          6964,
+          2617,
+          50863
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 22,
+        "seek": 5866,
+        "start": 68.62,
+        "end": 70.82000000000001,
+        "text": " un ADE, de Agent Development Environment",
+        "tokens": [
+          50863,
+          517,
+          9135,
+          36,
+          11,
+          368,
+          27174,
+          15041,
+          35354,
+          50973
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 23,
+        "seek": 5866,
+        "start": 70.82000000000001,
+        "end": 72.66,
+        "text": " es básicamente un entorno gráfico donde",
+        "tokens": [
+          50973,
+          785,
+          48282,
+          517,
+          948,
+          21998,
+          34613,
+          78,
+          10488,
+          51065
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 24,
+        "seek": 5866,
+        "start": 72.66,
+        "end": 74.62,
+        "text": " puedes controlar distintos agentes al mismo tiempo",
+        "tokens": [
+          51065,
+          19010,
+          47843,
+          49337,
+          623,
+          9240,
+          419,
+          12461,
+          11772,
+          51163
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 25,
+        "seek": 5866,
+        "start": 74.62,
+        "end": 76.62,
+        "text": " y si bien el software es gratuito, tú tienes que traer",
+        "tokens": [
+          51163,
+          288,
+          1511,
+          3610,
+          806,
+          4722,
+          785,
+          10158,
+          22703,
+          11,
+          15056,
+          20716,
+          631,
+          944,
+          260,
+          51263
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 26,
+        "seek": 5866,
+        "start": 76.62,
+        "end": 78.48,
+        "text": " tu suscripción de agentes como Cloud Code",
+        "tokens": [
+          51263,
+          2604,
+          40405,
+          39859,
+          368,
+          623,
+          9240,
+          2617,
+          8061,
+          15549,
+          51356
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 27,
+        "seek": 5866,
+        "start": 78.48,
+        "end": 80.5,
+        "text": " Codex u Open Code, y lo que hace Orca",
+        "tokens": [
+          51356,
+          15549,
+          87,
+          344,
+          7238,
+          15549,
+          11,
+          288,
+          450,
+          631,
+          10032,
+          1610,
+          496,
+          51457
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 28,
+        "seek": 5866,
+        "start": 80.5,
+        "end": 82.36,
+        "text": " es poder comunicarlos a todos y poder",
+        "tokens": [
+          51457,
+          785,
+          8152,
+          31710,
+          39734,
+          257,
+          6321,
+          288,
+          8152,
+          51550
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 29,
+        "seek": 5866,
+        "start": 82.36,
+        "end": 84.48,
+        "text": " orquestarlos, también trae un editor al estilo",
+        "tokens": [
+          51550,
+          420,
+          20343,
+          39734,
+          11,
+          6407,
+          944,
+          68,
+          517,
+          9839,
+          419,
+          37470,
+          51656
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 30,
+        "seek": 5866,
+        "start": 84.48,
+        "end": 86.56,
+        "text": " de Visual Studio Code, integración con Git",
+        "tokens": [
+          51656,
+          368,
+          23187,
+          13500,
+          15549,
+          11,
+          3572,
+          3482,
+          416,
+          16939,
+          51760
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 31,
+        "seek": 5866,
+        "start": 86.56,
+        "end": 88.44,
+        "text": " y Linear, posee soporte a WordTree",
+        "tokens": [
+          51760,
+          288,
+          14670,
+          289,
+          11,
+          10774,
+          68,
+          370,
+          44614,
+          257,
+          8725,
+          51,
+          701,
+          51854
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 32,
+        "seek": 8844,
+        "start": 88.44,
+        "end": 90.66,
+        "text": " SSH, y hasta tiene una aplicación móvil",
+        "tokens": [
+          50365,
+          12238,
+          39,
+          11,
+          288,
+          10764,
+          7066,
+          2002,
+          18221,
+          3482,
+          32515,
+          20202,
+          50476
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 33,
+        "seek": 8844,
+        "start": 90.66,
+        "end": 92.46,
+        "text": " que te permite controlarlo remotamente",
+        "tokens": [
+          50476,
+          631,
+          535,
+          31105,
+          1969,
+          19457,
+          19896,
+          3439,
+          50566
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 34,
+        "seek": 8844,
+        "start": 92.46,
+        "end": 94.8,
+        "text": " además es un proyecto abierto que está para Mac, Windows",
+        "tokens": [
+          50566,
+          21251,
+          785,
+          517,
+          32285,
+          410,
+          20747,
+          631,
+          3192,
+          1690,
+          5707,
+          11,
+          8591,
+          50683
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 35,
+        "seek": 8844,
+        "start": 94.8,
+        "end": 96.6,
+        "text": " y Linux, por lo que también puedes instalarlo",
+        "tokens": [
+          50683,
+          288,
+          18734,
+          11,
+          1515,
+          450,
+          631,
+          6407,
+          19010,
+          1058,
+          12031,
+          752,
+          50773
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 36,
+        "seek": 8844,
+        "start": 96.6,
+        "end": 98.4,
+        "text": " donde quieras. Número 4, Omarchi",
+        "tokens": [
+          50773,
+          10488,
+          23572,
+          296,
+          13,
+          426,
+          2481,
+          936,
+          78,
+          1017,
+          11,
+          9757,
+          1178,
+          72,
+          50863
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 37,
+        "seek": 8844,
+        "start": 98.4,
+        "end": 100.64,
+        "text": " este no es un repo nuevo, pero sigue creciendo",
+        "tokens": [
+          50863,
+          4065,
+          572,
+          785,
+          517,
+          49040,
+          18591,
+          11,
+          4768,
+          34532,
+          1197,
+          16830,
+          50975
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 38,
+        "seek": 8844,
+        "start": 100.64,
+        "end": 102.74,
+        "text": " Omarchi es la distro de DHH",
+        "tokens": [
+          50975,
+          9757,
+          1178,
+          72,
+          785,
+          635,
+          1483,
+          340,
+          368,
+          413,
+          7499,
+          51080
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 39,
+        "seek": 8844,
+        "start": 102.74,
+        "end": 104.3,
+        "text": " el creador de Ruby on Rails",
+        "tokens": [
+          51080,
+          806,
+          1197,
+          5409,
+          368,
+          19907,
+          322,
+          48526,
+          51158
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 40,
+        "seek": 8844,
+        "start": 104.3,
+        "end": 106.53999999999999,
+        "text": " y esta distro está basada en Arch Linux, pero",
+        "tokens": [
+          51158,
+          288,
+          5283,
+          1483,
+          340,
+          3192,
+          987,
+          1538,
+          465,
+          10984,
+          18734,
+          11,
+          4768,
+          51270
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 41,
+        "seek": 8844,
+        "start": 106.53999999999999,
+        "end": 108.58,
+        "text": " tiene soporte con Hyperland y tiene",
+        "tokens": [
+          51270,
+          7066,
+          370,
+          44614,
+          416,
+          29592,
+          1661,
+          288,
+          7066,
+          51372
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 42,
+        "seek": 8844,
+        "start": 108.58,
+        "end": 110.38,
+        "text": " una enorme cantidad de programas ya instalados",
+        "tokens": [
+          51372,
+          2002,
+          33648,
+          33757,
+          368,
+          1461,
+          296,
+          2478,
+          34059,
+          4181,
+          51462
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 43,
+        "seek": 8844,
+        "start": 110.38,
+        "end": 112.18,
+        "text": " y esto responde a un problema muy en concreto",
+        "tokens": [
+          51462,
+          288,
+          7433,
+          4196,
+          68,
+          257,
+          517,
+          12395,
+          5323,
+          465,
+          1588,
+          47330,
+          51552
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 44,
+        "seek": 8844,
+        "start": 112.18,
+        "end": 114.28,
+        "text": " ¿quieres utilizar Linux pero te suena complicado?",
+        "tokens": [
+          51552,
+          3841,
+          16622,
+          279,
+          24060,
+          18734,
+          4768,
+          535,
+          459,
+          4118,
+          49850,
+          30,
+          51657
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 45,
+        "seek": 8844,
+        "start": 114.62,
+        "end": 116.6,
+        "text": " bueno, puedes llegar a instalar simplemente Omarchi",
+        "tokens": [
+          51674,
+          11974,
+          11,
+          19010,
+          24892,
+          257,
+          1058,
+          12031,
+          33190,
+          9757,
+          1178,
+          72,
+          51773
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 46,
+        "seek": 11660,
+        "start": 116.60000000000001,
+        "end": 119.76,
+        "text": " Y ya trae todos los programas listos para que simplemente empieces a utilizarlo",
+        "tokens": [
+          50365,
+          398,
+          2478,
+          944,
+          68,
+          6321,
+          1750,
+          1461,
+          296,
+          1329,
+          329,
+          1690,
+          631,
+          33190,
+          4012,
+          414,
+          887,
+          257,
+          24060,
+          752,
+          50523
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 47,
+        "seek": 11660,
+        "start": 119.76,
+        "end": 124.44000000000001,
+        "text": " Viene con Alacrity, NeoBean, LazyBean, Docker y muchos otros más",
+        "tokens": [
+          50523,
+          691,
+          10174,
+          416,
+          967,
+          326,
+          81,
+          507,
+          11,
+          24458,
+          6524,
+          282,
+          11,
+          441,
+          33235,
+          6524,
+          282,
+          11,
+          33772,
+          288,
+          17061,
+          16422,
+          3573,
+          50757
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 48,
+        "seek": 11660,
+        "start": 124.44000000000001,
+        "end": 125.98,
+        "text": " Y finalmente tenemos a AnyDoc",
+        "tokens": [
+          50757,
+          398,
+          35577,
+          9914,
+          257,
+          2639,
+          35,
+          905,
+          50834
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 49,
+        "seek": 11660,
+        "start": 125.98,
+        "end": 128.08,
+        "text": " Que probablemente lo vas a utilizar más de lo que crees",
+        "tokens": [
+          50834,
+          4493,
+          21759,
+          4082,
+          450,
+          11481,
+          257,
+          24060,
+          3573,
+          368,
+          450,
+          631,
+          1197,
+          279,
+          50939
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 50,
+        "seek": 11660,
+        "start": 128.08,
+        "end": 131.84,
+        "text": " Y es que esta es una biblioteca de RAS que permite convertir cualquier tipo de archivo",
+        "tokens": [
+          50939,
+          398,
+          785,
+          631,
+          5283,
+          785,
+          2002,
+          34344,
+          1370,
+          496,
+          368,
+          497,
+          3160,
+          631,
+          31105,
+          7620,
+          347,
+          21004,
+          9746,
+          368,
+          3912,
+          6340,
+          51127
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 51,
+        "seek": 11660,
+        "start": 131.84,
+        "end": 135.42000000000002,
+        "text": " Ya sea Word, PowerPoint, Excel, Open Document o lo que quieras",
+        "tokens": [
+          51127,
+          6080,
+          4158,
+          8725,
+          11,
+          25584,
+          11,
+          19060,
+          11,
+          7238,
+          37684,
+          277,
+          450,
+          631,
+          23572,
+          296,
+          51306
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 52,
+        "seek": 11660,
+        "start": 135.42000000000002,
+        "end": 138.84,
+        "text": " En archivos de Markdown listos para poder utilizarse en milisegundos",
+        "tokens": [
+          51306,
+          2193,
+          3912,
+          16501,
+          368,
+          3934,
+          5093,
+          1329,
+          329,
+          1690,
+          8152,
+          24060,
+          405,
+          465,
+          1962,
+          908,
+          70,
+          36518,
+          51477
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 53,
+        "seek": 11660,
+        "start": 138.84,
+        "end": 143.10000000000002,
+        "text": " Y es que en esta época de día donde tratas de cargar información dentro de un modelo inteligente",
+        "tokens": [
+          51477,
+          398,
+          785,
+          631,
+          465,
+          5283,
+          25024,
+          368,
+          12271,
+          10488,
+          21507,
+          296,
+          368,
+          1032,
+          2976,
+          21660,
+          10856,
+          368,
+          517,
+          27825,
+          44300,
+          1576,
+          51690
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 54,
+        "seek": 11660,
+        "start": 143.10000000000002,
+        "end": 145.48000000000002,
+        "text": " La conversión de un formato a otro es muy importante",
+        "tokens": [
+          51690,
+          2369,
+          2615,
+          2560,
+          368,
+          517,
+          1254,
+          2513,
+          257,
+          11921,
+          785,
+          5323,
+          9416,
+          51809
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 55,
+        "seek": 14548,
+        "start": 145.48,
+        "end": 148.32,
+        "text": " Sobre todo porque muchos modelos inteligentes pueden leer Markdowns",
+        "tokens": [
+          50365,
+          407,
+          2672,
+          5149,
+          4021,
+          17061,
+          2316,
+          329,
+          44300,
+          9240,
+          14714,
+          34172,
+          3934,
+          5093,
+          82,
+          50507
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      },
+      {
+        "id": 56,
+        "seek": 14548,
+        "start": 148.32,
+        "end": 153.14,
+        "text": " Así que esta biblioteca lo que hace es que en promedio puede llegar a convertir cualquier tipo de archivo en 4 milisegundos",
+        "tokens": [
+          50507,
+          17419,
+          631,
+          5283,
+          34344,
+          1370,
+          496,
+          450,
+          631,
+          10032,
+          785,
+          631,
+          465,
+          2234,
+          292,
+          1004,
+          8919,
+          24892,
+          257,
+          7620,
+          347,
+          21004,
+          9746,
+          368,
+          3912,
+          6340,
+          465,
+          1017,
+          1962,
+          908,
+          70,
+          36518,
+          50748
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      },
+      {
+        "id": 57,
+        "seek": 14548,
+        "start": 153.14,
+        "end": 157.0,
+        "text": " Además que también viene con un skill para que tu agente pueda saber cómo utilizarlo por ti",
+        "tokens": [
+          50748,
+          34621,
+          631,
+          6407,
+          19561,
+          416,
+          517,
+          5389,
+          1690,
+          631,
+          2604,
+          623,
+          1576,
+          31907,
+          12489,
+          12826,
+          24060,
+          752,
+          1515,
+          8757,
+          50941
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      },
+      {
+        "id": 58,
+        "seek": 14548,
+        "start": 157.0,
+        "end": 160.16,
+        "text": " Pero estos son tan solamente 5 proyectos de los muchos que puedes llegar a encontrar",
+        "tokens": [
+          50941,
+          9377,
+          12585,
+          1872,
+          7603,
+          27814,
+          1025,
+          23832,
+          329,
+          368,
+          1750,
+          17061,
+          631,
+          19010,
+          24892,
+          257,
+          17525,
+          51099
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      },
+      {
+        "id": 59,
+        "seek": 14548,
+        "start": 160.16,
+        "end": 161.85999999999999,
+        "text": " Así que también te dejo un video en el canal",
+        "tokens": [
+          51099,
+          17419,
+          631,
+          6407,
+          535,
+          368,
+          5134,
+          517,
+          960,
+          465,
+          806,
+          9911,
+          51184
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      }
+    ]
+  },
+  "configuration_b_detection_samples": [
+    {
+      "start_seconds": 0.0,
+      "end_seconds": 30.0,
+      "duration_seconds": 30.0,
+      "language": "es",
+      "probability_uncalibrated": 0.998046875,
+      "all_probabilities_uncalibrated": [
+        [
+          "es",
+          0.998046875
+        ],
+        [
+          "en",
+          0.0009102821350097656
+        ],
+        [
+          "pt",
+          0.00042319297790527344
+        ],
+        [
+          "vi",
+          7.414817810058594e-05
+        ],
+        [
+          "ru",
+          7.021427154541016e-05
+        ],
+        [
+          "fr",
+          5.137920379638672e-05
+        ],
+        [
+          "ko",
+          3.9696693420410156e-05
+        ],
+        [
+          "nn",
+          2.682209014892578e-05
+        ],
+        [
+          "it",
+          2.0742416381835938e-05
+        ],
+        [
+          "zh",
+          1.7583370208740234e-05
+        ],
+        [
+          "de",
+          1.5914440155029297e-05
+        ],
+        [
+          "tr",
+          1.4126300811767578e-05
+        ],
+        [
+          "km",
+          1.3530254364013672e-05
+        ],
+        [
+          "ja",
+          1.341104507446289e-05
+        ],
+        [
+          "gl",
+          1.2576580047607422e-05
+        ],
+        [
+          "pl",
+          1.2218952178955078e-05
+        ],
+        [
+          "el",
+          1.1801719665527344e-05
+        ],
+        [
+          "ar",
+          1.0132789611816406e-05
+        ],
+        [
+          "ca",
+          8.106231689453125e-06
+        ],
+        [
+          "id",
+          6.198883056640625e-06
+        ],
+        [
+          "ro",
+          4.112720489501953e-06
+        ],
+        [
+          "nl",
+          3.814697265625e-06
+        ],
+        [
+          "th",
+          3.3974647521972656e-06
+        ],
+        [
+          "la",
+          3.039836883544922e-06
+        ],
+        [
+          "jw",
+          2.6226043701171875e-06
+        ],
+        [
+          "cy",
+          2.4437904357910156e-06
+        ],
+        [
+          "sv",
+          2.205371856689453e-06
+        ],
+        [
+          "eu",
+          1.7285346984863281e-06
+        ],
+        [
+          "hi",
+          1.430511474609375e-06
+        ],
+        [
+          "hu",
+          1.3709068298339844e-06
+        ],
+        [
+          "tl",
+          1.3113021850585938e-06
+        ],
+        [
+          "cs",
+          1.0132789611816406e-06
+        ],
+        [
+          "fi",
+          8.344650268554688e-07
+        ],
+        [
+          "haw",
+          7.748603820800781e-07
+        ],
+        [
+          "ms",
+          6.556510925292969e-07
+        ],
+        [
+          "ta",
+          5.960464477539062e-07
+        ],
+        [
+          "sn",
+          4.76837158203125e-07
+        ],
+        [
+          "si",
+          4.76837158203125e-07
+        ],
+        [
+          "da",
+          3.5762786865234375e-07
+        ],
+        [
+          "he",
+          3.5762786865234375e-07
+        ],
+        [
+          "uk",
+          2.980232238769531e-07
+        ],
+        [
+          "br",
+          1.7881393432617188e-07
+        ],
+        [
+          "lt",
+          1.7881393432617188e-07
+        ],
+        [
+          "te",
+          1.7881393432617188e-07
+        ],
+        [
+          "fa",
+          1.7881393432617188e-07
+        ],
+        [
+          "sw",
+          1.1920928955078125e-07
+        ],
+        [
+          "sk",
+          1.1920928955078125e-07
+        ],
+        [
+          "ml",
+          1.1920928955078125e-07
+        ],
+        [
+          "mi",
+          1.1920928955078125e-07
+        ],
+        [
+          "bg",
+          1.1920928955078125e-07
+        ],
+        [
+          "hr",
+          1.1920928955078125e-07
+        ],
+        [
+          "ur",
+          1.1920928955078125e-07
+        ],
+        [
+          "no",
+          1.1920928955078125e-07
+        ],
+        [
+          "bn",
+          1.1920928955078125e-07
+        ],
+        [
+          "sa",
+          5.960464477539063e-08
+        ],
+        [
+          "be",
+          5.960464477539063e-08
+        ],
+        [
+          "oc",
+          5.960464477539063e-08
+        ],
+        [
+          "yo",
+          5.960464477539063e-08
+        ],
+        [
+          "lv",
+          5.960464477539063e-08
+        ],
+        [
+          "yue",
+          5.960464477539063e-08
+        ],
+        [
+          "az",
+          5.960464477539063e-08
+        ],
+        [
+          "sl",
+          5.960464477539063e-08
+        ],
+        [
+          "is",
+          5.960464477539063e-08
+        ],
+        [
+          "mg",
+          0.0
+        ],
+        [
+          "ps",
+          0.0
+        ],
+        [
+          "tk",
+          0.0
+        ],
+        [
+          "mk",
+          0.0
+        ],
+        [
+          "mt",
+          0.0
+        ],
+        [
+          "et",
+          0.0
+        ],
+        [
+          "lb",
+          0.0
+        ],
+        [
+          "my",
+          0.0
+        ],
+        [
+          "bo",
+          0.0
+        ],
+        [
+          "kn",
+          0.0
+        ],
+        [
+          "ht",
+          0.0
+        ],
+        [
+          "as",
+          0.0
+        ],
+        [
+          "tt",
+          0.0
+        ],
+        [
+          "ln",
+          0.0
+        ],
+        [
+          "ha",
+          0.0
+        ],
+        [
+          "ba",
+          0.0
+        ],
+        [
+          "su",
+          0.0
+        ],
+        [
+          "sr",
+          0.0
+        ],
+        [
+          "ka",
+          0.0
+        ],
+        [
+          "mr",
+          0.0
+        ],
+        [
+          "pa",
+          0.0
+        ],
+        [
+          "kk",
+          0.0
+        ],
+        [
+          "bs",
+          0.0
+        ],
+        [
+          "mn",
+          0.0
+        ],
+        [
+          "ne",
+          0.0
+        ],
+        [
+          "so",
+          0.0
+        ],
+        [
+          "af",
+          0.0
+        ],
+        [
+          "hy",
+          0.0
+        ],
+        [
+          "sq",
+          0.0
+        ],
+        [
+          "tg",
+          0.0
+        ],
+        [
+          "sd",
+          0.0
+        ],
+        [
+          "gu",
+          0.0
+        ],
+        [
+          "am",
+          0.0
+        ],
+        [
+          "yi",
+          0.0
+        ],
+        [
+          "lo",
+          0.0
+        ],
+        [
+          "uz",
+          0.0
+        ],
+        [
+          "fo",
+          0.0
+        ]
+      ],
+      "detect_language_parameters": {
+        "language_detection_segments": 1,
+        "language_detection_threshold": 0.5,
+        "vad_filter": false,
+        "input_type": "decoded float32 numpy array slice"
+      }
+    },
+    {
+      "start_seconds": 98.27125,
+      "end_seconds": 128.27125,
+      "duration_seconds": 30.0,
+      "language": "es",
+      "probability_uncalibrated": 0.9990234375,
+      "all_probabilities_uncalibrated": [
+        [
+          "es",
+          0.9990234375
+        ],
+        [
+          "en",
+          0.0004875659942626953
+        ],
+        [
+          "pt",
+          0.0003917217254638672
+        ],
+        [
+          "ru",
+          7.653236389160156e-05
+        ],
+        [
+          "vi",
+          6.699562072753906e-05
+        ],
+        [
+          "fr",
+          3.165006637573242e-05
+        ],
+        [
+          "ko",
+          1.9788742065429688e-05
+        ],
+        [
+          "tr",
+          1.8894672393798828e-05
+        ],
+        [
+          "it",
+          1.6808509826660156e-05
+        ],
+        [
+          "de",
+          1.531839370727539e-05
+        ],
+        [
+          "pl",
+          1.1920928955078125e-05
+        ],
+        [
+          "zh",
+          1.0967254638671875e-05
+        ],
+        [
+          "el",
+          7.271766662597656e-06
+        ],
+        [
+          "ja",
+          7.212162017822266e-06
+        ],
+        [
+          "nn",
+          6.973743438720703e-06
+        ],
+        [
+          "ar",
+          6.020069122314453e-06
+        ],
+        [
+          "gl",
+          5.602836608886719e-06
+        ],
+        [
+          "nl",
+          5.304813385009766e-06
+        ],
+        [
+          "km",
+          5.066394805908203e-06
+        ],
+        [
+          "id",
+          3.5762786865234375e-06
+        ],
+        [
+          "ca",
+          3.4570693969726562e-06
+        ],
+        [
+          "sv",
+          1.9073486328125e-06
+        ],
+        [
+          "ro",
+          1.6093254089355469e-06
+        ],
+        [
+          "hi",
+          1.430511474609375e-06
+        ],
+        [
+          "th",
+          1.430511474609375e-06
+        ],
+        [
+          "hu",
+          1.2516975402832031e-06
+        ],
+        [
+          "tl",
+          1.0728836059570312e-06
+        ],
+        [
+          "cy",
+          8.940696716308594e-07
+        ],
+        [
+          "cs",
+          8.344650268554688e-07
+        ],
+        [
+          "la",
+          8.344650268554688e-07
+        ],
+        [
+          "jw",
+          5.364418029785156e-07
+        ],
+        [
+          "eu",
+          5.364418029785156e-07
+        ],
+        [
+          "fi",
+          4.76837158203125e-07
+        ],
+        [
+          "ta",
+          4.172325134277344e-07
+        ],
+        [
+          "haw",
+          2.980232238769531e-07
+        ],
+        [
+          "ms",
+          2.980232238769531e-07
+        ],
+        [
+          "uk",
+          2.384185791015625e-07
+        ],
+        [
+          "da",
+          1.7881393432617188e-07
+        ],
+        [
+          "lt",
+          1.7881393432617188e-07
+        ],
+        [
+          "he",
+          1.7881393432617188e-07
+        ],
+        [
+          "sn",
+          1.1920928955078125e-07
+        ],
+        [
+          "si",
+          1.1920928955078125e-07
+        ],
+        [
+          "fa",
+          1.1920928955078125e-07
+        ],
+        [
+          "te",
+          1.1920928955078125e-07
+        ],
+        [
+          "oc",
+          5.960464477539063e-08
+        ],
+        [
+          "sw",
+          5.960464477539063e-08
+        ],
+        [
+          "is",
+          5.960464477539063e-08
+        ],
+        [
+          "yue",
+          5.960464477539063e-08
+        ],
+        [
+          "br",
+          5.960464477539063e-08
+        ],
+        [
+          "no",
+          5.960464477539063e-08
+        ],
+        [
+          "ml",
+          5.960464477539063e-08
+        ],
+        [
+          "sk",
+          5.960464477539063e-08
+        ],
+        [
+          "lv",
+          5.960464477539063e-08
+        ],
+        [
+          "bn",
+          5.960464477539063e-08
+        ],
+        [
+          "bg",
+          5.960464477539063e-08
+        ],
+        [
+          "az",
+          5.960464477539063e-08
+        ],
+        [
+          "ur",
+          5.960464477539063e-08
+        ],
+        [
+          "hr",
+          5.960464477539063e-08
+        ],
+        [
+          "my",
+          0.0
+        ],
+        [
+          "uz",
+          0.0
+        ],
+        [
+          "fo",
+          0.0
+        ],
+        [
+          "ht",
+          0.0
+        ],
+        [
+          "ps",
+          0.0
+        ],
+        [
+          "tk",
+          0.0
+        ],
+        [
+          "mi",
+          0.0
+        ],
+        [
+          "mt",
+          0.0
+        ],
+        [
+          "gu",
+          0.0
+        ],
+        [
+          "sa",
+          0.0
+        ],
+        [
+          "lb",
+          0.0
+        ],
+        [
+          "su",
+          0.0
+        ],
+        [
+          "ba",
+          0.0
+        ],
+        [
+          "bo",
+          0.0
+        ],
+        [
+          "ha",
+          0.0
+        ],
+        [
+          "mg",
+          0.0
+        ],
+        [
+          "ln",
+          0.0
+        ],
+        [
+          "as",
+          0.0
+        ],
+        [
+          "tt",
+          0.0
+        ],
+        [
+          "pa",
+          0.0
+        ],
+        [
+          "et",
+          0.0
+        ],
+        [
+          "kn",
+          0.0
+        ],
+        [
+          "sl",
+          0.0
+        ],
+        [
+          "hy",
+          0.0
+        ],
+        [
+          "ne",
+          0.0
+        ],
+        [
+          "mn",
+          0.0
+        ],
+        [
+          "bs",
+          0.0
+        ],
+        [
+          "kk",
+          0.0
+        ],
+        [
+          "sq",
+          0.0
+        ],
+        [
+          "sr",
+          0.0
+        ],
+        [
+          "mr",
+          0.0
+        ],
+        [
+          "lo",
+          0.0
+        ],
+        [
+          "yo",
+          0.0
+        ],
+        [
+          "so",
+          0.0
+        ],
+        [
+          "af",
+          0.0
+        ],
+        [
+          "ka",
+          0.0
+        ],
+        [
+          "be",
+          0.0
+        ],
+        [
+          "tg",
+          0.0
+        ],
+        [
+          "sd",
+          0.0
+        ],
+        [
+          "mk",
+          0.0
+        ],
+        [
+          "am",
+          0.0
+        ],
+        [
+          "yi",
+          0.0
+        ]
+      ],
+      "detect_language_parameters": {
+        "language_detection_segments": 1,
+        "language_detection_threshold": 0.5,
+        "vad_filter": false,
+        "input_type": "decoded float32 numpy array slice"
+      }
+    }
+  ],
+  "configuration_b_selected_language": "es",
+  "configuration_b_explicit_language": {
+    "elapsed_seconds": 8.048528,
+    "language": "es",
+    "language_probability_uncalibrated": 1,
+    "duration": 162.5425,
+    "duration_after_vad": 162.5425,
+    "full_text": "Estos son 5 proyectos open source que han llamado la atención a muchos desarrolladores esta semana. El primero es Archify. Este es básicamente un skill para agentes como Cloud Code, Cursor, Codex, Open Code y muchos otros más en donde le puedes pasar un repo o simplemente le describes el sistema y este te va a devolver un diagrama de arquitectura con flujo de secuencia o ciclo de vida. Y lo interesante es que no es un dibujito, en realidad es básicamente toda una interfaz escrita en HTML en donde puedes navegar entre este tipo de diagramas avanzados en donde puedes exportarlos a PNG, SVG y otros formatos. puedes comparar entre múltiples versiones y son diagramas que lucen bastante bien y te pueden ayudar a entender lo que sería una arquitectura grande a través de una forma visual. El segundo es OmniRoute. Este es básicamente un endpoint para todos tus modelos de IA. Se le conoce como un gateway y es básicamente un proyecto que tiene la idea de poder enrutar a cientos de proveedores de IA con la idea de que la cuota nunca se acabe. Es decir, lo puedes instalar, lo ejecutas y a partir de allí puedes conectarlo con cualquier herramienta de IA que básicamente esta repo se va a encargar de intercambiar entre cuentas gratuitas para que tu suscripción nunca se acabe, y en la práctica es como tener una suscripción de IA completamente gratis, sin registros sin tokens y sin ningún tipo de login necesario, y luego también tenemos este proyecto llamado Orca, que se define como un ADE, de Agent Development Environment es básicamente un entorno gráfico donde puedes controlar distintos agentes al mismo tiempo y si bien el software es gratuito, tú tienes que traer tu suscripción de agentes como Cloud Code Codex u Open Code, y lo que hace Orca es poder comunicarlos a todos y poder orquestarlos, también trae un editor al estilo de Visual Studio Code, integración con Git y Linear, posee soporte a WordTree SSH, y hasta tiene una aplicación móvil que te permite controlarlo remotamente además es un proyecto abierto que está para Mac, Windows y Linux, por lo que también puedes instalarlo donde quieras. Número 4, Omarchi este no es un repo nuevo, pero sigue creciendo Omarchi es la distro de DHH el creador de Ruby on Rails y esta distro está basada en Arch Linux, pero tiene soporte con Hyperland y tiene una enorme cantidad de programas ya instalados y esto responde a un problema muy en concreto ¿quieres utilizar Linux pero te suena complicado? bueno, puedes llegar a instalar simplemente Omarchi Y ya trae todos los programas listos para que simplemente empieces a utilizarlo Viene con Alacrity, NeoBean, LazyBean, Docker y muchos otros más Y finalmente tenemos a AnyDoc Que probablemente lo vas a utilizar más de lo que crees Y es que esta es una biblioteca de RAS que permite convertir cualquier tipo de archivo Ya sea Word, PowerPoint, Excel, Open Document o lo que quieras En archivos de Markdown listos para poder utilizarse en milisegundos Y es que en esta época de día donde tratas de cargar información dentro de un modelo inteligente La conversión de un formato a otro es muy importante Sobre todo porque muchos modelos inteligentes pueden leer Markdowns Así que esta biblioteca lo que hace es que en promedio puede llegar a convertir cualquier tipo de archivo en 4 milisegundos Además que también viene con un skill para que tu agente pueda saber cómo utilizarlo por ti Pero estos son tan solamente 5 proyectos de los muchos que puedes llegar a encontrar Así que también te dejo un video en el canal",
+    "segments": [
+      {
+        "id": 1,
+        "seek": 0,
+        "start": 0.0,
+        "end": 3.24,
+        "text": " Estos son 5 proyectos open source que han llamado la atención a muchos desarrolladores",
+        "tokens": [
+          50365,
+          4410,
+          329,
+          1872,
+          1025,
+          23832,
+          329,
+          1269,
+          4009,
+          631,
+          7276,
+          47055,
+          635,
+          33488,
+          257,
+          17061,
+          32501,
+          11856,
+          50527
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 2,
+        "seek": 0,
+        "start": 3.24,
+        "end": 4.24,
+        "text": " esta semana.",
+        "tokens": [
+          50527,
+          5283,
+          20205,
+          13,
+          50577
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 3,
+        "seek": 0,
+        "start": 4.24,
+        "end": 5.24,
+        "text": " El primero es Archify.",
+        "tokens": [
+          50577,
+          2699,
+          21289,
+          785,
+          10984,
+          2505,
+          13,
+          50627
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 4,
+        "seek": 0,
+        "start": 5.24,
+        "end": 9.4,
+        "text": " Este es básicamente un skill para agentes como Cloud Code, Cursor, Codex, Open Code",
+        "tokens": [
+          50627,
+          16105,
+          785,
+          48282,
+          517,
+          5389,
+          1690,
+          623,
+          9240,
+          2617,
+          8061,
+          15549,
+          11,
+          383,
+          2156,
+          284,
+          11,
+          15549,
+          87,
+          11,
+          7238,
+          15549,
+          50835
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 5,
+        "seek": 0,
+        "start": 9.4,
+        "end": 13.620000000000001,
+        "text": " y muchos otros más en donde le puedes pasar un repo o simplemente le describes el sistema",
+        "tokens": [
+          50835,
+          288,
+          17061,
+          16422,
+          3573,
+          465,
+          10488,
+          476,
+          19010,
+          25344,
+          517,
+          49040,
+          277,
+          33190,
+          476,
+          15626,
+          806,
+          13245,
+          51046
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 6,
+        "seek": 0,
+        "start": 13.620000000000001,
+        "end": 17.92,
+        "text": " y este te va a devolver un diagrama de arquitectura con flujo de secuencia o ciclo de vida.",
+        "tokens": [
+          51046,
+          288,
+          4065,
+          535,
+          2773,
+          257,
+          1905,
+          401,
+          331,
+          517,
+          10686,
+          64,
+          368,
+          40258,
+          5739,
+          2991,
+          416,
+          932,
+          4579,
+          78,
+          368,
+          907,
+          47377,
+          277,
+          27464,
+          752,
+          368,
+          7644,
+          13,
+          51261
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 7,
+        "seek": 0,
+        "start": 17.92,
+        "end": 21.8,
+        "text": " Y lo interesante es que no es un dibujito, en realidad es básicamente toda una interfaz",
+        "tokens": [
+          51261,
+          398,
+          450,
+          36396,
+          785,
+          631,
+          572,
+          785,
+          517,
+          46621,
+          3528,
+          11,
+          465,
+          25635,
+          785,
+          48282,
+          11687,
+          2002,
+          14510,
+          921,
+          51455
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 8,
+        "seek": 0,
+        "start": 21.8,
+        "end": 26.0,
+        "text": " escrita en HTML en donde puedes navegar entre este tipo de diagramas avanzados en donde",
+        "tokens": [
+          51455,
+          49865,
+          2786,
+          465,
+          17995,
+          465,
+          10488,
+          19010,
+          39376,
+          2976,
+          3962,
+          4065,
+          9746,
+          368,
+          10686,
+          296,
+          42444,
+          4181,
+          465,
+          10488,
+          51665
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 9,
+        "seek": 0,
+        "start": 26.0,
+        "end": 29.32,
+        "text": " puedes exportarlos a PNG, SVG y otros formatos.",
+        "tokens": [
+          51665,
+          19010,
+          10725,
+          39734,
+          257,
+          430,
+          30237,
+          11,
+          31910,
+          38,
+          288,
+          16422,
+          7877,
+          329,
+          13,
+          51831
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.126810220774354,
+        "compression_ratio": 1.673913043478261,
+        "no_speech_prob": 0.03839111328125
+      },
+      {
+        "id": 10,
+        "seek": 2932,
+        "start": 29.32,
+        "end": 33.34,
+        "text": " puedes comparar entre múltiples versiones y son diagramas que lucen bastante bien y te pueden",
+        "tokens": [
+          50365,
+          19010,
+          6311,
+          289,
+          3962,
+          275,
+          43447,
+          72,
+          2622,
+          3037,
+          279,
+          288,
+          1872,
+          10686,
+          296,
+          631,
+          21296,
+          268,
+          14651,
+          3610,
+          288,
+          535,
+          14714,
+          50566
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 11,
+        "seek": 2932,
+        "start": 33.34,
+        "end": 37.36,
+        "text": " ayudar a entender lo que sería una arquitectura grande a través de una forma visual. El segundo",
+        "tokens": [
+          50566,
+          38759,
+          257,
+          20054,
+          450,
+          631,
+          23679,
+          2002,
+          40258,
+          5739,
+          2991,
+          8883,
+          257,
+          24463,
+          368,
+          2002,
+          8366,
+          5056,
+          13,
+          2699,
+          17954,
+          50767
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 12,
+        "seek": 2932,
+        "start": 37.36,
+        "end": 41.84,
+        "text": " es OmniRoute. Este es básicamente un endpoint para todos tus modelos de IA. Se le conoce como",
+        "tokens": [
+          50767,
+          785,
+          9757,
+          3722,
+          49,
+          14040,
+          13,
+          16105,
+          785,
+          48282,
+          517,
+          35795,
+          1690,
+          6321,
+          20647,
+          2316,
+          329,
+          368,
+          286,
+          32,
+          13,
+          1100,
+          476,
+          33029,
+          384,
+          2617,
+          50991
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 13,
+        "seek": 2932,
+        "start": 41.84,
+        "end": 46.08,
+        "text": " un gateway y es básicamente un proyecto que tiene la idea de poder enrutar a cientos de proveedores",
+        "tokens": [
+          50991,
+          517,
+          28532,
+          288,
+          785,
+          48282,
+          517,
+          32285,
+          631,
+          7066,
+          635,
+          1558,
+          368,
+          8152,
+          465,
+          24316,
+          289,
+          257,
+          269,
+          20370,
+          368,
+          7081,
+          292,
+          2706,
+          51203
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 14,
+        "seek": 2932,
+        "start": 46.08,
+        "end": 51.0,
+        "text": " de IA con la idea de que la cuota nunca se acabe. Es decir, lo puedes instalar, lo ejecutas y a",
+        "tokens": [
+          51203,
+          368,
+          286,
+          32,
+          416,
+          635,
+          1558,
+          368,
+          631,
+          635,
+          2702,
+          5377,
+          13768,
+          369,
+          696,
+          4488,
+          13,
+          2313,
+          10235,
+          11,
+          450,
+          19010,
+          1058,
+          12031,
+          11,
+          450,
+          39564,
+          6672,
+          296,
+          288,
+          257,
+          51449
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 15,
+        "seek": 2932,
+        "start": 51.0,
+        "end": 55.120000000000005,
+        "text": " partir de allí puedes conectarlo con cualquier herramienta de IA que básicamente esta repo se",
+        "tokens": [
+          51449,
+          13906,
+          368,
+          34294,
+          19010,
+          30458,
+          19457,
+          416,
+          21004,
+          38271,
+          64,
+          368,
+          286,
+          32,
+          631,
+          48282,
+          5283,
+          49040,
+          369,
+          51655
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 16,
+        "seek": 2932,
+        "start": 55.120000000000005,
+        "end": 58.66,
+        "text": " va a encargar de intercambiar entre cuentas gratuitas para que tu suscripción nunca se",
+        "tokens": [
+          51655,
+          2773,
+          257,
+          2058,
+          289,
+          2976,
+          368,
+          728,
+          66,
+          2173,
+          9448,
+          3962,
+          46414,
+          296,
+          38342,
+          296,
+          1690,
+          631,
+          2604,
+          40405,
+          39859,
+          13768,
+          369,
+          51832
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.05277876467020674,
+        "compression_ratio": 1.7578947368421052,
+        "no_speech_prob": 0.00745391845703125
+      },
+      {
+        "id": 17,
+        "seek": 5866,
+        "start": 58.660000000000004,
+        "end": 60.82000000000001,
+        "text": " acabe, y en la práctica es como tener una suscripción",
+        "tokens": [
+          50365,
+          696,
+          4488,
+          11,
+          288,
+          465,
+          635,
+          27300,
+          29041,
+          785,
+          2617,
+          11640,
+          2002,
+          40405,
+          39859,
+          50473
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 18,
+        "seek": 5866,
+        "start": 60.82000000000001,
+        "end": 62.78,
+        "text": " de IA completamente gratis, sin registros",
+        "tokens": [
+          50473,
+          368,
+          286,
+          32,
+          28381,
+          10158,
+          271,
+          11,
+          3343,
+          11376,
+          2635,
+          50571
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 19,
+        "seek": 5866,
+        "start": 62.78,
+        "end": 64.7,
+        "text": " sin tokens y sin ningún tipo de login",
+        "tokens": [
+          50571,
+          3343,
+          22667,
+          288,
+          3343,
+          30394,
+          9746,
+          368,
+          24276,
+          50667
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 20,
+        "seek": 5866,
+        "start": 64.7,
+        "end": 66.76,
+        "text": " necesario, y luego también tenemos este proyecto",
+        "tokens": [
+          50667,
+          44095,
+          11,
+          288,
+          17222,
+          6407,
+          9914,
+          4065,
+          32285,
+          50770
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 21,
+        "seek": 5866,
+        "start": 66.76,
+        "end": 68.62,
+        "text": " llamado Orca, que se define como",
+        "tokens": [
+          50770,
+          47055,
+          1610,
+          496,
+          11,
+          631,
+          369,
+          6964,
+          2617,
+          50863
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 22,
+        "seek": 5866,
+        "start": 68.62,
+        "end": 70.82000000000001,
+        "text": " un ADE, de Agent Development Environment",
+        "tokens": [
+          50863,
+          517,
+          9135,
+          36,
+          11,
+          368,
+          27174,
+          15041,
+          35354,
+          50973
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 23,
+        "seek": 5866,
+        "start": 70.82000000000001,
+        "end": 72.66,
+        "text": " es básicamente un entorno gráfico donde",
+        "tokens": [
+          50973,
+          785,
+          48282,
+          517,
+          948,
+          21998,
+          34613,
+          78,
+          10488,
+          51065
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 24,
+        "seek": 5866,
+        "start": 72.66,
+        "end": 74.62,
+        "text": " puedes controlar distintos agentes al mismo tiempo",
+        "tokens": [
+          51065,
+          19010,
+          47843,
+          49337,
+          623,
+          9240,
+          419,
+          12461,
+          11772,
+          51163
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 25,
+        "seek": 5866,
+        "start": 74.62,
+        "end": 76.62,
+        "text": " y si bien el software es gratuito, tú tienes que traer",
+        "tokens": [
+          51163,
+          288,
+          1511,
+          3610,
+          806,
+          4722,
+          785,
+          10158,
+          22703,
+          11,
+          15056,
+          20716,
+          631,
+          944,
+          260,
+          51263
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 26,
+        "seek": 5866,
+        "start": 76.62,
+        "end": 78.48,
+        "text": " tu suscripción de agentes como Cloud Code",
+        "tokens": [
+          51263,
+          2604,
+          40405,
+          39859,
+          368,
+          623,
+          9240,
+          2617,
+          8061,
+          15549,
+          51356
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 27,
+        "seek": 5866,
+        "start": 78.48,
+        "end": 80.5,
+        "text": " Codex u Open Code, y lo que hace Orca",
+        "tokens": [
+          51356,
+          15549,
+          87,
+          344,
+          7238,
+          15549,
+          11,
+          288,
+          450,
+          631,
+          10032,
+          1610,
+          496,
+          51457
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 28,
+        "seek": 5866,
+        "start": 80.5,
+        "end": 82.36,
+        "text": " es poder comunicarlos a todos y poder",
+        "tokens": [
+          51457,
+          785,
+          8152,
+          31710,
+          39734,
+          257,
+          6321,
+          288,
+          8152,
+          51550
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 29,
+        "seek": 5866,
+        "start": 82.36,
+        "end": 84.48,
+        "text": " orquestarlos, también trae un editor al estilo",
+        "tokens": [
+          51550,
+          420,
+          20343,
+          39734,
+          11,
+          6407,
+          944,
+          68,
+          517,
+          9839,
+          419,
+          37470,
+          51656
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 30,
+        "seek": 5866,
+        "start": 84.48,
+        "end": 86.56,
+        "text": " de Visual Studio Code, integración con Git",
+        "tokens": [
+          51656,
+          368,
+          23187,
+          13500,
+          15549,
+          11,
+          3572,
+          3482,
+          416,
+          16939,
+          51760
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 31,
+        "seek": 5866,
+        "start": 86.56,
+        "end": 88.44,
+        "text": " y Linear, posee soporte a WordTree",
+        "tokens": [
+          51760,
+          288,
+          14670,
+          289,
+          11,
+          10774,
+          68,
+          370,
+          44614,
+          257,
+          8725,
+          51,
+          701,
+          51854
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.08392981602159959,
+        "compression_ratio": 1.6666666666666667,
+        "no_speech_prob": 0.034576416015625
+      },
+      {
+        "id": 32,
+        "seek": 8844,
+        "start": 88.44,
+        "end": 90.66,
+        "text": " SSH, y hasta tiene una aplicación móvil",
+        "tokens": [
+          50365,
+          12238,
+          39,
+          11,
+          288,
+          10764,
+          7066,
+          2002,
+          18221,
+          3482,
+          32515,
+          20202,
+          50476
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 33,
+        "seek": 8844,
+        "start": 90.66,
+        "end": 92.46,
+        "text": " que te permite controlarlo remotamente",
+        "tokens": [
+          50476,
+          631,
+          535,
+          31105,
+          1969,
+          19457,
+          19896,
+          3439,
+          50566
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 34,
+        "seek": 8844,
+        "start": 92.46,
+        "end": 94.8,
+        "text": " además es un proyecto abierto que está para Mac, Windows",
+        "tokens": [
+          50566,
+          21251,
+          785,
+          517,
+          32285,
+          410,
+          20747,
+          631,
+          3192,
+          1690,
+          5707,
+          11,
+          8591,
+          50683
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 35,
+        "seek": 8844,
+        "start": 94.8,
+        "end": 96.6,
+        "text": " y Linux, por lo que también puedes instalarlo",
+        "tokens": [
+          50683,
+          288,
+          18734,
+          11,
+          1515,
+          450,
+          631,
+          6407,
+          19010,
+          1058,
+          12031,
+          752,
+          50773
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 36,
+        "seek": 8844,
+        "start": 96.6,
+        "end": 98.4,
+        "text": " donde quieras. Número 4, Omarchi",
+        "tokens": [
+          50773,
+          10488,
+          23572,
+          296,
+          13,
+          426,
+          2481,
+          936,
+          78,
+          1017,
+          11,
+          9757,
+          1178,
+          72,
+          50863
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 37,
+        "seek": 8844,
+        "start": 98.4,
+        "end": 100.64,
+        "text": " este no es un repo nuevo, pero sigue creciendo",
+        "tokens": [
+          50863,
+          4065,
+          572,
+          785,
+          517,
+          49040,
+          18591,
+          11,
+          4768,
+          34532,
+          1197,
+          16830,
+          50975
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 38,
+        "seek": 8844,
+        "start": 100.64,
+        "end": 102.74,
+        "text": " Omarchi es la distro de DHH",
+        "tokens": [
+          50975,
+          9757,
+          1178,
+          72,
+          785,
+          635,
+          1483,
+          340,
+          368,
+          413,
+          7499,
+          51080
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 39,
+        "seek": 8844,
+        "start": 102.74,
+        "end": 104.3,
+        "text": " el creador de Ruby on Rails",
+        "tokens": [
+          51080,
+          806,
+          1197,
+          5409,
+          368,
+          19907,
+          322,
+          48526,
+          51158
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 40,
+        "seek": 8844,
+        "start": 104.3,
+        "end": 106.53999999999999,
+        "text": " y esta distro está basada en Arch Linux, pero",
+        "tokens": [
+          51158,
+          288,
+          5283,
+          1483,
+          340,
+          3192,
+          987,
+          1538,
+          465,
+          10984,
+          18734,
+          11,
+          4768,
+          51270
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 41,
+        "seek": 8844,
+        "start": 106.53999999999999,
+        "end": 108.58,
+        "text": " tiene soporte con Hyperland y tiene",
+        "tokens": [
+          51270,
+          7066,
+          370,
+          44614,
+          416,
+          29592,
+          1661,
+          288,
+          7066,
+          51372
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 42,
+        "seek": 8844,
+        "start": 108.58,
+        "end": 110.38,
+        "text": " una enorme cantidad de programas ya instalados",
+        "tokens": [
+          51372,
+          2002,
+          33648,
+          33757,
+          368,
+          1461,
+          296,
+          2478,
+          34059,
+          4181,
+          51462
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 43,
+        "seek": 8844,
+        "start": 110.38,
+        "end": 112.18,
+        "text": " y esto responde a un problema muy en concreto",
+        "tokens": [
+          51462,
+          288,
+          7433,
+          4196,
+          68,
+          257,
+          517,
+          12395,
+          5323,
+          465,
+          1588,
+          47330,
+          51552
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 44,
+        "seek": 8844,
+        "start": 112.18,
+        "end": 114.28,
+        "text": " ¿quieres utilizar Linux pero te suena complicado?",
+        "tokens": [
+          51552,
+          3841,
+          16622,
+          279,
+          24060,
+          18734,
+          4768,
+          535,
+          459,
+          4118,
+          49850,
+          30,
+          51657
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 45,
+        "seek": 8844,
+        "start": 114.62,
+        "end": 116.6,
+        "text": " bueno, puedes llegar a instalar simplemente Omarchi",
+        "tokens": [
+          51674,
+          11974,
+          11,
+          19010,
+          24892,
+          257,
+          1058,
+          12031,
+          33190,
+          9757,
+          1178,
+          72,
+          51773
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.09949712930568333,
+        "compression_ratio": 1.6722222222222223,
+        "no_speech_prob": 0.0233154296875
+      },
+      {
+        "id": 46,
+        "seek": 11660,
+        "start": 116.60000000000001,
+        "end": 119.76,
+        "text": " Y ya trae todos los programas listos para que simplemente empieces a utilizarlo",
+        "tokens": [
+          50365,
+          398,
+          2478,
+          944,
+          68,
+          6321,
+          1750,
+          1461,
+          296,
+          1329,
+          329,
+          1690,
+          631,
+          33190,
+          4012,
+          414,
+          887,
+          257,
+          24060,
+          752,
+          50523
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 47,
+        "seek": 11660,
+        "start": 119.76,
+        "end": 124.44000000000001,
+        "text": " Viene con Alacrity, NeoBean, LazyBean, Docker y muchos otros más",
+        "tokens": [
+          50523,
+          691,
+          10174,
+          416,
+          967,
+          326,
+          81,
+          507,
+          11,
+          24458,
+          6524,
+          282,
+          11,
+          441,
+          33235,
+          6524,
+          282,
+          11,
+          33772,
+          288,
+          17061,
+          16422,
+          3573,
+          50757
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 48,
+        "seek": 11660,
+        "start": 124.44000000000001,
+        "end": 125.98,
+        "text": " Y finalmente tenemos a AnyDoc",
+        "tokens": [
+          50757,
+          398,
+          35577,
+          9914,
+          257,
+          2639,
+          35,
+          905,
+          50834
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 49,
+        "seek": 11660,
+        "start": 125.98,
+        "end": 128.08,
+        "text": " Que probablemente lo vas a utilizar más de lo que crees",
+        "tokens": [
+          50834,
+          4493,
+          21759,
+          4082,
+          450,
+          11481,
+          257,
+          24060,
+          3573,
+          368,
+          450,
+          631,
+          1197,
+          279,
+          50939
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 50,
+        "seek": 11660,
+        "start": 128.08,
+        "end": 131.84,
+        "text": " Y es que esta es una biblioteca de RAS que permite convertir cualquier tipo de archivo",
+        "tokens": [
+          50939,
+          398,
+          785,
+          631,
+          5283,
+          785,
+          2002,
+          34344,
+          1370,
+          496,
+          368,
+          497,
+          3160,
+          631,
+          31105,
+          7620,
+          347,
+          21004,
+          9746,
+          368,
+          3912,
+          6340,
+          51127
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 51,
+        "seek": 11660,
+        "start": 131.84,
+        "end": 135.42000000000002,
+        "text": " Ya sea Word, PowerPoint, Excel, Open Document o lo que quieras",
+        "tokens": [
+          51127,
+          6080,
+          4158,
+          8725,
+          11,
+          25584,
+          11,
+          19060,
+          11,
+          7238,
+          37684,
+          277,
+          450,
+          631,
+          23572,
+          296,
+          51306
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 52,
+        "seek": 11660,
+        "start": 135.42000000000002,
+        "end": 138.84,
+        "text": " En archivos de Markdown listos para poder utilizarse en milisegundos",
+        "tokens": [
+          51306,
+          2193,
+          3912,
+          16501,
+          368,
+          3934,
+          5093,
+          1329,
+          329,
+          1690,
+          8152,
+          24060,
+          405,
+          465,
+          1962,
+          908,
+          70,
+          36518,
+          51477
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 53,
+        "seek": 11660,
+        "start": 138.84,
+        "end": 143.10000000000002,
+        "text": " Y es que en esta época de día donde tratas de cargar información dentro de un modelo inteligente",
+        "tokens": [
+          51477,
+          398,
+          785,
+          631,
+          465,
+          5283,
+          25024,
+          368,
+          12271,
+          10488,
+          21507,
+          296,
+          368,
+          1032,
+          2976,
+          21660,
+          10856,
+          368,
+          517,
+          27825,
+          44300,
+          1576,
+          51690
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 54,
+        "seek": 11660,
+        "start": 143.10000000000002,
+        "end": 145.48000000000002,
+        "text": " La conversión de un formato a otro es muy importante",
+        "tokens": [
+          51690,
+          2369,
+          2615,
+          2560,
+          368,
+          517,
+          1254,
+          2513,
+          257,
+          11921,
+          785,
+          5323,
+          9416,
+          51809
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.06446481928853931,
+        "compression_ratio": 1.671270718232044,
+        "no_speech_prob": 0.0028438568115234375
+      },
+      {
+        "id": 55,
+        "seek": 14548,
+        "start": 145.48,
+        "end": 148.32,
+        "text": " Sobre todo porque muchos modelos inteligentes pueden leer Markdowns",
+        "tokens": [
+          50365,
+          407,
+          2672,
+          5149,
+          4021,
+          17061,
+          2316,
+          329,
+          44300,
+          9240,
+          14714,
+          34172,
+          3934,
+          5093,
+          82,
+          50507
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      },
+      {
+        "id": 56,
+        "seek": 14548,
+        "start": 148.32,
+        "end": 153.14,
+        "text": " Así que esta biblioteca lo que hace es que en promedio puede llegar a convertir cualquier tipo de archivo en 4 milisegundos",
+        "tokens": [
+          50507,
+          17419,
+          631,
+          5283,
+          34344,
+          1370,
+          496,
+          450,
+          631,
+          10032,
+          785,
+          631,
+          465,
+          2234,
+          292,
+          1004,
+          8919,
+          24892,
+          257,
+          7620,
+          347,
+          21004,
+          9746,
+          368,
+          3912,
+          6340,
+          465,
+          1017,
+          1962,
+          908,
+          70,
+          36518,
+          50748
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      },
+      {
+        "id": 57,
+        "seek": 14548,
+        "start": 153.14,
+        "end": 157.0,
+        "text": " Además que también viene con un skill para que tu agente pueda saber cómo utilizarlo por ti",
+        "tokens": [
+          50748,
+          34621,
+          631,
+          6407,
+          19561,
+          416,
+          517,
+          5389,
+          1690,
+          631,
+          2604,
+          623,
+          1576,
+          31907,
+          12489,
+          12826,
+          24060,
+          752,
+          1515,
+          8757,
+          50941
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      },
+      {
+        "id": 58,
+        "seek": 14548,
+        "start": 157.0,
+        "end": 160.16,
+        "text": " Pero estos son tan solamente 5 proyectos de los muchos que puedes llegar a encontrar",
+        "tokens": [
+          50941,
+          9377,
+          12585,
+          1872,
+          7603,
+          27814,
+          1025,
+          23832,
+          329,
+          368,
+          1750,
+          17061,
+          631,
+          19010,
+          24892,
+          257,
+          17525,
+          51099
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      },
+      {
+        "id": 59,
+        "seek": 14548,
+        "start": 160.16,
+        "end": 161.85999999999999,
+        "text": " Así que también te dejo un video en el canal",
+        "tokens": [
+          51099,
+          17419,
+          631,
+          6407,
+          535,
+          368,
+          5134,
+          517,
+          960,
+          465,
+          806,
+          9911,
+          51184
+        ],
+        "temperature": 0.0,
+        "avg_logprob": -0.058900123900350404,
+        "compression_ratio": 1.6053639846743295,
+        "no_speech_prob": 0.00154876708984375
+      }
+    ]
+  },
+  "english_status": "pending_no_input",
+  "metrics": {
+    "vram_total_before_mib": 1538,
+    "vram_total_after_mib": 5746,
+    "vram_total_after_load_mib": 5698,
+    "vram_load_delta_mib": 4160,
+    "swap_before": {
+      "pswpin": 30148,
+      "pswpout": 225726,
+      "page_size_bytes": 4096,
+      "swap_io_bytes": 1048059904
+    },
+    "swap_after": {
+      "pswpin": 30176,
+      "pswpout": 307415,
+      "page_size_bytes": 4096,
+      "swap_io_bytes": 1382772736
+    },
+    "swap_io_delta_bytes": 334712832,
+    "swap_io_limit_bytes": 536870912
+  },
+  "parameters": {
+    "transcription_input": "original full WAV",
+    "task": "transcribe",
+    "condition_on_previous_text": false,
+    "vad_filter": false
+  },
+  "raw_segment_files": [
+    "/work/results/lang/raw-segments-a-autodetect.json",
+    "/work/results/lang/raw-segments-b-pinned.json"
+  ]
+}
