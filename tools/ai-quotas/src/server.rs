@@ -120,12 +120,19 @@ fn route(request: &tiny_http::Request, dir: &Path, pull: &PullFn, status: &Statu
         "/api/status" => (200, "application/json".into(), status_body(status)),
         "/api/costs" => (200, "application/json".into(), costs_body(costs)),
         "/api/history" => (200, "application/json".into(), history_body(dir)),
+        "/api/config" => (200, "application/json".into(), config_body()),
         "/api/balancer/recommend" => match query_param(raw_url, "model").filter(|m| !m.is_empty()) {
             Some(model) => (200, "application/json".into(), balancer_recommend_body(dir, pull, &model)),
             None => (400, "application/json".into(), "{\"error\":\"missing model query parameter\"}".into()),
         },
         _ => (404, "text/plain; charset=utf-8".into(), "not found\n".into()),
     }
+}
+
+/// `/api/config` payload: current declarative user configuration.
+fn config_body() -> String {
+    let config = crate::config::AppConfig::load();
+    serde_json::to_string(&config).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Build the `/api/quotas` payload: file records read fresh, pull records
@@ -139,7 +146,8 @@ fn quotas_body(dir: &Path, pull: &PullFn, force_refresh: bool) -> String {
     let statuses = reader::merge_statuses(file_statuses, pull_statuses);
     append_history_snapshot(dir, &statuses, now);
     let records: Vec<Value> = statuses.iter().map(|s| status_to_json(s, now)).collect();
-    serde_json::to_string(&json!({ "generated_at": now.to_rfc3339(), "records": records }))
+    let config = crate::config::AppConfig::load();
+    serde_json::to_string(&json!({ "generated_at": now.to_rfc3339(), "records": records, "config": config }))
         .unwrap_or_else(|_| "{\"generated_at\":\"\",\"records\":[]}".to_string())
 }
 
@@ -330,7 +338,7 @@ pub fn status_to_json(status: &Status, now: DateTime<Utc>) -> Value {
     let display_name = status
         .display_name
         .clone()
-        .or_else(|| reader::known_display_name(&status.provider).map(str::to_string));
+        .or_else(|| reader::known_display_name(&status.provider));
     if let Some(display_name) = display_name {
         obj.insert("display_name".into(), json!(display_name));
     }

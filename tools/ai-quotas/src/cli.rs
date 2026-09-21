@@ -189,7 +189,7 @@ fn print_status(status: &reader::Status) {
     let display_name = status
         .display_name
         .clone()
-        .or_else(|| reader::known_display_name(&status.provider).map(str::to_string))
+        .or_else(|| reader::known_display_name(&status.provider))
         .unwrap_or_else(|| "-".to_string());
     println!(
         "{}\t{}\t{}\t{}",
@@ -222,7 +222,7 @@ fn check_status_json(
         "display_name": status
             .display_name
             .clone()
-            .or_else(|| reader::known_display_name(&status.provider).map(str::to_string)),
+            .or_else(|| reader::known_display_name(&status.provider)),
         "label": record.and_then(|r| r.label.clone()),
         "resets_at": record.and_then(|r| r.resets_at).map(|t| t.to_rfc3339()),
         "kind": record.map(|r| r.kind),

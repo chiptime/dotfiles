@@ -164,12 +164,15 @@
 const SYMBOLS = { EUR: '€', USD: '$', CNY: '¥' };
 
 // Provider group order (known pull/file ids first, unknown ones after, by name).
-const ORDER = ['claude', 'zai', 'chatgpt', 'opencode', 'gemini', 'deepseek'];
+let ORDER = ['claude', 'zai', 'chatgpt', 'opencode', 'gemini', 'gemini-3p', 'deepseek'];
 
 // Relative subscription capacity, used ONLY as a ranking tie-breaker (at
 // equal pace, the bigger sub wastes more money). Hidden from the UI: pace
 // itself needs no weights. Claude = 1, zai = 20x, tune the rest to taste.
-const CAPACITY = { claude: 1, zai: 20, chatgpt: 1, opencode: 1, gemini: 1 };
+let CAPACITY = { claude: 1, zai: 20, chatgpt: 1, opencode: 1, gemini: 1, 'gemini-3p': 1 };
+
+let MAIN_LABELS = ['5h window', 'weekly', 'monthly', 'daily', '3p 5h window', '3p weekly'];
+let WEEKLY_LABELS = { 'gemini-3p': '3p weekly' };
 
 // Window used for cross-sub comparison (the only one all coding subs share).
 const COMPARISON_LABEL = 'weekly';
@@ -187,11 +190,10 @@ let LEARNED_DUR = {};
 const workday = { on: localStorage.getItem('workdayPace') === '1' };
 
 // Standard window labels form the main row of a group; everything else
-// (3P variants, generic token limits, balances...) falls into "Otras cuotas".
-// "monthly" matches both OpenCode "Monthly" and Z.ai "MCP monthly".
+// (generic token limits, balances...) falls into "Otras cuotas".
 function isMainLabel(label) {
   const l = String(label || '').toLowerCase();
-  return l === '5h window' || l === 'weekly' || l.endsWith('monthly');
+  return MAIN_LABELS.some(m => l === m.toLowerCase()) || l.endsWith('monthly');
 }
 
 function esc(s) {
@@ -217,7 +219,8 @@ function windowTier(label) {
 function paceView(provider, recs) {
   const cap = CAPACITY[provider];
   if (!cap) return null;
-  const w = recs.find(r => String(r.label || '').toLowerCase() === COMPARISON_LABEL);
+  const wLabel = weeklyLabel(provider);
+  const w = recs.find(r => String(r.label || '').toLowerCase() === wLabel);
   if (!w || (w.state !== 'ok' && w.state !== 'stale')) return null;
   if (typeof w.used_percent !== 'number') return null;
   const exp = paceExpected(w);
@@ -298,11 +301,16 @@ function learnDurations(hist) {
   return out;
 }
 
+// Per provider: the label that represents its weekly window.
+function weeklyLabel(provider) {
+  return WEEKLY_LABELS[provider] || 'weekly';
+}
+
 // Per provider: final used% of the last COMPLETED weekly window in history.
 function weeklyCloses(hist) {
   const wins = new Map();
   for (const h of hist) {
-    if (String(h.label || '').toLowerCase() !== 'weekly' || !h.resets_at) continue;
+    if (String(h.label || '').toLowerCase() !== weeklyLabel(h.provider) || !h.resets_at) continue;
     const r = Date.parse(h.resets_at);
     if (!isFinite(r)) continue;
     if (!wins.has(h.provider)) wins.set(h.provider, new Map());
@@ -323,12 +331,14 @@ function weeklyCloses(hist) {
 
 // Ritmo series for one provider's weekly window, from history snapshots.
 function ritmoSeries(provider, hist, limit = 14) {
+  const wLabel = weeklyLabel(provider);
+  const learnedKey = provider === 'gemini-3p' ? 'gemini-3p|3P Weekly' : provider + '|Weekly';
   const out = [];
   for (const h of hist) {
-    if (h.provider !== provider || String(h.label || '').toLowerCase() !== 'weekly') continue;
+    if (h.provider !== provider || String(h.label || '').toLowerCase() !== wLabel) continue;
     if (typeof h.used_percent !== 'number' || !h.resets_at || !h.ts) continue;
     const end = Date.parse(h.resets_at), ts = Date.parse(h.ts);
-    const dur = LEARNED_DUR[provider + '|Weekly'] || 7 * 86400e3;
+    const dur = LEARNED_DUR[learnedKey] || 7 * 86400e3;
     const start = end - dur;
     const frac = workday.on ? workElapsedFraction(start, end, ts) : (ts - start) / dur;
     if (frac > 0.02 && frac <= 1) out.push({ ts, ritmo: h.used_percent / 100 / frac });
@@ -626,6 +636,13 @@ async function load(forceRefresh = false) {
     ]);
     STATUS = statusData.providers || {};
     COSTS = costsData;
+
+    if (data.config) {
+      if (Array.isArray(data.config.order)) ORDER = data.config.order;
+      if (data.config.capacity && typeof data.config.capacity === 'object') CAPACITY = data.config.capacity;
+      if (Array.isArray(data.config.main_labels)) MAIN_LABELS = data.config.main_labels;
+      if (data.config.weekly_labels && typeof data.config.weekly_labels === 'object') WEEKLY_LABELS = data.config.weekly_labels;
+    }
 
     const groups = new Map();
     for (const r of data.records) {
