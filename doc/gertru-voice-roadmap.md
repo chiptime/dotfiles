@@ -69,10 +69,13 @@ verified deployment evidence for this roadmap. This document does not amend it.
 - **Prior source inspection:** Windows Electron/React → `localhost:8000/transcribe`
   → Python → separate faster-whisper WebSocket service → sidecar intent routing
   → pyperclip and Ctrl+V. Actual deployment and the active path remain unverified.
-- **Locally observed gap:** [projects-html.py](../scripts/projects-html.py) reads
-  management data from [projects.yaml](../scripts/projects.yaml), not canonical
-  `hub/`. Existing telemetry, cards, and session links are reuse candidates, not
-  evidence that the desired cockpit already derives its management state from hub.
+- **Locally observed state:** the projects sweep now feeds `hub/telemetria/repos.md`
+  in canonical `hub/` (2026-09-15 amendment), the local dashboard at :47624 renders
+  with hub-precedence, and any other view — including
+  [projects-html.py](../scripts/projects-html.py) over
+  [projects.yaml](../scripts/projects.yaml) — is a projection of the hub. Existing
+  telemetry, cards, and session links remain reuse candidates; the Phase 4
+  Windows-client cockpit surface itself is still unbuilt.
 - Preserve historical documentation and unrelated dirty changes. No decision has
   been made to rewrite, delete, or replace the voice-assistant repository.
 
@@ -185,6 +188,9 @@ reconstructing project state from separate applications or agent conversations.
   Exact modes, action authority, and which larger integrations ship are **OPEN**.
 - Meeting task publication and note-to-hub capture are candidates only after destination,
   save semantics, and write authority are chosen; maintain existing corporate boundaries.
+  Reverse-path precedent: Notion→hub task materialization is already sealed via
+  `set-tareas` fed from `tareas-fuentes.json` (one-way pull); hub→Notion writes remain
+  out of scope.
 - **Dependencies:** verified Gertru tool surface, per-integration authorization, failure
   and retry semantics, and canonical write contracts wherever hub state is affected.
 - **Exit evidence:** one approved end-to-end action with observable result and audit
