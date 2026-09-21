@@ -39,12 +39,22 @@ Rejected alternatives:
 | **Obsidian (local clone, pull-only)** | **Human dashboard — first-class product layer**: `hub/dashboard.md`, project notes, Canvas ecosystem map. Read-only sync via obsidian-git (never pushes) |
 | `cerebro/` (rest of workspace) | Gertru's personal second brain — untouched by the hub |
 | Engram | Agent operational memory (session state) — never the human dashboard |
-| Notion personal | Inbox + mobile push reminders (satellite, not source) |
-| Notion work (Clece) | Corporate boundary — untouched |
+| Notion personal | Direct task source (2026-09-15, `hub-task-sync`): personal Tareas DB pulled by Gertru's `sync-tasks` job — one-way, reads only |
+| Notion work (Clece) | Direct task source (2026-09-15, `hub-task-sync`): Mantenimiento SIS board pulled by the same job — task ingestion only, still no hub→Notion writes |
 | `~/.dotfiles/scripts/projects.yaml` + `PROJECTS.md` | Repo-level technical layer (branch, dirty, last commit) — stays as is |
 | `/opt/ai-stack/openclaw-hub` (ro-mounted at `/etc/openclaw/hub/`) | The RULES: `CLERK.md`, `schema.json`, `clerk-validate.mjs`, `MANUAL.md`, `templates/` — stable mirror, never workspace-resident (Gertru cannot edit her own write rules) |
 | **`~/hub` (local clone + `hub-session-close` skill)** | **Local agent layer**: every meaningful opencode session drops a session-close summary into `~/hub/hub/inbox/opencode/` and pushes (create-only, pathspec-scoped, pull --rebase first). First live item: `aaf4081` (2026-09-14) |
 | Morning-brief / weekly-review / drain-inbox | Consumers: read the vault, list pending triage, apply inbox items |
+
+**Task ingestion amendment (2026-09-15, SDD change `hub-task-sync`, archived at ai-stack
+`openspec/changes/archive/2026-09-15-hub-task-sync/`):** Gertru pulls BOTH Notion sources
+directly through her stdio MCP (personal Tareas DB + Clece Mantenimiento SIS, data source
+`2345b76b-8c24-409e-a728-6074d38acefd`), configured in `openclaw/hub/tareas-fuentes.json`;
+the hourly `sync-tasks` job (:15, workdays 08–20) materializes the hub `## Tareas` section
+through the clerk op `set-tareas`. Hub task vocabulary is sealed to
+`abierta|en_curso|hecha`; the 13 Notion states map onto it (mapping sealed in
+`doc/MAPA_INGESTAS.md`). Tasks take no inbox hop; the PC sensor keeps machine facts only
+(repos, sessions, hours, autodiscovery).
 
 ## Data vs. Rules — separation of powers
 
@@ -85,7 +95,7 @@ gertru-workspace/
 | Zone | Writers | Rule |
 |---|---|---|
 | `hub/inbox/<writer>/` | Everyone (agents, Bruno drops) | Create-only, own namespace → content conflicts impossible by construction |
-| `hub/proyectos/`, `dashboard.md`, `ecosistema.md` | Clerk (Gertru) only | Six fixed validated ops: `set-estado`, `add-hito`, `add-log`, `nuevo-proyecto`, `archivar`, `drain-inbox` — schema validation before any write, exit 1 = zero writes |
+| `hub/proyectos/`, `dashboard.md`, `ecosistema.md` | Clerk (Gertru) only | Eight fixed validated ops: `set-estado`, `add-hito`, `add-log`, `nuevo-proyecto`, `archivar`, `drain-inbox`, `regen-dashboard`, `set-tareas` — schema validation before any write, exit 1 = zero writes (spec `gertru-clerk`: 9 requirements / 14 scenarios) |
 | `hub/inbox/_triage/` | Nobody applies anything | Items wait for Bruno's explicit election |
 | Rest of workspace | Gertru only | Hub never touches it (the 90%) |
 | Local clone | Nobody pushes. Ever | Obsidian + obsidian-git configured **pull-only** |
@@ -160,7 +170,8 @@ drain job via jobs.yaml + drift gate. Human steps only for pre-existing content:
    unhandled TLSSocket `'error'` in the SSRF guard; its custom lookup dials api.z.ai
    AAAA records. Three-layer mitigation: `NODE_OPTIONS=--dns-result-order=ipv4first` +
    `net.ipv6.conf.all.disable_ipv6=1` + `/etc/hosts` pin (`extra_hosts`) — the hosts
-   file is the only lookup layer nothing can bypass. Upstream report + unpin pending.
+   file is the only lookup layer nothing can bypass. Deployed image has since moved to
+   `2026.9.4` (digest-pinned); upstream report + unpin still pending.
 2. **Dokploy re-clone inode race** — direct `./openclaw/hub` bind captured an empty
    pre-clone inode; the drain ran with "validador ausente" and correctly fail-closed
    everything to `_triage`. Fix: stable `/opt/ai-stack/openclaw-hub` mirror (the same
@@ -187,9 +198,10 @@ drain job via jobs.yaml + drift gate. Human steps only for pre-existing content:
 
 ## Follow-ups (open, non-blocking)
 
-- **Dashboard regeneration**: migrated notes never populate `dashboard.md` (only
-  drain-touched rows appear). Recommend a clerk `regen-dashboard` op or drain-side
-  refresh (spec CH-DASH "Filter query" stays PARTIAL for this).
+- **Dashboard regeneration**: CLOSED — the clerk `regen-dashboard` op shipped (ai-stack
+  `7b9b197`) and the drain runs it post-apply (`automations/payloads/drain-inbox.md`),
+  so migrated notes now reach `dashboard.md`. Caveat: the rebuild is LLM-mediated;
+  there is no deterministic regeneration script yet.
 - **Upstream report** to OpenClaw for the SSRF-guard unhandled error; unpin
   `extra_hosts` when fixed.
 - Plan phase 4: formal pause/archive of dormant projects + absorb `projects.yaml`.
@@ -197,8 +209,8 @@ drain job via jobs.yaml + drift gate. Human steps only for pre-existing content:
 ## Non-goals
 
 - No new vault, no Notion-hub, no manual git for Bruno, no local pushes.
-- Not touching: `cerebro/` personal content, `openclaw.json`/credentials, Notion work,
-  `PROJECTS.md`/`projects.yaml` repo-technical layer.
+- Not touching: `cerebro/` personal content, `openclaw.json`/credentials, Notion work
+  (beyond read-only task ingestion), `PROJECTS.md`/`projects.yaml` repo-technical layer.
 
 ## Documents
 
