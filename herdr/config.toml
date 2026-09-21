@@ -125,7 +125,8 @@ key = "prefix+ctrl+o"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-palette"
 
-# Voice Feedback (TTS) — Voice menu (simulated leader: one key opens, next key commands)
+# Voice Feedback (TTS) — Voice menu (simulated leader: one key opens, next key commands;
+# los ajustes de voz/audio viven dentro, tecla "a")
 [[keys.command]]
 key = "prefix+u"
 type = "shell"
