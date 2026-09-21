@@ -14,8 +14,8 @@
 dotfiles:
   scope: personal
   status: active
-  desc: Infra personal — skills OpenCode, notificaciones ntfy, teams-to-tasks + task-resolver (enriquecimiento a demanda), tools
-  next: primera prueba real de task-resolver ("triaje el inbox" sobre Inbox real, ver PATCH del espejo); vigilar sweep/digest teams-to-tasks (fallos intermitentes rc=0/124/1, preexistentes — no regresión); notificaciones ntfy intermitentes en el móvil (batería/Doze de Android); documentar mapping ~/bin/projects en conf.linux.yaml
+  desc: Infra personal — skills OpenCode, config centralizada de modelos de agentes, notificaciones ntfy, teams-to-tasks + task-resolver, tools
+  next: trackear opencode.json (210KB) en el repo tras scrub de secrets; commitear cambio del router (ai/opencode-router/opencode-router.json); prueba real de task-resolver sobre Inbox; vigilar sweep teams-to-tasks y ntfy intermitente en móvil; documentar mapping ~/bin/projects en conf.linux.yaml
 
 agy-bridge:
   scope: personal
@@ -220,12 +220,14 @@ planificador:
 backend:
   scope: work
   group: planificador
-  desc: Products/Planificador backend — WIP refactoring mar-2025
+  status: cold
+  desc: Products/Planificador backend — cold desde mar-2025 (refactoring sin retomar)
 
 frontend:
   scope: work
   group: planificador
-  desc: Products/Planificador frontend — WIP refactoring mar-2025
+  status: cold
+  desc: Products/Planificador frontend — cold desde mar-2025 (refactoring sin retomar)
 
 str06-bh-mid:
   scope: work
