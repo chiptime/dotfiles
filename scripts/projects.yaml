@@ -26,8 +26,8 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor en main (catálogos provider/voices desde voice list --json con kokoro, --probe, retención exportada al core, podcast por API pública con argv, parser IPC único, sin fallbacks de voces), HT-02 voces por chat, Ajustes en submenús de dos niveles, daemon supervisado, dashboard v3.1 / paleta fzf / menú de voz, push ntfy con audio, CLI contract v1
-  next: migrar parseo de status IPC del host a --ipc-json del motor; cerrar y pushear el WIP vivo de la sesión paralela (packaging/, popups settings, openspec settings-category-submenus); HT-11 audición de voces (P1)
+  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-02 voces por chat, Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio, CLI contract v1; distribución completa (instalador 1 línea, skill install para Claude Code/OpenCode/Codex/Pi, wrapper npm, fórmula Homebrew) y UI inglés-first con idioma configurable (HERDR_TTS_LANG, ciclo desde popup), suite 694/0
+  next: cortar release v0.17 (bump + CHANGELOG); publicar npm y crear tap Homebrew (steps en packaging/); migrar parseo de status IPC del host a --ipc-json del motor; HT-11 audición de voces (P1)
 
 herdr-brain:
   scope: personal
