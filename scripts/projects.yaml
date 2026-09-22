@@ -26,8 +26,8 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr — settle window anti pasos intermedios (TTS_SETTLE_SECONDS, knob s en Ajustes), popups del menú arreglados (ui_busy + setsid + log de reintentos), dashboard v3.1 / paleta fzf / menú de voz / ajustes, keymap declarativo, push ntfy, glifos de título, docs y comparativa redibujadas
-  next: verificar en el móvil que desaparecen las notificaciones duplicadas en tareas con pasos; valorar detección semántica del done real; streaming frame-level de Piper
+  desc: Voz para agentes en Herdr — Ajustes con redirección web y click directo (w/c, deep link a Collie), daemon supervisado (auto-relanza y registra su ciclo de vida en daemon.log), config_set upsert sin duplicados, settle window, dashboard v3.1 / paleta fzf / menú de voz, push ntfy con audio y glifos de título
+  next: reiniciar el servidor herdr para activar el daemon supervisado; único ítem de roadmap abierto: Intercom Push-to-Talk (prefix+c, Whisper.cpp) + streaming frame-level de Piper en agent-tts
 
 herdr-brain:
   scope: personal
