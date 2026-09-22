@@ -255,7 +255,7 @@ if [ -s "$JSON_OUT" ]; then
   if scp -q "${SSH_OPTS[@]}" "$JSON_OUT" \
       "root@100.74.160.4:/tmp/bruno-projects.incoming" 2>/dev/null \
      && ssh "${SSH_OPTS[@]}" root@100.74.160.4 \
-      'mv /tmp/bruno-projects.incoming /home/node/.openclaw/workspace/hub/inbox/bruno/projects.json' 2>/dev/null; then
+      'docker cp /tmp/bruno-projects.incoming aistack-all-o9aphm-openclaw-1:/home/node/.openclaw/workspace/hub/inbox/bruno/projects.json && rm /tmp/bruno-projects.incoming' 2>/dev/null; then
     echo "hub: projects.json entregado al inbox"
   else
     echo "hub: entrega de projects.json falló (no crítico)"
