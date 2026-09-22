@@ -14,8 +14,19 @@ authority is granted by this document. No schedule or performance budget is agre
 1. Compare reuse against replacement without losing working daily dictation.
 2. Add a lightweight Windows orb, then continuous F8 conversation and voice threads.
 3. Process completed meetings and keep readable text history in the Windows app.
-4. Connect a hub-derived **Today / Needs decisions / Changes** cockpit.
-5. Introduce controlled existing-app actions; consider live meetings and video later.
+ 4. Connect a hub-derived **Today / Needs decisions / Changes** cockpit.
+ 5. Introduce controlled existing-app actions; consider live meetings and video later.
+
+**Direction update (2026-09-22, Bruno):** the Electron voice app (and the orb) is
+**PARKED** — stalled by app problems, not a prerequisite anymore. The cockpit is
+reframed as the evolution of the control-hub ecosystem itself, NOT a new product:
+the local dashboard `127.0.0.1:47624/PROJECTS.html` extended with the full hub
+discovery (Today / Needs decisions / Changes / Notion Tareas — "all work, one
+view"), plus a mic button in the same view as the voice entry to Gertru-as-PM
+(browser capture → local whisper → single PM thread). Voice phases below are
+re-scoped around that surface: the whisper backend is live and measured (RTF
+0.10), so the open work is the cockpit view + the mic bridge, not resurrecting
+the Electron client.
 
 This is the **PROPOSED minimum-to-more sequence**, not approval of every feature.
 The cockpit can advance alongside voice once its canonical data contract is ready;
