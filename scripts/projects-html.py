@@ -12,6 +12,8 @@ Data sources:
   OpenCode API http://127.0.0.1:4096      /project + /session?directory=...
   ~/.local/share/time-ledger/webbase      FULL session-link prefix
                                           (default http://localhost:4097/server/<b64>/session)
+  hub-state.json (sibling of PROJECTS.md) cockpit hub sections — hub-state/v2
+                                          copied by the sweep after its hub pull
 Output: PROJECTS.html next to input. Best-effort: exits 0 if inputs missing.
 """
 import html
@@ -21,7 +23,7 @@ import re
 import sys
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 md_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
     "~/.local/share/projects-dashboard/PROJECTS.md")
@@ -377,6 +379,124 @@ for u in units:
                f'{esc(nxt)} {evtxt}</li>')
 act_html = "".join(act) or "<li>Nada pendiente</li>"
 
+# ---------- cockpit del hub (cockpit-view R1-R3, hub-state.json v2) -----------
+# Every hub datum below comes EXCLUSIVELY from the sibling hub-state.json v2 —
+# NEVER from dashboard.md. The index is keyed by slug AND repos[] AND unit
+# display name (hub slugs are number-prefixed, units are not, aliases are 1:N).
+# Missing/unparsable sibling ⇒ explicit "sin datos del hub" state instead of
+# stale numbers presented as current; sensor hub columns stay empty (fallback).
+hub_doc = None
+hub_index = {}
+try:
+    with open(os.path.join(os.path.dirname(md_path), "hub-state.json"), encoding="utf-8") as f:
+        hub_doc = json.load(f)
+except (OSError, ValueError):
+    hub_doc = None
+if not isinstance(hub_doc, dict):
+    hub_doc = None
+if hub_doc is not None:
+    for _e in hub_doc.get("projects") or []:
+        if not isinstance(_e, dict):
+            continue
+        for _k in [_e.get("slug"), _e.get("unit")] + list(_e.get("repos") or []):
+            if isinstance(_k, str) and _k and _k not in hub_index:
+                hub_index[_k] = _e
+
+def _hub_projects():
+    ps = hub_doc.get("projects") if hub_doc is not None else None
+    return [p for p in ps if isinstance(p, dict)] if isinstance(ps, list) else []
+
+def _age_label(h):
+    if h < 1:
+        return f"{max(0, round(h * 60))} min"
+    if h < 48:
+        return f"{round(h)} h"
+    return f"{round(h / 24)} días"
+
+hub_today, hub_decide, hub_changes, hub_tareas = [], [], [], []
+if hub_doc is None:
+    hub_badge = '<span class="hubbadge none">sin datos del hub</span>'
+    hub_panels = ('<p class="dim hubnodata">sin datos del hub — ejecuta <code>projects</code> '
+                  "(el sweep copia hub-state.json junto a PROJECTS.md) o espera al drain de las 07:30.</p>")
+else:
+    today_iso = date.today().isoformat()
+    horizon = (date.today() + timedelta(days=14)).isoformat()
+    for e in _hub_projects():
+        slug = e.get("slug") or "?"
+        if e.get("estado") == "activo":  # Today: activo + próxima acción + hitos ≤14 días
+            nxt = e.get("proxima_accion") or ""
+            hitos = [h for h in (e.get("hitos") or []) if isinstance(h, dict)
+                     and today_iso <= str(h.get("fecha") or "") <= horizon]
+            if nxt or hitos:
+                parts = ([esc(nxt)] if nxt else []) + \
+                    [f'hito {esc(h.get("fecha") or "")}: {esc(h.get("texto") or "")}' for h in hitos]
+                hub_today.append(f'<li><code>{esc(slug)}</code> — {" · ".join(parts)}</li>')
+        logs = [l for l in (e.get("logs") or []) if isinstance(l, dict)]  # append-only: last = recent
+        if logs:
+            last = logs[-1]
+            more = f' <span class="dim">(+{len(logs) - 1} más)</span>' if len(logs) > 1 else ""
+            hub_changes.append(f'<li><code>{esc(slug)}</code> <span class="dim">'
+                               f'{esc(last.get("fecha") or "s/f")}</span> — '
+                               f'{esc(last.get("texto") or "")}{more}</li>')
+        t = e.get("tareas") or {}
+        if t.get("abiertas") or t.get("en_curso") or t.get("hecha"):
+            subs = []
+            for it in (t.get("items") or []):
+                if not isinstance(it, dict) or it.get("estado") == "hecha":
+                    continue  # hecha no se materializa: cuenta sí, línea no
+                nid = it.get("id")
+                origin = (f' <span class="dim">{esc(it.get("origin") or "")}:{esc(nid)}</span>'
+                          if nid else "")
+                subs.append(f'<li class="sub">{esc(it.get("titulo") or "")} '
+                            f'<span class="dim">({esc(it.get("estado") or "")})</span>{origin}</li>')
+            hub_tareas.append(
+                f'<li><code>{esc(slug)}</code> — {int(t.get("abiertas") or 0)} abierta(s) · '
+                f'{int(t.get("en_curso") or 0)} en curso</li>' + "".join(subs))
+    inbox = hub_doc.get("inbox") or {}  # Needs decisions: inbox + triaje + propuestas locales
+    hub_decide.append(f'<li>Inbox: opencode {int(inbox.get("opencode") or 0)} · '
+                      f'pi {int(inbox.get("pi") or 0)} · bruno {int(inbox.get("bruno") or 0)}</li>')
+    hub_decide.append(f'<li>Triaje: {int(hub_doc.get("triage") or 0)}</li>')
+    for e in _hub_projects():
+        loc = e.get("local")
+        if isinstance(loc, dict) and loc.get("status_local") == "proposal":
+            hub_decide.append(f'<li><code>{esc(e.get("slug") or "?")}</code> — propuesta '
+                              '<span class="dim">local («proposal» no es vocabulario del hub)</span></li>')
+    counts = {"activo": 0, "pausa": 0, "archivado": 0}  # Resumen computed from v2
+    for e in _hub_projects():
+        if e.get("estado") in counts:
+            counts[e["estado"]] += 1
+    hub_resumen = f'Hub: {counts["activo"]} activo · {counts["pausa"]} pausa · {counts["archivado"]} archivado'
+    gen_iso = str(hub_doc.get("generated") or "")  # Freshness badge (R3)
+    try:
+        age_h = (datetime.now(timezone.utc)
+                 - datetime.fromisoformat(gen_iso.replace("Z", "+00:00"))).total_seconds() / 3600
+    except ValueError:
+        age_h = None
+    if age_h is None:
+        hub_badge = '<span class="hubbadge stale">hub: fecha no válida</span>'
+    else:
+        cls = "stale" if age_h > 24 else "ok"
+        hub_badge = (f'<span class="hubbadge {cls}" id="hub-fresh" data-generated="{esc(gen_iso)}">'
+                     f'<span class="txt">datos del hub de hace {esc(_age_label(age_h))}</span></span>')
+
+    def _panel(title, icon, items):
+        return (f'<div class="hubpanel"><h3>{icon}{esc(title)}</h3>'
+                f'<ul>{"".join(items) or "<li class=\"dim\">— nada</li>"}</ul></div>')
+
+    hub_panels = ('<div class="hubgrid">'
+                  + _panel("Hoy", I_TARGET, hub_today)
+                  + _panel("Decisiones pendientes", I_ALERT, hub_decide)
+                  + _panel("Cambios", I_CLOCK, hub_changes)
+                  + _panel("Tareas Notion", I_CHAT, hub_tareas)
+                  + "</div>")
+    hub_section_html = (f'<section class="panel" id="sec-hub" aria-labelledby="hub-title">'
+                        f'<h2 id="hub-title">{I_TARGET}Cockpit del hub {hub_badge} '
+                        f'<span class="dim">{esc(hub_resumen)}</span></h2>{hub_panels}</section>')
+if hub_doc is None:
+    hub_section_html = (f'<section class="panel" id="sec-hub" aria-labelledby="hub-title">'
+                        f'<h2 id="hub-title">{I_TARGET}Cockpit del hub {hub_badge}</h2>'
+                        f'{hub_panels}</section>')
+
 session_cards = []
 for group in sorted(session_projects.values(), key=lambda g: g["display"].casefold()):
     rows = sorted(group["sessions"].values(), key=lambda row: (row[0], row[1]), reverse=True)
@@ -465,23 +585,54 @@ html_doc = f"""<!doctype html>
   .stream {{ font-size: .72rem; border: 1px solid var(--line); border-radius: 999px;
              padding: .12rem .55rem; color: var(--tx); background: #101c33; }}
   .convtitle {{ font-size: .68rem; color: var(--dim); text-transform: uppercase; letter-spacing: .06em;
-                margin: .6rem 0 .15rem; }}
+                 margin: .6rem 0 .15rem; }}
   .conv {{ list-style: none; margin: 0; padding: 0; }}
   .conv li {{ font-size: .8rem; margin: .28rem 0; display: flex; gap: .35rem; align-items: baseline;
-              flex-wrap: wrap; overflow-wrap: anywhere; }}
+               flex-wrap: wrap; overflow-wrap: anywhere; }}
   .dim {{ color: var(--dim); font-size: .72rem; }}
   .ic {{ width: .95em; height: .95em; vertical-align: -0.15em; flex: none; }}
-  .hours .ic, .conv .ic, .panel h2 .ic {{ color: var(--acc); }}
+  .hours .ic, .conv .ic, .panel h2 .ic, .hubpanel h3 .ic {{ color: var(--acc); }}
   .badge.warn .ic {{ color: #fda4af; }}
+  .hubgrid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: .7rem; }}
+  .hubpanel {{ background: #101c33; border: 1px solid var(--line); border-radius: .45rem;
+               padding: .55rem .7rem; min-width: 0; }}
+  .hubpanel h3 {{ font-size: .85rem; margin: 0 0 .4rem; color: var(--acc);
+                  display: flex; gap: .35rem; align-items: center; }}
+  .hubpanel ul {{ margin: 0; padding-left: 1rem; }}
+  .hubpanel li {{ font-size: .8rem; margin: .28rem 0; overflow-wrap: anywhere; }}
+  .hubpanel li.sub {{ list-style: none; margin: .12rem 0 .12rem .7rem; }}
+  .hubpanel li.dim, li.dim {{ color: var(--dim); }}
+  .hubbadge {{ font-size: .72rem; border: 1px solid var(--line); border-radius: 999px;
+               padding: .12rem .55rem; vertical-align: middle; margin-left: .4rem; }}
+  .hubbadge.ok {{ color: var(--ok); border-color: #14532d66; }}
+  .hubbadge.stale {{ color: #fda4af; border-color: #7f1d1d66; }}
+  .hubbadge.none {{ color: var(--dim); }}
+  .hubnodata {{ margin: .2rem 0; }}
   @media (max-width: 640px) {{ .grid {{ grid-template-columns: 1fr; }} body {{ padding: .6rem; }} }}
   @media (prefers-reduced-motion: reduce) {{ * {{ transition: none !important; }} }}
 </style></head><body>
 <h1>Global Project Tracker</h1>
-<p class="meta">Actualizado {gen} · fuentes: git sweep + projects.yaml + time-ledger + sesiones OpenCode · refresco diario 08:00 · <code>projects</code> regenera</p>
+<p class="meta">Actualizado {gen} · fuentes: git sweep + projects.yaml + time-ledger + sesiones OpenCode + hub-state v2 · refresco diario 08:00 · <code>projects</code> regenera</p>
 <div class="strip">{''.join(chips)}{week_chip}</div>
 <div class="panel"><h2>{I_TARGET}Accionables pendientes</h2><ul>{act_html}</ul></div>
+{hub_section_html}
 <section class="panel" id="sec-opencode" aria-labelledby="opencode-title"><h2 id="opencode-title">{I_CHAT}Proyectos con sesiones multi-agente</h2>{agent_html}</section>
 {''.join(body_sections)}
+<script>
+(function () {{
+  var el = document.getElementById('hub-fresh');
+  if (!el) return;
+  var t = Date.parse(el.getAttribute('data-generated') || '');
+  if (isNaN(t)) return;
+  var h = (Date.now() - t) / 36e5;
+  var label = h < 1 ? 'hace ' + Math.max(0, Math.round(h * 60)) + ' min'
+            : h < 48 ? 'hace ' + Math.round(h) + ' h'
+            : 'hace ' + Math.round(h / 24) + ' días';
+  var txt = el.querySelector('.txt');
+  if (txt) txt.textContent = 'datos del hub de ' + label;
+  el.classList.add(h > 24 ? 'stale' : 'ok');
+}})();
+</script>
 </body></html>"""
 
 with open(out_path, "w", encoding="utf-8") as f:
@@ -524,16 +675,13 @@ def unit_json(u):
 
 sensor_projects = [unit_json(u) for u in units]
 
-# hub-state mirror (Phase 3): optional sibling index — facts only. The PAINTED
-# md already applies hub-wins precedence in the sweep; the json carries both
-# facts so consumers can see hub intent and local cache side by side.
-try:
-    with open(os.path.join(os.path.dirname(md_path), "hub-state.json"), encoding="utf-8") as f:
-        _hub_state = {p["slug"]: p for p in json.load(f).get("projects", [])}
-except (OSError, ValueError):
-    _hub_state = {}
+# hub-state v2 mirror (cockpit-view R2): the sibling index loaded above, keyed
+# by slug AND repos[] AND unit display name (D1 normalization: hub slugs are
+# number-prefixed — 006-ai-stack — local keys are not; 1:N aliases carry both
+# repos). Absent/unparsable sibling ⇒ graceful empty hub columns (preserved
+# fallback: estado_hub/prioridad_hub simply stay unset).
 for _p in sensor_projects:
-    _h = _hub_state.get(_p["name"])
+    _h = hub_index.get(_p["name"])
     if _h:
         _p["estado_hub"] = _h.get("estado")
         _p["prioridad_hub"] = _h.get("prioridad")
