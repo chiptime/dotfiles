@@ -7,6 +7,13 @@
 #
 # Usage:   projects              (via ~/bin symlink) or scripts/projects-dashboard.sh
 # Output:  ~/.local/share/projects-dashboard/PROJECTS.md  (machine-local, never committed)
+#
+# Cockpit loop (hub-state/v2, two-phase render): render → deliver projects.json
+# (scp + docker cp) → trigger the VPS emit with ONE ssh (fixed argv; the trigger
+# commits inside the container with an explicit pathspec, never -a) → pull the
+# clone → copy hub-state.json next to PROJECTS.md (sibling, tmp+rename) →
+# render again so the cockpit reflects the fresh v2 in the SAME cycle. All
+# hub-side steps are best-effort: the 07:30 drain regenerates v2 anyway.
 
 set -euo pipefail
 
@@ -199,6 +206,8 @@ section() {
 } > "$OUT"
 
 # Web dashboard (best-effort; standalone from ai-quotas, served on its own port)
+# Render pass 1 of 2: produces projects.json, which the delivery step below
+# ships to the hub inbox so the VPS emit can merge it into hub-state v2.
 python3 "$DOTFILES/scripts/projects-html.py" "$OUT" >/dev/null 2>&1 || true
 
 # --- Control Hub telemetry (fail-soft) ---------------------------------------
@@ -246,7 +255,7 @@ echo "Repos scanned: ${#repos[@]} · annotated: ${#annotated[@]} · unclassified
 # 6. Hub delivery (Phase 2 — sensor-inbox-triage): atomic best-effort scp of
 # projects.json into hub/inbox/bruno/. Never fatal: the morning chain (regen,
 # digest) must complete even when the VPS is unreachable. Ordering per
-# doc/MAPA_INGESTAS.md: regen -> espejo -> scp -> drain 07:30.
+# doc/MAPA_INGESTAS.md: regen -> espejo -> scp -> trigger -> drain 07:30.
 JSON_OUT="$OUT_DIR/projects.json"
 if [ -s "$JSON_OUT" ]; then
   SSH_OPTS=(-F /dev/null -i "$HOME/.ssh/id_contabo_VPS_1"
@@ -257,7 +266,49 @@ if [ -s "$JSON_OUT" ]; then
      && ssh "${SSH_OPTS[@]}" root@100.74.160.4 \
       'docker cp /tmp/bruno-projects.incoming aistack-all-o9aphm-openclaw-1:/home/node/.openclaw/workspace/hub/inbox/bruno/projects.json && rm /tmp/bruno-projects.incoming' 2>/dev/null; then
     echo "hub: projects.json entregado al inbox"
+
+    # --- on-demand emit trigger (hub-state-v2 R4 / D4): ONE ssh, fixed argv --
+    # The TRIGGER commits inside the container (pull --rebase → add → commit
+    # with pathspec → push); the emit itself stays git-free (exit 0/2 charter).
+    # Machine-commit precedent: telemetria(sweep). No-change ⇒ no commit;
+    # push failure ⇒ ssh exits non-zero ⇒ logged, non-fatal. The remote script
+    # is a fixed literal: no user- or scan-derived interpolation.
+    if ssh "${SSH_OPTS[@]}" root@100.74.160.4 '
+      C=aistack-all-o9aphm-openclaw-1
+      W=/home/node/.openclaw/workspace
+      docker exec "$C" git -C "$W" pull --rebase --quiet &&
+      docker exec "$C" node /etc/openclaw/hub/hub-state-emit.mjs "$W/hub" &&
+      docker exec "$C" git -C "$W" add hub/hub-state.json &&
+      { docker exec "$C" git -C "$W" diff --cached --quiet &&
+        echo "hub: sin cambios en hub-state.json" ||
+        docker exec "$C" git -C "$W" commit -q -m "hub-state(emit): v2 $(date +%Y-%m-%d\ %H:%M)" -- hub/hub-state.json; } &&
+      docker exec "$C" git -C "$W" push --quiet' 2>/dev/null; then
+      echo "hub: emit v2 disparado y publicado"
+    else
+      echo "hub: trigger del emit falló (no crítico)"
+    fi
   else
     echo "hub: entrega de projects.json falló (no crítico)"
   fi
 fi
+
+# ---------------------------------------------------------------------------
+# 7. v2 back down (cockpit-view R2 / D5 second phase): pull the freshly pushed
+# hub-state.json and copy it next to PROJECTS.md — the sibling read at
+# projects-html.py that nobody filled before. tmp+rename (atomic). Then render
+# pass 2 so the cockpit shows the fresh v2 in the SAME cycle (single-pass would
+# land it one cycle late: projects.json only exists after pass 1, and the
+# pushed v2 only lands after the trigger). Best-effort, never fatal.
+if [ -d "$HUB/.git" ]; then
+  if git -C "$HUB" pull --rebase --quiet 2>/dev/null && [ -s "$HUB/hub/hub-state.json" ]; then
+    if cp "$HUB/hub/hub-state.json" "$OUT_DIR/hub-state.json.tmp" \
+       && mv -f "$OUT_DIR/hub-state.json.tmp" "$OUT_DIR/hub-state.json"; then
+      echo "hub: hub-state.json copiado junto a PROJECTS.md"
+    else
+      echo "hub: copia del sibling hub-state.json falló (no crítico)"
+    fi
+  else
+    echo "hub: pull del v2 falló — se renderiza con el sibling previo (no crítico)"
+  fi
+fi
+python3 "$DOTFILES/scripts/projects-html.py" "$OUT" >/dev/null 2>&1 || true
