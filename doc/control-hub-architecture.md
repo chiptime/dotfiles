@@ -46,6 +46,16 @@ Rejected alternatives:
 | **`~/hub` (local clone + `hub-session-close` skill)** | **Local agent layer**: every meaningful opencode session drops a session-close summary into `~/hub/hub/inbox/opencode/` and pushes (create-only, pathspec-scoped, pull --rebase first). First live item: `aaf4081` (2026-09-14) |
 | Morning-brief / weekly-review / drain-inbox | Consumers: read the vault, list pending triage, apply inbox items |
 
+**Cockpit único (direction set 2026-09-22):** the local dashboard at
+`127.0.0.1:47624/PROJECTS.html` becomes THE cockpit — the single work view,
+extended with the full hub discovery (Today, Needs decisions, Changes, Notion
+Tareas). It stays a read-only projection: every write flows through Gertru's
+validated contracts (clerk/inbox/Telegram). Voice entry lands as a mic button in
+the same view (browser `getUserMedia` → local whisper → Gertru-as-PM, single
+thread) — the stalled Electron voice app is NOT a prerequisite. `projects.json`
+is delivered directly into the vault inbox on every tracker regen (docker cp,
+2026-09-22 fix) so the hub receives the full local registry.
+
 **Task ingestion amendment (2026-09-15, SDD change `hub-task-sync`, archived at ai-stack
 `openspec/changes/archive/2026-09-15-hub-task-sync/`):** Gertru pulls BOTH Notion sources
 directly through her stdio MCP (personal Tareas DB + Clece Mantenimiento SIS, data source
