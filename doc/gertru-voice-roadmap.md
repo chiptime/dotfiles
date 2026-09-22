@@ -100,6 +100,16 @@ All phases below are **PROPOSED sequencing**. Exit evidence describes what a fut
 implementation must demonstrate, not tests already passed. Set measurable acceptance
 thresholds with the user after baseline measurement; all numeric thresholds are TBD.
 
+**Verified in code and live stack (2026-09-22 audit):** the existing voice-assistant
+already ships more than "proposed" implies — the F9 dictation path is real and
+measured (Electron → `:8000/transcribe` → faster-whisper `large-v3` CUDA float16 →
+stdio sidecar → clipboard paste; warm ~0.41s for a 4.12s clip, RTF ≈ 0.10), an F8
+`/agent` LLM orchestrator path exists in code, and an I4 conversation path exists
+behind flags (default off). Phases 1–3 below are therefore **harden/extend** work on
+shipped surfaces, not greenfield builds. The server-side baseline is recorded in
+Engram (`voice/fase0-baseline-2026-09`); host RAM/VRAM profiling, cold/warm start,
+and real-mic accuracy remain open Phase 0 items.
+
 ### Phase 0 — Establish the baseline and choose reuse deliberately
 
 **Value:** avoid a costly rewrite that merely recreates today's working dictation.
