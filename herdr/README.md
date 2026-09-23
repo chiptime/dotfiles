@@ -103,6 +103,16 @@ systemctl --user restart herdr-tts    # reiniciar daemon
 journalctl --user -u herdr-tts -f     # ver logs en vivo
 ```
 
+### La configuración crece contigo
+
+`herdr-tts` es progresivo: cada nivel funciona por sí solo y solo activas el siguiente cuando lo necesitas.
+
+1. **Cero configuración (Edge TTS)** — Instalas el plugin y ya suena: voces neuronales de Microsoft sin API keys, sin servicios que mantener (`herdr-tts --speak "Hola"` para probarlo).
+2. **Modelo de voz propio** — ¿Lo quieres 100% local? Cambias de motor sin tocar nada más: `herdr-tts --provider piper --piper-model <modelo.onnx>` (o ciclando `p` en ⚙️ Ajustes de voz). Edge (gratis) sigue siendo el default cero-config.
+3. **Notificaciones push** — Añades ntfy y el móvil recibe el aviso de cada agente (`herdr-tts --ntfy-topic <topic>`).
+4. **Audio en las notificaciones** — El push incrusta el `.mp3` con la voz hablada + enlace directo a Collie: escuchas al agente desde el móvil sin abrir nada.
+5. **Y después, incluso voz** — El horizonte es la conversación bidireccional: hablarle al agente (push-to-talk con Whisper) manteniendo el mismo modelo de configuración.
+
 ## Feedback por Voz (Neural TTS)
 
 Vocalización bajo demanda y automática de agentes con **Microsoft Edge Neural TTS + miniaudio + PulseAudio WSLg**. Diseñado para trabajar con múltiples chats en paralelo sin colisiones de voz.
@@ -125,8 +135,12 @@ herdr-tts --scope focused|all  # 'focused' (solo chat activo) | 'all' (cualquier
 herdr-tts --status             # Ver configuración, lock y estado (htts)
 herdr-tts --voice alvaro       # Cambiar a voz masculina
 herdr-tts --rate +25%          # Cambiar velocidad
+herdr-tts --auto-on            # Auto-lectura siempre (default): te lee al terminar cada agente
+herdr-tts --auto-off           # Solo manual: lanzas la voz con prefix+r / htr (persiste entre reinicios)
 herdr-tts --speak "Hola"       # Probar síntesis directa
 ```
+
+* **Auto-lectura configurable**: siempre (`--auto-on`) o solo cuando lo lanzas tú (`--auto-off`); también desde ⚙️ Ajustes de voz (tecla `v`), aplica al vuelo.
 
 ## Comandos útiles
 

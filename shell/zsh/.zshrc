@@ -57,6 +57,13 @@ PATH=~/.console-ninja/.bin:$PATH
 # opencode
 export PATH=/home/bruno/.opencode/bin:$PATH
 
+# Attach TUI al server persistente con el scope del directorio dado (default: pwd)
+oa() {
+  local dir="${1:-$PWD}"
+  dir="$(cd "$dir" && pwd)" || return 1
+  opencode attach http://localhost:4096 --dir "$dir"
+}
+
 # Configuraciones para un historial más seguro
 HISTSIZE=10000
 SAVEHIST=10000
@@ -382,3 +389,8 @@ export PATH="/home/bruno/.local/bin:$PATH"
 
 # OpenClaw Completion
 [ -f "/home/bruno/.openclaw/completions/openclaw.zsh" ] && source "/home/bruno/.openclaw/completions/openclaw.zsh"
+
+# herdr-automatic-rename: live tab naming hook
+for _f in $HOME/.config/herdr/plugins/github/herdr-automatic-rename-*/shell/hook.zsh(N); do
+  source $_f; break
+done

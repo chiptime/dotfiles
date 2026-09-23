@@ -7,7 +7,7 @@ Data source ID: `PENDING` — filled in by whichever session runs the Bootstrap 
 | Property | Type | Options |
 |---|---|---|
 | Título | title | — |
-| Proyecto | select | dotfiles, ai-stack, vps-hungry, recruiting-frontend, recruiting-backend, sis, odata-batch, compare-prices, voice-assistant, busqueda-vacaciones, otro/vida |
+| Proyecto | select | dotfiles, ai-stack, vps-hungry, recruiting-frontend, recruiting-backend, sis, odata-batch, compare-prices, voice-assistant, agent-tts, busqueda-vacaciones, otro/vida |
 | Prioridad | select | 🔥 Alta, 🟡 Media, 🟢 Baja |
 | Estado | select | 📥 Inbox, 🔨 En curso, ✅ Hecho, 🗑️ Descartado |
 | Notas | rich_text | free text, optional short context |
