@@ -8,5 +8,3 @@ ai/opencode-router/node_modules/
 ai/teams-to-tasks/node_modules/
 .playwright-mcp/
 .agy-attachments/
-modules/dotly
-modules/zsh-ai

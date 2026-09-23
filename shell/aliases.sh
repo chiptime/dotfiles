@@ -94,6 +94,19 @@ alias wt='cmd.exe /c start wt.exe -d .'
 
 # AI
 
+# Herdr
+alias h='herdr'
+alias ha='herdr agent list | jq -r ".result.agents[] | \"\\(.agent)\t\\(.agent_status)\t\\(.workspace_id)\""'
+alias hs='herdr status'
+alias hw='herdr-workspace'
+alias hn='herdr-ntfy'
+alias hsync='herdr-sync-opencode'
+alias htt='herdr-tts'
+alias htr='herdr-tts --toggle-play'
+alias htx='herdr-tts --stop'
+alias httt='herdr-tts --toggle-auto'
+alias htts='herdr-tts --status'
+
 # Codex personal (default, no necesita alias especial)
 # codex → usa ~/.codex automáticamente
 
@@ -101,6 +114,8 @@ alias wt='cmd.exe /c start wt.exe -d .'
 alias cxw='CODEX_HOME=~/.codex-work codex'
 
 # OpenCode Services
+alias oca='opencode attach http://localhost:4096'
+alias ocac='opencode attach http://localhost:4096 -c'
 alias ocr='systemctl --user restart opencode-web.service mobile-proxy.service && systemctl --user --no-pager status opencode-web.service mobile-proxy.service'
 alias ocs='systemctl --user --no-pager status opencode-web.service mobile-proxy.service'
 alias ocl='journalctl --user -u opencode-web.service -u mobile-proxy.service -f'

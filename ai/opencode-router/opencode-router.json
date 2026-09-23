@@ -10,7 +10,8 @@
 					"*": "deny",
 					"sdd-explore-fallback": "allow"
 				}
-			}
+			},
+			"model": "agy/gemini-3.8-flash"
 		},
 		"sdd-explore-fallback": {
 			"description": "Unchanged native SDD explore executor. Runs only when the router delegates approved unavailability (quota, transient, timeout). Denies task: no deeper nesting.",
@@ -22,7 +23,8 @@
 				"task": {
 					"*": "deny"
 				}
-			}
+			},
+			"model": "deepseek/deepseek-v4-pro-0813"
 		}
 	}
 }
