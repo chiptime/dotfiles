@@ -211,6 +211,147 @@ replace already overwrote is NOT detectable — an exclusive-writer
 window honored by all writers remains necessary and does not exist
 (see OPERATIONS.md). Nothing here performs network, GPU or service work.
 
+## Guided operation (`guided-run`)
+
+`src/tiktok_ingest/guided.py` adds ONE thin coordinator — not a
+framework, not a scheduler, no agent skill: it sequences the EXISTING
+stage functions for one operator-confirmed tanda behind explicit,
+per-window authorization, and derives all progress from the product's
+own manifests and fingerprints (no second state authority; the command
+persists nothing of its own).
+
+```bash
+# Plan only: selection + per-stage state, zero prompts, zero effects:
+python3 -m tiktok_ingest guided-run --collection "<url-or-key>" --dry-run
+python3 -m tiktok_ingest guided-run --ids <id>[,<id>...] --dry-run
+
+# Consent-gated execution (interactive terminal required):
+python3 -m tiktok_ingest guided-run --collection "<url-or-key>" [--limit N]
+python3 -m tiktok_ingest guided-run --ids <id>[,<id>...] \
+    [--synthesis <id>=<path>] [--synthesis <id>=<path> ...]
+```
+
+Selection rules (always recomputed from CURRENT state — a previously
+printed plan is never authority): plan mode takes `new_processable`
+items capped at the batch limit (default 5, hard maximum 5); explicit
+`--ids` accepts new and `partial_resumable` ids and rejects unknown,
+duplicated or over-cap selections; permanently blocklisted ids and ids
+already complete (emit fingerprint) are excluded with their reason and
+are never re-inferred implicitly.
+
+Consent windows, in order, each showing ids/destinations, operations,
+limits and effects BEFORE anything runs: tanda confirmation → network
+download of exactly the selected URLs → CPU preparation in the pinned
+container → GPU inference window (isolated Ollama lifecycle + gated
+vision, then audio through the shared whisper service) → verification
+retrieval of the EXACT `candidate_urls` recorded in the supplied
+synthesis documents. Denial, EOF, cancellation or a non-interactive
+environment stop without assuming consent; there is no global `--yes`;
+an authorization never persists into a later invocation. The GPU-window
+consent covers starting AND stopping the isolated Ollama server this
+command started (stop runs at window end or on failure); a preexisting
+server answering on the isolated port is never adopted, and whisper is
+never started, stopped or restored by this code (vision requires it
+stopped, audio requires it healthy — both preconditions surface as
+explicit blocks with resume instructions).
+
+The synthesis boundary is a hard stop: without `--synthesis ID=PATH`
+the run reports the `video.md`/`audio.md` paths and the exact resume
+command, and NEVER generates, edits or auto-fills a document
+(`synthesize --from-file` ingestion only; no model calls, no new
+credentials). Stage order is fixed: fetch → prepare → vision (all ids)
+→ verified unload → audio (all ids) → synthesis → verify; a fired gate
+or any non-complete vision outcome ends the GPU window for every
+remaining id (no auto-retry). Verify appends `pending` backlog entries
+exactly as the standalone stage does; guided-run never edits statuses
+or the blocklist and ends by referring to the backlog review CLI. Like
+every writer, it requires an exclusive-writer operational window (see
+OPERATIONS.md).
+
+## Phase 0 — One collection, one command (`collection-run`)
+
+Phase 0 adds ONE application command over the engine above. It
+coordinates; it implements no stage logic of its own (ROADMAP work
+packages 0.1–0.4; see `prds/PHASE-0-ONE-COMMAND-PRD.md`).
+
+```bash
+# Thin launcher (fail-fast, no logic, forwards args + exit code):
+./run-collection.sh "https://www.tiktok.com/@author/collection/name-id"
+# which dispatches to:
+python3 -m tiktok_ingest collection-run "<collection-url>" [--dry-run] \
+    [--limit N] [--declared-count N] [--end-evidence TEXT]
+```
+
+Journey: read-only preflight (dependencies, local state, exclusive
+writer, planned destinations) → headed Playwright browser with a
+DEDICATED run-scoped profile (the operator handles login/captcha by
+hand and explicitly confirms visibility — the browser controller
+exposes only open/read/close, so login automation is impossible by
+construction) → collection-scoped capture through the EXISTING
+`collection.py` contracts (recommendations counted, never items;
+declared/observed/end/access recorded separately; DOM change fails
+explicitly; audit HTML persisted) → browser closed and profile removed
+before any media work → batches of at most five through the EXISTING
+`guided-run` coordinator → automatic synthesis → bounded verification
+→ local `pending` backlog entries only.
+
+Key boundaries:
+
+- **Batches**: the plan is recomputed FRESH from current state before
+  every batch; `new_processable` + `partial_resumable` ids are
+  eligible, capped at 5; completed/rejected ids are skipped; a batch
+  that makes no NEW progress stops with a loop-guard reason instead of
+  re-asking forever. Progress reporting is a view derived from the
+  product's stores — never a second ledger.
+- **Whisper coordination** (`src/tiktok_ingest/whisper_lifecycle.py`):
+  when the known shared service (`voice-assistant-whisper`) is running,
+  collection-run verifies its identity/configuration BEFORE any consent,
+  then asks TWO separate windows BEFORE any mutation: `whisper-stop`
+  (bounded `podman stop --timeout 30`, positively verified) and a
+  STANDING `whisper-restore` authorization for the recovery of the SAME
+  service/configuration. Denial of either blocks BEFORE any mutation.
+  The restore runs under that prior authorization once the GPU window
+  ends — normally, on failure, or after an interruption (a Ctrl-C never
+  grants a window and never triggers a new prompt) — UNLESS the
+  interruption lands inside the stop itself: then the stop result is
+  UNKNOWN, no restore is attempted (the stop cannot be verified as
+  ours/completed) and manual verification of the exact service is
+  required. In every restore that does run: SAME container,
+  identity/config verification, health check before audio. A failed
+  restore/health — or an interruption leaving the restore incomplete —
+  blocks ALL further progress, reports the actual partial state and
+  promises no rollback. Standalone `guided-run` keeps its documented
+  behavior (whisper operator-managed, blocks with instructions).
+- **Automatic synthesis** (`src/tiktok_ingest/synthesis_api.py`): ONE
+  OpenAI-compatible adapter (`POST {base}/chat/completions`) configured
+  ONLY through the documented environment variables
+  `TIKTOK_INGEST_TEXT_API_BASE_URL`, `TIKTOK_INGEST_TEXT_API_KEY`,
+  `TIKTOK_INGEST_TEXT_MODEL` (optional
+  `TIKTOK_INGEST_TEXT_API_TIMEOUT_SECONDS`, default 120). Values are
+  never persisted and are scrubbed from every error. The request
+  carries ONLY evidence text derived from `video.md`/`audio.md`
+  (paths and credential-looking strings stripped, per-modality cap);
+  tools, provider-side retrieval and command execution are disabled
+  (`tools: []`, `tool_choice: "none"`); structured JSON is requested.
+  The result is a CANDIDATE only: it is persisted solely through the
+  existing `run_synthesis_stage` validation (`SynthesisDocument`
+  contract + credential scrub + resume fingerprint). Timeout, refusal,
+  malformed output, denial or missing configuration are RESUMABLE
+  synthesis stops — completed vision/audio are never repeated and no
+  classification is ever manufactured.
+- **Consent**: every effect sits behind its own window (browser,
+  browser-confirm, tanda, fetch, prepare, gpu, whisper-stop,
+  whisper-restore, synthesis-api, verify), each naming exact
+  ids/destinations/operations/limits/effects. Denial/EOF/non-TTY/Ctrl-C
+  stop without assuming consent; there is no global `--yes`; a grant
+  never persists into a later window, batch or invocation.
+- **Dry run**: `--dry-run` prints preflight + the document-only plan
+  with zero browser, zero network, zero containers, zero GPU, zero API
+  calls and zero writes.
+
+Exit codes: 0 success; 1 failures/interruption/hard blocks; 2 usage
+errors (invalid or missing URL rejected BEFORE any effect).
+
 ## Collection inventory (offline core)
 
 `src/tiktok_ingest/collection.py` implements the offline half of the
@@ -321,6 +462,18 @@ python3 -m tiktok_ingest backlog-show <id>
 python3 -m tiktok_ingest backlog-decide <id> --decision accepted --decisions-file d.jsonl
 python3 -m tiktok_ingest backlog-plan --decisions-file d.jsonl
 python3 -m tiktok_ingest backlog-apply --decisions-file d.jsonl
+
+# 9. Guided coordination of one tanda through the stages above
+#     (consent-gated; see "Guided operation (guided-run)"):
+python3 -m tiktok_ingest guided-run --collection "<url-or-key>" --dry-run
+python3 -m tiktok_ingest guided-run --collection "<url-or-key>"
+python3 -m tiktok_ingest guided-run --ids <id>[,<id>...] --synthesis <id>=<path>
+
+# 10. Phase 0 one-command journey (browser inventory + batches +
+#     automatic synthesis + pending delivery; see "Phase 0 — One
+#     collection, one command"):
+./run-collection.sh "<collection-url>"
+python3 -m tiktok_ingest collection-run "<collection-url>" --dry-run
 ```
 
 Every command accepts `--state-root` (default
@@ -352,14 +505,14 @@ network, GPU, podman, ollama or model weights. Every external boundary
 - **M5 — Small pilot and handoff:** operator-selected clips, acceptance
   results, operational instructions for a real authorized run.
 
-Also not implemented in this batch: the LIVE browser collection scan —
-the offline collection-inventory core now exists (see "Collection
-inventory (offline core)"), but capturing page snapshots still requires
-the operator's separately authorized browser session, and enumeration
-never authorizes downloads or inference. GPU inference commands and
-resource gates exist, but the fixture suite does not exercise real GPU
-work. Running those commands requires separate operator authorization;
-adjacent workloads must not be stopped implicitly.
-Synthesis is never performed by this pipeline itself: the operator (or
-an out-of-band model run they authorize) supplies the document via
-`--from-file`, and the pipeline only validates, scrubs and persists it.
+Also not exercised yet: the REAL trial of the Phase 0 command — the
+live browser scan, automatic synthesis against a configured text API,
+whisper stop/restore coordination and the whole one-command journey
+exist and are fixture-tested (see "Phase 0 — One collection, one
+command"), but running them for real requires separate operator
+authorization per the Phase 0 PRD. GPU inference commands and resource
+gates exist, but the fixture suite does not exercise real GPU work.
+Adjacent workloads must not be stopped implicitly. Synthesis through
+`guided-run` remains operator-supplied (`--from-file`); only
+`collection-run` adds the automatic OpenAI-compatible adapter, and its
+output still passes the same strict validation.

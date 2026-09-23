@@ -50,9 +50,28 @@ Subcommands:
   changes, expected per-entry and whole-file hashes, blocklist
   additions and conflicts. Writes nothing.
 - ``backlog-apply``      apply ONLY explicit, still-current decisions
-  with verified exclusive backups, fail-safe write ordering
-  (blocklist before backlog), a receipt and post-write verification.
-
+                         with verified exclusive backups, fail-safe write
+                         ordering (blocklist before backlog), a receipt
+                         and post-write verification.
+- ``guided-run``        consent-gated coordination of the existing
+                         stages for one tanda (plan-driven or explicit
+                         IDs): fetch -> prepare -> vision -> audio ->
+                         synthesis ingestion -> verify, with a SEPARATE
+                         authorization window before each effectful
+                         phase, a hard stop at the synthesis boundary
+                         when no document was supplied, and no writes of
+                         its own. Never starts anything without its
+                         window; ``--dry-run`` only prints the plan.
+- ``collection-run``    Phase 0 one-command journey for ONE collection
+                         URL: headed run-scoped browser inventory
+                         (operator handles login/captcha and confirms
+                         visibility), batches of at most five through
+                         the guided coordinator, automatic synthesis via
+                         ONE OpenAI-compatible adapter (env-configured),
+                         bounded whisper stop/restore coordination, and
+                         local PENDING backlog entries only. Invalid or
+                         missing URLs are rejected before any effect;
+                         ``--dry-run`` prints preflight + plan only.
 Every state-touching command accepts ``--state-root`` (default
 ``~/.local/state/tiktok-ingest/``) so tests and dry inspection can point
 at a scratch location. No subcommand stops services, browsers, downloads
@@ -81,6 +100,7 @@ from .collection import (
 )
 from .contracts import BACKLOG_STATUSES, utc_now_iso
 from .extractor import ExtractorError
+from .guided import GuidedError, parse_synthesis_args, run_guided
 from .ollama_runtime import (
     OllamaRuntimeError,
     import_model,
@@ -568,6 +588,131 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_state_root(backlog_apply)
 
+    guided = subparsers.add_parser(
+        "guided-run",
+        help="consent-gated guided coordination of one tanda through the "
+        "existing stages",
+        description=(
+            "A thin coordinator, NOT a new framework: sequences the "
+            "existing fetch -> prepare -> vision -> audio -> synthesis "
+            "(--from-file ingestion) -> verify stages for one operator-"
+            "confirmed tanda (batch cap 5). Every effectful phase asks "
+            "its own explicit authorization window first (tanda, network "
+            "download, CPU container, GPU + isolated Ollama cycle, "
+            "verification retrieval of the exact candidate URLs); denial, "
+            "EOF or a non-interactive environment stops without assuming "
+            "consent. Progress is derived from the product's own "
+            "manifests/fingerprints; this command keeps no second state "
+            "and writes nothing of its own. The synthesis boundary is a "
+            "hard stop: without --synthesis ID=PATH it reports the "
+            "video.md/audio.md paths and how to resume; it NEVER "
+            "generates content. Whisper stays operator-managed (vision "
+            "needs it stopped, audio needs it healthy); the isolated "
+            "Ollama server is started only inside the consented GPU "
+            "window and stopped at window end or failure. Backlog "
+            "entries are appended as pending by verify only; review "
+            "stays with backlog-list/show/decide/plan/apply."
+        ),
+    )
+    guided.add_argument(
+        "--collection",
+        default=None,
+        metavar="URL_OR_KEY",
+        help="collection URL or 16-hex key with persisted scan state; "
+        "plan-driven selection takes the new_processable items (capped)",
+    )
+    guided.add_argument(
+        "--ids",
+        default=None,
+        metavar="ID[,ID...]",
+        help="explicit video IDs (new or partial-resumable); unknown or "
+        "ambiguous IDs are rejected",
+    )
+    guided.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"batch cap for the selection (1..{config.BUDGETS.batch_pilot_clips}; "
+        f"default {config.BUDGETS.batch_pilot_clips})",
+    )
+    guided.add_argument(
+        "--synthesis",
+        action="append",
+        default=None,
+        metavar="ID=PATH",
+        help="operator-authored synthesis document for one ID of this "
+        "tanda (repeatable); validated and persisted by the existing "
+        "synthesize stage — no model calls, nothing generated",
+    )
+    guided.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the selection and per-stage plan only: zero prompts, "
+        "zero writes, zero network/GPU work",
+    )
+    add_state_root(guided)
+
+    collection_run = subparsers.add_parser(
+        "collection-run",
+        help="Phase 0 one-command journey: browser inventory -> batches "
+        "through the guided coordinator -> automatic synthesis -> local "
+        "pending entries",
+        description=(
+            "One command takes a single TikTok collection URL through a "
+            "headed, run-scoped Playwright browser inventory (operator "
+            "handles login/captcha and explicitly confirms visibility), "
+            "then processes eligible items in batches of at most five "
+            "through the EXISTING consent-gated stages (fetch -> prepare "
+            "-> vision -> audio -> synthesis -> verify). Synthesis is "
+            "automatic through ONE OpenAI-compatible text API configured "
+            "by TIKTOK_INGEST_TEXT_API_BASE_URL/_API_KEY/_MODEL and "
+            "always validated by the existing strict document contract. "
+            "The known shared whisper service may be stopped for vision "
+            "and restored for audio, each only after identity "
+            "verification and explicit consent. Output is local pending "
+            "backlog entries only; review stays with the backlog CLI. "
+            "Invalid or missing URLs are rejected before any effect."
+        ),
+    )
+    collection_run.add_argument(
+        "collection_url",
+        metavar="COLLECTION_URL",
+        help="canonical https://www.tiktok.com/@<author>/collection/<slug> "
+        "(or /playlist/<slug>) URL",
+    )
+    collection_run.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"per-batch cap (1..{config.BUDGETS.batch_pilot_clips}; default "
+        f"{config.BUDGETS.batch_pilot_clips})",
+    )
+    collection_run.add_argument(
+        "--declared-count",
+        type=int,
+        default=None,
+        metavar="N",
+        help="declared item count observed in the browser (optional honest "
+        "evidence; recorded separately from the observed count)",
+    )
+    collection_run.add_argument(
+        "--end-evidence",
+        default=None,
+        metavar="TEXT",
+        help="end-of-list evidence text observed in the browser (optional; "
+        "completeness is only ever claimed from recorded evidence)",
+    )
+    collection_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the preflight and the document-only plan: zero browser, "
+        "zero network, zero containers, zero GPU, zero API calls, zero "
+        "writes",
+    )
+    add_state_root(collection_run)
+
     return parser
 
 
@@ -791,6 +936,48 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(summary, indent=2, ensure_ascii=False))
             return 0
 
+        if args.command == "guided-run":
+            if args.collection is None and args.ids is None:
+                print(
+                    "guided-run: --collection and/or --ids is required",
+                    file=sys.stderr,
+                )
+                return 2
+            ids = (
+                [part for part in args.ids.split(",")]
+                if args.ids is not None
+                else None
+            )
+            synthesis = parse_synthesis_args(args.synthesis or [])
+            exit_code, report = run_guided(
+                state=state,
+                collection=args.collection,
+                ids=ids,
+                limit=args.limit,
+                synthesis=synthesis,
+                dry_run=args.dry_run,
+            )
+            print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+            return exit_code
+
+        if args.command == "collection-run":
+            from .collection_run import CollectionRunError, run_collection
+
+            try:
+                exit_code, report = run_collection(
+                    collection_url=args.collection_url,
+                    state=state,
+                    dry_run=args.dry_run,
+                    limit=args.limit,
+                    declared_count=args.declared_count,
+                    end_evidence=args.end_evidence,
+                )
+            except CollectionRunError as exc:
+                print(f"collection-run: {exc}", file=sys.stderr)
+                return 2
+            print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+            return exit_code
+
     except ReviewError as exc:
         print(f"review error: {exc}", file=sys.stderr)
         return 2
@@ -824,6 +1011,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except CollectionError as exc:
         print(f"collection error: {exc}", file=sys.stderr)
+        return 2
+    except GuidedError as exc:
+        print(f"guided-run: {exc}", file=sys.stderr)
         return 2
     except (ConnectionError, OSError) as exc:
         print(f"whisper transport error: {exc}", file=sys.stderr)

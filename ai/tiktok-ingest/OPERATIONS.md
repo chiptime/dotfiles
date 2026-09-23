@@ -318,6 +318,8 @@ also accept `--share-root`. Verified command set:
 | `backlog-decide <id> --decision D [--reason R] --decisions-file F` | Record one explicit operator decision (versioned JSONL) |
 | `backlog-plan --decisions-file F` | Dry run with IDs, changes and expected hashes |
 | `backlog-apply --decisions-file F` | Apply explicit, still-current decisions (verified backups, receipt, idempotent) |
+| `guided-run` | Consent-gated coordination of one tanda through the existing stages (see section 8) |
+| `collection-run <url>` | Phase 0 one-command journey: browser inventory → guided batches → automatic synthesis → pending entries (see section 9) |
 
 `verify --force` re-runs verification when fingerprints match; backlog
 appends remain duplicate-guarded (see section 4). `synthesize --force`
@@ -347,8 +349,44 @@ defects.
 
 ## 7. What is tested and what is not
 
-Tested (582 tests in the 2026-09-21 local preflight, fixture-only,
-zero network/GPU/podman/ollama):
+Tested (720 tests in the 2026-09-23 local run, fixture-only, zero
+network/GPU/podman/ollama):
+
+- The Phase 0 application layer with every external boundary doubled:
+  the `collection-run` batch loop (fresh recomputation per batch, cap
+  5, exclusion of completed/rejected ids, resume without stage
+  repetition, loop-guard on no progress, second run with zero
+  re-processing and zero duplicate entries), the browser boundary
+  (run-scoped profile created/removed, explicit visibility
+  confirmation, denial/EOF paths that capture nothing, no
+  login-automation surface, container-scoped capture with
+  recommendations excluded, DOM change failing explicitly with the
+  audit HTML preserved, honest close/cleanup reporting on success,
+  error and Ctrl-C), the OpenAI-compatible synthesis adapter (env
+  configuration with names-only diagnostics, path/secret scrubbing of
+  the outbound payload, tools/retrieval disabled in the request,
+  single-attempt semantics, timeout/refusal/malformed resumable stops,
+  results persisted only through the real strict validation), the
+  whisper lifecycle (identity verification before consent and before
+  any mutation, verified stop, same-service restore with
+  config/health checks, fail-closed reporting without rollback
+  promises), the whisper stop→vision→restore→health→audio ordering,
+  and the launcher (usage, forwarding, exit codes, no secrets, no
+  installs).
+
+- The guided-run coordinator with stage doubles and scripted consent:
+  selection from plan and explicit ids, batch cap and its hard errors,
+  exclusion of blocked/photo/complete ids, freshness against current
+  state, zero prompts/calls on dry run and on every denial path
+  (including EOF and non-interactive stdin), window contents naming
+  exactly the ids/destinations of that invocation, vision → verified
+  server stop → audio ordering, whisper-running blocking vision before
+  any load, preexisting Ollama never adopted, gate/error ending the GPU
+  window without retry, interrupt and failed-cleanup paths (audio
+  blocked after a failed server stop), the synthesis boundary (missing,
+  malformed and valid documents; exact candidate-URL consent), pending
+  entries left untouched, resume reusing complete stages without
+  repetition, and CLI wiring/exit codes.
 
 - The full verdict matrix including the rules-v2 identity separation
   (identified-without-URLs → `unverifiable`/`no_candidate_urls`;
@@ -373,3 +411,189 @@ Not tested by the suite (by design): real extraction against TikTok, real
 GPU inference, real whisper service, the live browser scan, and any
 end-to-end run with real state. Those require separate operator
 authorization per the MVP-PRD and remain manual procedures.
+
+## 8. Guided runs (`guided-run`)
+
+`guided-run` coordinates the existing stages for one tanda; it adds no
+new stage logic, keeps no state of its own and writes nothing directly
+(every write still comes from the existing stage functions). The
+persisted manifests and fingerprints remain the ONLY authority: the
+report it prints is a summary, never a second ledger.
+
+### Selection and freshness
+
+- `--collection` selects the plan's `new_processable` items, capped at
+  the batch limit (default 5, hard maximum 5; remaining items stay
+  pending for a later batch).
+- `--ids` selects explicit new or `partial_resumable` ids. Unknown,
+  duplicated or over-cap selections are hard errors; blocklisted ids
+  and ids with an emit fingerprint (already complete) are excluded with
+  their reason — complete stages are reused, never re-inferred.
+- Classification is ALWAYS recomputed at invocation time against the
+  current blocklist/processed stores: a plan printed earlier is a
+  document, not authority over state that has since changed.
+
+### Authorization windows (in order; each shows ids, destinations,
+operations, limits and effects before anything runs)
+
+1. **Tanda confirmation** — the exact id list; nothing runs without it.
+2. **Network download** — the selected canonical URLs, through the
+   gated pinned extractor; gate failures are final (`blocked`).
+3. **CPU preparation** — the pinned container, per-clip budgets.
+4. **GPU window** — isolated Ollama lifecycle + gated vision for all
+   pending ids, then audio through the shared whisper service. The
+   consent explicitly covers STARTING and STOPPING the isolated server
+   this run started (stop runs at window end or on failure, so an
+   authorized window never leaves a loaded server waiting on another
+   answer). A server already answering on the isolated port is NEVER
+   adopted (identity/scope cannot be verified from outside) — stop it
+   explicitly and re-invoke. Gates are the existing ones, unweakened:
+   ≥20 GiB free VRAM before every Qwen load, ≤512 MiB swap delta per
+   phase, zero CPU offload, a fired gate is FINAL for the window.
+5. **Verification retrieval** — asked ONLY after the real
+   `candidate_urls` of the supplied synthesis documents are known; the
+   window lists exactly those URLs.
+
+Denial, EOF, Ctrl-C or a non-interactive environment stop without
+assuming consent (only a literal `yes` grants a window; there is no
+global `--yes`). An authorization NEVER persists: every invocation and
+every window asks again.
+
+### Whisper (operator-managed, unchanged)
+
+Vision requires the whisper service STOPPED: if it is running, the GPU
+window reports the requirement and stops BEFORE any model load. Audio
+requires it healthy: after visions complete (each vision stage verifies
+its own unload — empty residency plus observed GPU release — before
+the next phase), a whisper health precheck runs; if unhealthy, every
+pending audio id is `blocked` with the resume instruction (start the
+service explicitly, then re-invoke; completed visions are reused with
+zero re-inference). guided-run never starts, stops or restores whisper.
+
+### Synthesis boundary (hard stop)
+
+`synthesize --from-file` is validated-document ingestion ONLY. Without
+`--synthesis ID=PATH` the run ends each completed video in a
+`waiting_for_synthesis` state, reporting the `video.md`/`audio.md`
+paths and the exact resume command. Documents are never generated,
+edited or auto-filled; no text-model calls or credentials exist here. A
+malformed document is a per-id `failed` outcome and no verify consent
+is asked for that id.
+
+### Failure, cleanup and resume policy
+
+Simple and conservative: network/CPU failures are per-id (other ids
+continue); ANY non-complete vision outcome (fired gate, error,
+interrupt) ends the GPU window for every remaining id — no further GPU
+load this invocation, no auto-retry. If the isolated-server stop fails,
+audio is NOT attempted: the run says so explicitly and names the PID
+file. Ctrl-C passes through the applicable cleanup (the server this run
+started is stopped); partial results are preserved by the stages
+themselves. An abrupt kill cannot guarantee cleanup: recover from the
+evidence of the real state (`status`, the PID file at
+`~/.local/share/tiktok-ingest/ollama/ollama.pid`, stage fingerprints) —
+never from a promise. Re-invoking requires NEW authorization for the
+pending operations.
+
+### Reporting and backlog
+
+The report keeps stage outcomes separate from claim verdicts (section
+2: stage `complete` is NOT claim `confirmed`). Verify appends `pending`
+entries exactly as the standalone stage does (duplicate-guarded);
+guided-run never accepts/rejects entries, never writes the blocklist,
+and never runs `backlog-apply`. After a run, review with the existing
+CLI: `backlog-list` → `backlog-show` → `backlog-decide` →
+`backlog-plan` → `backlog-apply`.
+
+### Concurrency
+
+There is still no product-wide lock. guided-run is a writer like any
+other (through the stage functions) and the review CLI rewrites
+backlog/blocklist files: run them in an EXCLUSIVE-writer operational
+window — never concurrently with each other or with a verify emission.
+A partial lock taken only by guided-run would be a false guarantee, so
+none was added.
+
+## 9. Phase 0 one-command runs (`collection-run`)
+
+`./run-collection.sh "<collection-url>"` (a thin fail-fast launcher)
+dispatches to `python3 -m tiktok_ingest collection-run <url>`. The
+command coordinates the existing engine; it adds no stage logic and no
+second state.
+
+### What happens, in order
+
+1. **Preflight (read-only)**: Playwright availability (never
+   installed by this pipeline), text-API configuration presence
+   (missing env NAMES only, never values), current scan state, the
+   exclusive-writer requirement and the planned destinations of the
+   run.
+2. **Browser inventory**: a headed Chromium through Playwright with a
+   DEDICATED run-scoped profile (never your default profile or ambient
+   sessions). You handle login/captcha manually — the controller can
+   only open/read/close, so automation of login is impossible — and
+   confirm explicitly that the collection is visible. The capture
+   applies the existing collection contracts: recommendations are
+   counted, never items; declared/observed/end/access evidence is
+   recorded separately; a changed DOM fails explicitly; the HTML is
+   persisted under `<state>/collections/<key>-captures/` for audit.
+   The browser closes and the profile is removed BEFORE any media
+   work. An abrupt kill cannot guarantee cleanup: recover from real
+   state, never from a promise.
+3. **Batches**: the plan is recomputed FRESH before every batch;
+   `new_processable` and `partial_resumable` ids are eligible in
+   batches of at most five; completed and blocklisted ids are skipped.
+   Each batch is a full `guided-run` invocation (section 8): every
+   effectful phase asks its own window again — a grant never carries
+   over. A batch that makes no NEW progress stops with a loop-guard
+   reason instead of re-asking.
+4. **Automatic synthesis**: configured ONLY via
+   `TIKTOK_INGEST_TEXT_API_BASE_URL`, `TIKTOK_INGEST_TEXT_API_KEY`,
+   `TIKTOK_INGEST_TEXT_MODEL` (optional
+   `TIKTOK_INGEST_TEXT_API_TIMEOUT_SECONDS`, default 120 s). Values
+   are never persisted and are scrubbed from errors. One
+   OpenAI-compatible request per id, tools/retrieval/execution
+   disabled, structured JSON requested, carrying only sanitized
+   `video.md`/`audio.md` text. The response is a CANDIDATE document:
+   it is persisted only after passing the existing strict
+   `SynthesisDocument` validation and credential scrub. Timeout,
+   refusal, malformed output, denial or missing configuration are
+   resumable synthesis stops — vision/audio are never repeated.
+5. **Verification and delivery**: exactly the validated document's
+   `candidate_urls`, after showing them; entries are appended as
+   `pending` only; review stays with `backlog-list` →
+   `backlog-show` → `backlog-decide` → `backlog-plan` →
+   `backlog-apply`.
+
+### Whisper coordination (collection-run only)
+
+If the known shared service `voice-assistant-whisper` is running when
+vision needs the GPU, collection-run verifies its identity and
+configuration BEFORE asking anything, then asks TWO separate windows
+BEFORE any mutation: the `whisper-stop` window (bounded `podman stop
+--timeout 30`, positively verified — no arbitrary or unidentified
+workload is ever stopped) and a STANDING `whisper-restore`
+authorization for the recovery of the SAME service/configuration.
+Denial of either blocks BEFORE any mutation (no stop happens). The
+restore then runs under that prior authorization once the GPU window
+ends — normally, on failure, or after an interruption (Ctrl-C, which
+itself never grants anything and never triggers a new prompt) —
+UNLESS the interruption lands inside the stop itself: then the stop
+result is UNKNOWN, NO restore is attempted (it cannot be verified that
+the stop was ours/completed) and manual verification/recovery of the
+exact service is required. In every restore that does run, the SAME
+container is started, identity/configuration are verified, and health
+is validated before any audio work. A failed restore or health
+check — or an interruption that leaves the restore incomplete — blocks
+ALL further progress, reports the actual partial service state with
+recovery instructions and promises no rollback. Standalone
+`guided-run` keeps its documented behavior (whisper operator-managed;
+blocks with instructions).
+
+### Exit codes
+
+`0` success · `1` failures, interruption or hard blocks · `2` usage
+errors (invalid/missing URL is rejected before any effect).
+
+`--dry-run` prints preflight plus the document-only plan with zero
+browser, network, container, GPU, API or write activity.
