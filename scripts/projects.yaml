@@ -26,8 +26,8 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr — HT-02 voces por chat en main (voices.json, --voice-for, prefijo hablado), Ajustes en submenús de dos niveles (índice v/a/n/l con 4 categorías y los 15 knobs ciclando) también en main, daemon supervisado, dashboard v3.1 / paleta fzf / menú de voz, push ntfy con audio, CLI contract v1 para consumidores externos
-  next: roadmap P1 en docs/prds/README.md — HT-11 audición de voces + HT-04→HT-05; SDD change settings-category-submenus verificado (PASS, 631/631) pendiente de archive opcional; HT-01 push-to-talk postergado a P4
+  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor en main (catálogos provider/voices desde voice list --json con kokoro, --probe, retención exportada al core, podcast por API pública con argv, parser IPC único, sin fallbacks de voces), HT-02 voces por chat, Ajustes en submenús de dos niveles, daemon supervisado, dashboard v3.1 / paleta fzf / menú de voz, push ntfy con audio, CLI contract v1
+  next: migrar parseo de status IPC del host a --ipc-json del motor; cerrar y pushear el WIP vivo de la sesión paralela (packaging/, popups settings, openspec settings-category-submenus); HT-11 audición de voces (P1)
 
 herdr-brain:
   scope: personal
@@ -38,8 +38,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Capa de voz universal para agentes CLI (v0.3.0) — Kokoro real verificado E2E (input_ids/rank/f32 negotiation, variante quantized opt-in, IPA español 100%), audio_store con retención opt-in (default 0) + persistencia de streaming (--stream --output y auto-store), --play-file con targets remotos (wsl-ps/winhost/windows), redact.py, --llm-summary, transportes Windows, CI ubuntu+windows experimental
-  next: publicar 3 commits en main; paquete P1 = AT-04+AT-08 (daemon persistente dueño de la cola, docs/prds/); luego AT-03 recortada (verificar opencode web) y P3: AT-07→AT-06→AT-01; revisar resultados del CI Windows
+  desc: Capa de voz universal para agentes CLI (v0.3.0) — core purificado (cero rutas de host en src/) con API pública estable en main (audio_store, audio_duration, provider_names/provider_voices, ipc_reply_json, main), --probe y voice list --json para hosts bash, --ipc-json, Kokoro real verificado E2E, audio_store retención opt-in, streaming pipelined, --play-file con targets remotos, redact.py, --llm-summary, transportes Windows
+  next: tag/release 0.3.x con la API pública verificada; paquete P1 = AT-04+AT-08 (daemon persistente dueño de la cola, docs/prds/); luego AT-03 recortada (verificar opencode web) y P3: AT-07→AT-06→AT-01; subir docs/prds/ (8 PRDs sin trackear)
 
 compare-prices:
   scope: personal
