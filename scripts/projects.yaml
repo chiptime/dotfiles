@@ -32,8 +32,8 @@ herdr-tts:
 herdr-brain:
   scope: personal
   status: active
-  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, botón replay TTS, picker de conversaciones estilo Collie en header (sheet con estado por agente + Nueva conversación etiquetada, herd-strip eliminado) y working agreement en el prompt LLM
-  next: verificar en móvil el picker de conversaciones del header (los 7 agentes visibles en el sheet); Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts para render/status/gate); prueba real en cocina con motor Navegador y decidir motor por defecto; decidir remote para master (repo sin origin, commits hasta 1cbeac4 solo locales)
+  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, botón replay TTS, picker de conversaciones estilo Collie en header, working agreement en el prompt LLM; fix de duplicación de voz (mergeOverlap dedupea Chrome growing finals, 4b26fd8 en origin)
+  next: verificar en móvil el fix de duplicación (recarga PWA y dictar prueba); PRD de la escucha (STT duplica palabras) quedó pendiente sin respuesta en sesión HT-14; defectos de anuncios vistos en capturas (texto truncado a mitad de palabra + botones Escuchar superpuestos); WIP sin commitear de conv-sheet (app.js, index.html, tools.py, transcripts.py, watcher.py + tests); Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts); prueba real en cocina con motor Navegador y decidir motor por defecto
 
 agent-tts:
   scope: personal
