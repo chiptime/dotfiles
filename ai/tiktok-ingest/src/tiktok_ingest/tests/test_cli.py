@@ -44,8 +44,41 @@ class ParserTests(unittest.TestCase):
                 "backlog-decide",
                 "backlog-plan",
                 "backlog-apply",
+                "guided-run",
+                "collection-run",
             },
         )
+
+    def test_collection_run_parses_url_and_flags(self) -> None:
+        args = self.parser.parse_args(
+            [
+                "collection-run",
+                "https://www.tiktok.com/@user/collection/slug-1",
+                "--dry-run",
+                "--limit",
+                "3",
+                "--declared-count",
+                "7",
+                "--end-evidence",
+                "end of list",
+                "--state-root",
+                "/tmp/state",
+            ]
+        )
+        self.assertEqual(args.command, "collection-run")
+        self.assertEqual(
+            args.collection_url, "https://www.tiktok.com/@user/collection/slug-1"
+        )
+        self.assertTrue(args.dry_run)
+        self.assertEqual(args.limit, 3)
+        self.assertEqual(args.declared_count, 7)
+        self.assertEqual(args.end_evidence, "end of list")
+
+    def test_collection_run_missing_url_is_a_usage_error(self) -> None:
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(stderr):
+            self.parser.parse_args(["collection-run"])
+        self.assertEqual(ctx.exception.code, 2)
 
     def test_milestone_3_commands_parse(self) -> None:
         args = self.parser.parse_args(
@@ -211,6 +244,55 @@ class Milestone3DispatchTests(unittest.TestCase):
         with mock.patch("tiktok_ingest.cli.run_vision_stage", return_value=outcome):
             code, _ = self._main(["vision", "123", "--state-root", str(self.state_root)])
         self.assertEqual(code, 1)
+
+
+class CollectionRunDispatchTests(unittest.TestCase):
+    """collection-run dispatch: URL validation before any effect."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.state_root = str(Path(self.tmp.name) / "state")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _main(self, argv: list[str]) -> tuple[int, str]:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = main(argv)
+        return code, stdout.getvalue()
+
+    def test_invalid_url_exits_two_without_effects(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code, _ = self._main(
+                [
+                    "collection-run",
+                    "https://www.tiktok.com/@user/video/123",
+                    "--state-root",
+                    self.state_root,
+                ]
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("collection error", stderr.getvalue())
+        self.assertFalse(Path(self.state_root).exists())
+
+    def test_dry_run_valid_url_exits_zero(self) -> None:
+        code, printed = self._main(
+            [
+                "collection-run",
+                "https://www.tiktok.com/@user/collection/slug-1",
+                "--dry-run",
+                "--state-root",
+                self.state_root,
+            ]
+        )
+        self.assertEqual(code, 0)
+        document = json.loads(printed)
+        self.assertEqual(document["mode"], "dry-run")
+        self.assertIn("preflight", document)
+        # Dry run writes nothing: the state root is never created.
+        self.assertFalse(Path(self.state_root).exists())
 
 
 if __name__ == "__main__":  # pragma: no cover
