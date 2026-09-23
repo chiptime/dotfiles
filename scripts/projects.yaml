@@ -26,14 +26,14 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-02 voces por chat, Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio, CLI contract v1; distribución completa (instalador 1 línea, skill install para Claude Code/OpenCode/Codex/Pi, wrapper npm, fórmula Homebrew) y UI inglés-first con idioma configurable (HERDR_TTS_LANG, ciclo desde popup), suite 694/0
+  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-02 voces por chat, Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio, CLI contract v1; distribución completa (instalador 1 línea, skill install para Claude Code/OpenCode/Codex/Pi, wrapper npm, fórmula Homebrew) y UI inglés-first con idioma configurable (HERDR_TTS_LANG, ciclo desde popup), suite 694/0; loading "Transcribiendo" al escuchar en menú y lectura
   next: cortar release v0.17 (bump + CHANGELOG); publicar npm y crear tap Homebrew (steps en packaging/); migrar parseo de status IPC del host a --ipc-json del motor; HT-11 audición de voces (P1)
 
 herdr-brain:
   scope: personal
   status: active
-  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, botón replay TTS, picker de conversaciones estilo Collie en header, working agreement en el prompt LLM; fix de duplicación de voz (mergeOverlap dedupea Chrome growing finals, 4b26fd8 en origin)
-  next: verificar en móvil el fix de duplicación (recarga PWA y dictar prueba); PRD de la escucha (STT duplica palabras) quedó pendiente sin respuesta en sesión HT-14; defectos de anuncios vistos en capturas (texto truncado a mitad de palabra + botones Escuchar superpuestos); WIP sin commitear de conv-sheet (app.js, index.html, tools.py, transcripts.py, watcher.py + tests); Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts); prueba real en cocina con motor Navegador y decidir motor por defecto
+  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, picker de conversaciones estilo Collie en header, working agreement en el prompt LLM; escuchar por turno con loading "Sintetizando", avisos cortos hablados con digest bajo demanda, turnos completos (join multi-part + coalescido), 2f37f2b en origin
+  next: verificar en móvil los fixes de voz de esta sesión (recarga PWA: loading, avisos cortos, texto completo con ver más); verificar fix de duplicación (dictar prueba); PRD de la escucha (STT duplica palabras) quedó pendiente sin respuesta en sesión HT-14; Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts); prueba real en cocina con motor Navegador y decidir motor por defecto
 
 agent-tts:
   scope: personal
