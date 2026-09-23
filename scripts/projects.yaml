@@ -32,8 +32,8 @@ herdr-tts:
 herdr-brain:
   scope: personal
   status: active
-  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, picker de conversaciones estilo Collie en header, working agreement en el prompt LLM; escuchar por turno con loading "Sintetizando", avisos cortos hablados con digest bajo demanda, turnos completos (join multi-part + coalescido), 2f37f2b en origin
-  next: verificar en móvil los fixes de voz de esta sesión (recarga PWA: loading, avisos cortos, texto completo con ver más); verificar fix de duplicación (dictar prueba); PRD de la escucha (STT duplica palabras) quedó pendiente sin respuesta en sesión HT-14; Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts); prueba real en cocina con motor Navegador y decidir motor por defecto
+  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, working agreement en el prompt LLM; escuchar por turno con loading "Sintetizando", avisos cortos hablados con digest bajo demanda, turnos completos (join multi-part + coalescido); picker de conversaciones estilo Collie con título de sesión de Herdr, workspace en gris (fila y header), colores de estado en punto y badge
+  next: verificar en móvil los cambios de las últimas sesiones (recarga PWA: fixes de voz + picker renovado con nombres, workspace y colores); verificar fix de duplicación (dictar prueba); PRD de la escucha (STT duplica palabras) quedó pendiente sin respuesta en sesión HT-14; Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts); prueba real en cocina con motor Navegador y decidir motor por defecto; pushear b903597 a origin
 
 agent-tts:
   scope: personal
