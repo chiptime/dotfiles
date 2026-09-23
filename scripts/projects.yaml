@@ -32,14 +32,14 @@ herdr-tts:
 herdr-brain:
   scope: personal
   status: active
-  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, chips de rebaño, vista por agente, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts
-  next: Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts para render/status/gate); prueba real en cocina con motor Navegador y decidir motor por defecto
+  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, botón replay TTS, picker de conversaciones estilo Collie en header (sheet con estado por agente + Nueva conversación etiquetada, herd-strip eliminado) y working agreement en el prompt LLM
+  next: verificar en móvil el picker de conversaciones del header (los 7 agentes visibles en el sheet); Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts para render/status/gate); prueba real en cocina con motor Navegador y decidir motor por defecto; decidir remote para master (repo sin origin, commits hasta 1cbeac4 solo locales)
 
 agent-tts:
   scope: personal
   status: active
-  desc: Capa de voz universal para agentes CLI (v0.3.0) — core purificado (cero rutas de host en src/) con API pública estable en main (audio_store, audio_duration, provider_names/provider_voices, ipc_reply_json, main), --probe y voice list --json para hosts bash, --ipc-json, Kokoro real verificado E2E, audio_store retención opt-in, streaming pipelined, --play-file con targets remotos, redact.py, --llm-summary, transportes Windows
-  next: tag/release 0.3.x con la API pública verificada; paquete P1 = AT-04+AT-08 (daemon persistente dueño de la cola, docs/prds/); luego AT-03 recortada (verificar opencode web) y P3: AT-07→AT-06→AT-01; subir docs/prds/ (8 PRDs sin trackear)
+  desc: Capa de voz universal para agentes CLI (v0.3.0) — core purificado (cero rutas de host en src/) con API pública estable en main (audio_store, audio_duration, provider_names/provider_voices, ipc_reply_json, main), --probe y voice list --json para hosts bash, --ipc-json, Kokoro real verificado E2E, audio_store retención opt-in, streaming pipelined, --play-file con targets remotos, redact.py, --llm-summary, transportes Windows, BLOQUE 1.1 (AT-09 propiedad del canal IPC vía flock + framing 8192) implementado en rama
+  next: revisar y pushear feat/at-09-canal-de-control (BLOQUE 1.1 + hardening stderr, 9 commits, suite 421/9); paquete P1 = AT-04+AT-08 (daemon persistente dueño de la cola, docs/prds/); luego AT-03 recortada (verificar opencode web) y P3: AT-07→AT-06→AT-01; tag/release 0.3.x; subir docs/prds/ (8 PRDs sin trackear)
 
 compare-prices:
   scope: personal
