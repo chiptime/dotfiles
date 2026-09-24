@@ -27,19 +27,19 @@ herdr-tts:
   scope: personal
   status: active
   desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-02 voces por chat, Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio, CLI contract v1; distribución completa (instalador 1 línea, skill install para Claude Code/OpenCode/Codex/Pi, wrapper npm, fórmula Homebrew) y UI inglés-first con idioma configurable (HERDR_TTS_LANG, ciclo desde popup), suite 694/0; loading "Transcribiendo" al escuchar en menú y lectura
-  next: cortar release v0.17 (bump + CHANGELOG); publicar npm y crear tap Homebrew (steps en packaging/); migrar parseo de status IPC del host a --ipc-json del motor; HT-11 audición de voces (P1)
+  next: cortar release v0.17 (bump + CHANGELOG); publicar npm y crear tap Homebrew (steps en packaging/); migrar parseo de status IPC del host a --ipc-json del motor; HT-11 audición de voces (P1); absorción al monorepo agent-tts planificada (PRD-AT-10: hosts/herdr/tts-plugin, tombstone+archive del repo viejo en Fase 5)
 
 herdr-brain:
   scope: personal
   status: active
   desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, working agreement en el prompt LLM; escuchar por turno con loading "Sintetizando", avisos cortos hablados con digest bajo demanda, turnos completos (join multi-part + coalescido); picker de conversaciones estilo Collie con título de sesión de Herdr, workspace en gris (fila y header), colores de estado en punto y badge
-  next: verificar en móvil los cambios de las últimas sesiones (recarga PWA: fixes de voz + picker renovado con nombres, workspace y colores); verificar fix de duplicación (dictar prueba); PRD de la escucha (STT duplica palabras) quedó pendiente sin respuesta en sesión HT-14; Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts); prueba real en cocina con motor Navegador y decidir motor por defecto; pushear b903597 a origin
+  next: verificar en móvil los cambios de las últimas sesiones (recarga PWA: fixes de voz + picker renovado con nombres, workspace y colores); verificar fix de duplicación (dictar prueba); PRD de la escucha (STT duplica palabras) quedó pendiente sin respuesta en sesión HT-14; Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts); prueba real en cocina con motor Navegador y decidir motor por defecto; pushear b903597 a origin; absorción al monorepo agent-tts planificada (PRD-AT-10: hosts/herdr/brain)
 
 agent-tts:
   scope: personal
   status: active
   desc: Capa de voz universal para agentes CLI (v0.3.0) — core purificado (cero rutas de host en src/) con API pública estable en main (audio_store, audio_duration, provider_names/provider_voices, ipc_reply_json, main), --probe y voice list --json para hosts bash, --ipc-json, Kokoro real verificado E2E, audio_store retención opt-in, streaming pipelined, --play-file con targets remotos, redact.py, --llm-summary, transportes Windows, BLOQUE 1.1 (AT-09 propiedad del canal IPC vía flock + framing 8192) implementado en rama
-  next: revisar y pushear feat/at-09-canal-de-control (BLOQUE 1.1 + hardening stderr, 9 commits, suite 421/9); paquete P1 = AT-04+AT-08 (daemon persistente dueño de la cola, docs/prds/); luego AT-03 recortada (verificar opencode web) y P3: AT-07→AT-06→AT-01; tag/release 0.3.x; subir docs/prds/ (8 PRDs sin trackear)
+  next: revisar y pushear feat/at-09-canal-de-control (BLOQUE 1.1); aterrizar resto del trabajo IPC en vuelo en main; cerrar paquete P1 = AT-04+AT-08 (daemon dueño de la cola); al cierre, migración monorepo PRD-AT-10 Fases 1-5 (engine/ + contracts/ + hosts/, árbol limpio, rama dedicada, remotes viejos con tombstone+archive); luego AT-03 recortada y P3: AT-07→AT-06→AT-01; tag/release 0.3.x; subir docs/prds/ (9 PRDs sin trackear; añadir fila AT-10 al índice)
 
 compare-prices:
   scope: personal
