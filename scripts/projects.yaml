@@ -26,8 +26,8 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-15/16 reader pipeline (markdown/HTML + popup de lectura karaoke), Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio; distribución completa (instalador 1 línea, skill install, npm, Homebrew) e UI inglés-first; tema oscuro/claro config-only (TTS_THEME vía config_set con adopción live per-frame; knob Apariencia oculto por decisión del maintainer), suite 965/0
-  next: pushear ramas locales (main 632cf1b, feat d2a00b7, chore/hide-appearance — todo mergeado local, sin push); cortar release v0.17 (bump + CHANGELOG, npm, tap Homebrew); HT-11 audición de voces (P1)
+  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-15/16 reader pipeline (markdown/HTML + popup de lectura karaoke), Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio; distribución completa (instalador 1 línea, skill install, npm, Homebrew) e UI inglés-first; tema oscuro/claro config-only; HT-16 SHIPPED: popup karaoke en vivo sobre reproducción remota/local (IPC read-only del motor), auto-apertura TTS_READER_AUTO con altura por frase más larga (compacto 60%×7), --reader explícito siempre inline, prefix+R popup; suite 988/0
+  next: pushear feat/ht-14-light-theme (HT-16 + auto-apertura + alturas: local hasta las 19:00) y cortar release v0.17; posición top de popups = petición upstream herdr; HT-15 reader pipeline (en vuelo, otra sesión); HT-11 audición de voces (P1)
 
 herdr-brain:
   scope: personal
@@ -39,7 +39,7 @@ agent-tts:
   scope: personal
   status: active
   desc: Capa de voz universal para agentes CLI (v0.3.0) — core purificado (cero rutas de host en src/) con API pública estable en main (audio_store, audio_duration, provider_names/provider_voices, ipc_reply_json, main), --probe y voice list --json para hosts bash, --ipc-json, Kokoro real verificado E2E, audio_store retención opt-in, streaming pipelined, --play-file con targets remotos, redact.py, --llm-summary, transportes Windows, BLOQUE 1.1 (AT-09 propiedad del canal IPC vía flock + framing 8192) implementado en rama
-  next: revisar y pushear feat/at-09-canal-de-control (BLOQUE 1.1); aterrizar resto del trabajo IPC en vuelo en main; cerrar paquete P1 = AT-04+AT-08 (daemon dueño de la cola); al cierre, migración monorepo PRD-AT-10 Fases 1-5 (engine/ + contracts/ + hosts/, árbol limpio, rama dedicada, remotes viejos con tombstone+archive); luego AT-03 recortada y P3: AT-07→AT-06→AT-01; tag/release 0.3.x; subir docs/prds/ (9 PRDs sin trackear; añadir fila AT-10 al índice)
+  next: revisar y pushear feat/at-09-canal-de-control (BLOQUE 1.1); aterrizar resto del trabajo IPC en vuelo en main (US-AT-09-1 sin commitear); karaoke remoto 32e9baf ya en main — falta sidecar de texto para replays; cerrar paquete P1 = AT-04+AT-08 (daemon dueño de la cola); al cierre, migración monorepo PRD-AT-10 Fases 1-5 (engine/ + contracts/ + hosts/, árbol limpio, rama dedicada, remotes viejos con tombstone+archive); luego AT-03 recortada y P3: AT-07→AT-06→AT-01; tag/release 0.3.x; subir docs/prds/ (9 PRDs sin trackear; añadir fila AT-10 al índice)
 
 compare-prices:
   scope: personal
