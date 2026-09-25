@@ -26,14 +26,14 @@ agy-bridge:
 herdr-tts:
   scope: personal
   status: active
-  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-15/16 reader pipeline (markdown/HTML + popup de lectura karaoke), Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio; distribución completa (instalador 1 línea, skill install, npm, Homebrew) e UI inglés-first; tema oscuro/claro config-only; HT-16 SHIPPED: popup karaoke en vivo sobre reproducción remota/local (IPC read-only del motor), auto-apertura TTS_READER_AUTO con altura por frase más larga (compacto 60%×7), --reader explícito siempre inline, prefix+R popup; suite 988/0
-  next: pushear feat/ht-14-light-theme (HT-16 + auto-apertura + alturas: local hasta las 19:00) y cortar release v0.17; posición top de popups = petición upstream herdr; HT-15 reader pipeline (en vuelo, otra sesión); HT-11 audición de voces (P1)
+  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-15 SHIPPED reader pipeline markdown→HTML con anclas engine-oracle (lib/reader_pipeline.py + --render-html + sidecar anchors@1, cero deps), Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio; distribución completa (instalador 1 línea, skill install, npm, Homebrew); HT-16 SHIPPED popup karaoke en vivo (IPC read-only), auto-apertura TTS_READER_AUTO; tema oscuro/claro config-only; contrato lector documentado (docs/reader-pipeline-contract.md); main en origin 259f834, suite 983/0
+  next: cortar release v0.17; posición top de popups = petición upstream herdr; HT-11 audición de voces (P1)
 
 herdr-brain:
   scope: personal
   status: active
-  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, sonda de vida del backend, despliegue systemd, consume superficie contract v1 de herdr-tts, working agreement en el prompt LLM; escuchar por turno con loading "Sintetizando", avisos cortos hablados con digest bajo demanda, turnos completos (join multi-part + coalescido); picker de conversaciones estilo Collie con título de sesión de Herdr, workspace en gris (fila y header), colores de estado en punto y badge
-  next: verificar en móvil los cambios de las últimas sesiones (recarga PWA: fixes de voz + picker renovado con nombres, workspace y colores); verificar fix de duplicación (dictar prueba); PRD de la escucha (STT duplica palabras) quedó pendiente sin respuesta en sesión HT-14; Fase B cuando el uso lo pida (socket de control persistente en daemon herdr-tts); prueba real en cocina con motor Navegador y decidir motor por defecto; pushear b903597 a origin; absorción al monorepo agent-tts planificada (PRD-AT-10: hosts/herdr/brain)
+  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, despliegue systemd, consume contract v1 de herdr-tts; SHIPPED conversation-reader: superficies de lectura maquetadas por defecto (endpoint /conversation/{pane}/rendered con caché por contenido SHA-256, anclas data-sent-idx, fail-soft, CSP en index) + toast de avisos maquetado (CSS-clip), presupuesto 16 renders/petición; suite pytest 429 + node 109
+  next: pushear master (33 commits locales: reader + toast + PRDs conversation-mode de la otra sesión); parche CSP en GET / (sirve StaticFiles sin la cabecera); HT-16 popup karaoke ANSI en herdr-tts consumiendo el pipeline; PRD escucha (STT duplica palabras) pendiente; Fase B socket de control cuando el uso lo pida
 
 agent-tts:
   scope: personal
