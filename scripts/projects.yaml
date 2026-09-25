@@ -38,8 +38,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Capa de voz universal para agentes CLI (v0.3.0) — core purificado (cero rutas de host en src/) con API pública estable en main (audio_store, audio_duration, provider_names/provider_voices, ipc_reply_json, main), --probe y voice list --json para hosts bash, --ipc-json, Kokoro real verificado E2E, audio_store retención opt-in, streaming pipelined, --play-file con targets remotos, redact.py, --llm-summary, transportes Windows, BLOQUE 1.1 (AT-09 propiedad del canal IPC vía flock + framing 8192) implementado en rama
-  next: revisar y pushear feat/at-09-canal-de-control (BLOQUE 1.1); aterrizar resto del trabajo IPC en vuelo en main (US-AT-09-1 sin commitear); karaoke remoto 32e9baf ya en main — falta sidecar de texto para replays; cerrar paquete P1 = AT-04+AT-08 (daemon dueño de la cola); al cierre, migración monorepo PRD-AT-10 Fases 1-5 (engine/ + contracts/ + hosts/, árbol limpio, rama dedicada, remotes viejos con tombstone+archive); luego AT-03 recortada y P3: AT-07→AT-06→AT-01; tag/release 0.3.x; subir docs/prds/ (9 PRDs sin trackear; añadir fila AT-10 al índice)
+  desc: Capa de voz universal para agentes CLI (v0.3.0) — core purificado con API pública estable en main, streaming pipelined, --play-file con targets remotos, transportes Windows, Kokoro real E2E; BLOQUE 1.1 (AT-09 propiedad del canal IPC) y BLOQUE 1.2 (AT-04 daemon vía única) en main y pusheados (885442f), BLOQUE 1.2 revisado con JD dual (APPROVED: 23 hallazgos, 13 fijados, catálogo de issues abiertos en engram)
+  next: BLOQUE 1.3 (AT-08 cola-y-cadena): decidir framing IPC v2 (length-prefixed) ANTES del congelado del contrato y si viajan A3/A5/A7; cerrar mediciones DoD 1.2 (edge p95, RAM kokoro, smoke 8h); sidecar de texto para replays remotas; luego monorepo PRD-AT-10 Fases 1-5; AT-03 recortada y P3: AT-07→AT-06→AT-01; tag/release 0.3.x; subir docs/prds/ (9 PRDs sin trackear)
 
 compare-prices:
   scope: personal
