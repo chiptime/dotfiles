@@ -590,6 +590,40 @@ recovery instructions and promises no rollback. Standalone
 `guided-run` keeps its documented behavior (whisper operator-managed;
 blocks with instructions).
 
+### Local synthesis backend on the shared GPU (llm-hub)
+
+The reference local backend is the `llm-hub-chat` container
+(llama.cpp, Qwen3.8-27B UD-IQ4_XS, 64k context, reasoning off) at
+`http://127.0.0.1:8081/v1` with model `qwen-3.8-27b`; the API key is
+any non-empty value. It shares the GPU with vision, and vision is
+fail-closed on free VRAM:
+
+- **Gate.** Before EVERY Qwen vision load, at least
+  `free_vram_gate_mib` (20480 MiB) must be free. Failing it records the
+  vision stage as `blocked`, closes the GPU window for the rest of the
+  batch and never retries.
+- **Awake backend always blocks vision.** Loaded, `llm-hub-chat`
+  holds about 15,600 MiB (measured on a 24 GiB RTX 4090), so no vision
+  load can pass the gate while it is awake.
+- **Idle sleep releases it.** The container runs with
+  `--sleep-idle-seconds 60`: after 60 s without requests it unloads
+  the model and holds 0 MiB (measured: stopped and asleep read the
+  same VRAM). The next synthesis request wakes it in about 10 s.
+- **Known limitation: back-to-back batches.** If the next batch's
+  vision window opens less than 60 s after the previous batch's last
+  synthesis, the model is still resident and vision blocks. Nothing is
+  lost: items without an `emit` fingerprint are re-planned as
+  `partial_resumable` and their valid completed stages are reused.
+  Wait at least 60 s and re-run the same command. Downloads and CPU
+  preparation between batches normally exceed 60 s, so this is rare.
+- **Other GPU consumers count too.** The gate measures the whole
+  device, including the Windows desktop under WSLg and any other
+  container. Historical vision sessions that passed started at
+  1,164–2,440 MiB used; `voice-assistant-whisper` is stopped by the
+  whisper coordination above before vision. If vision still blocks
+  with `llm-hub-chat` asleep, find the remaining consumer with
+  `nvidia-smi` before re-running; never lower the gate.
+
 ### Exit codes
 
 `0` success · `1` failures, interruption or hard blocks · `2` usage
