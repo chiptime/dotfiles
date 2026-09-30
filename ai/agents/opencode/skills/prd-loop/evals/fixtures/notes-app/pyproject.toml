@@ -1,0 +1,9 @@
+[project]
+name = "notes-fixture"
+version = "0.1.0"
+description = "Synthetic toy notes app used as a prd-loop evaluation fixture"
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["."]
