@@ -129,11 +129,15 @@ class ConsoleConsentProvider(ConsentProvider):
         self,
         *,
         stdin: Any | None = None,
-        out: Callable[[str], None] | None = None,
+        out: Callable[..., None] | None = None,
     ) -> None:
         self._stdin = stdin
         # Prompts are interactive UI: stderr keeps stdout parseable.
-        self._out = out or (lambda text: print(text, file=sys.stderr))
+        # ``end`` keeps the yes/no answer on the prompt line; an injected
+        # ``out`` must accept the same keyword.
+        self._out = out or (
+            lambda text, end="\n": print(text, end=end, file=sys.stderr, flush=True)
+        )
 
     def ask(self, window: ConsentWindow) -> bool:
         lines = [f"== authorization required: {window.title} =="]

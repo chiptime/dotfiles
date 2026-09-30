@@ -694,6 +694,19 @@ class TestConsoleConsent(unittest.TestCase):
             )
             self.assertFalse(provider.ask(self._window()), answer)
 
+    def test_default_console_output_asks_and_grants(self) -> None:
+        # Regression: every other test injects a permissive ``out``; this one
+        # exercises the real default console writer end to end.
+        import contextlib
+
+        stderr = io.StringIO()
+        provider = ConsoleConsentProvider(stdin=io.StringIO("yes\n"))
+        with contextlib.redirect_stderr(stderr):
+            self.assertTrue(provider.ask(self._window()))
+        written = stderr.getvalue()
+        self.assertIn("authorize this window? [yes/no] ", written)
+        self.assertIn("granted", written)
+
     def test_non_interactive_environment_never_grants(self) -> None:
         class NonTTY:
             def isatty(self) -> bool:
