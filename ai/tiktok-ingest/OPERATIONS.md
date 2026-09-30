@@ -595,8 +595,16 @@ blocks with instructions).
 The reference local backend is the `llm-hub-chat` container
 (llama.cpp, Qwen3.8-27B UD-IQ4_XS, 64k context, reasoning off) at
 `http://127.0.0.1:8081/v1` with model `qwen-3.8-27b`; the API key is
-any non-empty value. It shares the GPU with vision, and vision is
-fail-closed on free VRAM:
+any non-empty value. These three values are exported from
+`shell/exports.sh` (not secrets). `ai/tiktok-ingest/install.sh`
+(idempotent) links and enables `ai/services/llm-hub-chat.service`, which
+starts only that container after a host/WSL restart; it deliberately
+avoids `podman-restart.service`, which starts every `restart: always`
+container on the machine and, if one of them hangs past its timeout,
+SIGKILLs the conmon processes and leaves containers stuck in
+`Stopping`. The container must already exist (`podman-compose -f
+podman-compose.yml up -d llama-chat` in llm-hub). It shares the GPU with
+vision, and vision is fail-closed on free VRAM:
 
 - **Gate.** Before EVERY Qwen vision load, at least
   `free_vram_gate_mib` (20480 MiB) must be free. Failing it records the

@@ -78,3 +78,9 @@ newpath=(
 printf -v sNewPath "%s:" "${newpath[@]}"
 
 export PATH="$sNewPath $PATH"
+
+# TikTok ingest — Phase 0 synthesis backend (local llm-hub, not a secret:
+# llama.cpp has no auth; the key only needs to be non-empty)
+export TIKTOK_INGEST_TEXT_API_BASE_URL="http://127.0.0.1:8081/v1"
+export TIKTOK_INGEST_TEXT_API_KEY="llm-hub"
+export TIKTOK_INGEST_TEXT_MODEL="qwen-3.8-27b"
