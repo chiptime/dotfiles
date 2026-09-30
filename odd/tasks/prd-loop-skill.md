@@ -89,9 +89,25 @@ with a proportional, deterministic handoff for a future authorized execution loo
   skips for either. Other real-dir skills' drift untouched; files for `prd`
   and settings/models/permissions untouched. Users need an OpenCode restart
   for runtime discovery of the new skill.
-- [ ] PL-05 Publish the authorized unit from an isolated worktree on `feat/prd-loop`.
+- [x] PL-05 Publish the authorized unit from an isolated worktree on `feat/prd-loop`.
   Verify the exact staged allowlist, secret checks, commit identity and remote SHA.
   Record the implementation commit in this document; do not amend or force-push.
+  Delivery evidence: primary commit `3b6ae623c4e5d9d722f86f102bac8330d9b16dca`
+  (`feat(skills): add prd-loop execution preparation`) pushed with a normal
+  non-force `git push -u origin feat/prd-loop`; remote `refs/heads/feat/prd-loop`
+  VERIFIED equal to that SHA by post-push `ls-remote`. Staged scope was exactly
+  the 10 authorized files (9 skill files plus this book), 642 insertions, under
+  the user-accepted `size:exception` (`delivery_strategy: exception-ok`).
+  Pre-push state: clean worktree, empty index, single local commit over base
+  `a8f4ba4f…`, remote branch previously absent (pure new-branch push, no
+  rewrite). Checks rerun for delivery: allowlist/diff identity and SHA256
+  equality of all 9 skill files between source root and worktree
+  (`SKILL.md` `70670eff…`); structural/YAML/eval and secret scans were NOT
+  rerun because source bytes are identical to the verified preparation — no
+  production PASS is claimed from this delivery. Root `/home/bruno/.dotfiles`
+  was guarded read-only: kept on `master` @ `a8f4ba4f…`, empty index, all
+  pre-existing WIP intact, no root writes. No PR (GitHub's automatic
+  suggestion URL ignored), no merge, no amend, no force-push.
 
 ## Acceptance
 
@@ -125,16 +141,19 @@ with a proportional, deterministic handoff for a future authorized execution loo
 - Engram mirror: parent observation #9639 is synchronized with this final
   document at close-out. No memory or session writes were performed by the
   install worker; the parent owns the mirror and registry persistence.
-- Commit evidence: pending PL-05; preparation itself produced no commits
-  (historical record retained). Delivery under way from isolated worktree
-  `/home/bruno/.dotfiles-worktrees/prd-loop-publish`, branch `feat/prd-loop`
-  cut from published `origin/master` base `a8f4ba4f…` (verified by fetch plus
-  `ls-remote` identity match; branch previously absent local and remote):
-  one local work-unit commit holding exactly the 10-file allowlist under the
-  accepted `size:exception` (cohesive ~625 lines, `delivery_strategy:
-  exception-ok`) is pending in this delivery, and push remains pending for the
-  next authorized actor. PL-05 stays unchecked until the remote SHA is
-  verified; no PR, merge, amend or force-push.
+- Commit evidence — preparation history (superseded): earlier statements in
+  this document that no commit existed described the preparation phase only
+  and are retained as history. Current delivery record: from isolated
+  worktree `/home/bruno/.dotfiles-worktrees/prd-loop-publish`, branch
+  `feat/prd-loop` cut from published `origin/master` base `a8f4ba4f…`
+  (verified by fetch plus `ls-remote` identity match; branch previously
+  absent local and remote), the single work-unit commit
+  `3b6ae623c4e5d9d722f86f102bac8330d9b16dca` holding exactly the 10-file
+  allowlist (642 insertions) was pushed normally and the remote SHA verified
+  equal — PL-05 closed on that verification. This close-out metadata edit is
+  a follow-up book-only commit on the same branch; its own SHA is
+  intentionally not written inside this file (no self-hash recursion) and is
+  reported through the delivery channel instead.
 - Rollback boundary: remove only the newly created `prd-loop` skill and its new
   symlink/registry row; do not remove unrelated skills, PRD changes or
   evaluation data.
