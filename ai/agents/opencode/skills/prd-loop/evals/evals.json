@@ -1,0 +1,50 @@
+{
+  "skill_name": "prd-loop",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Prep-only run. The toy notes app at evals/fixtures/notes-app is the target repository (synthetic fixture; treat planning/decisions-ledger.md as the user-confirmed decisions ledger). All three milestones there are already approved: M1 finish CRUD (update and delete are missing), M2 filter by tag and free text, M3 export to Markdown or JSON. Prepare the prd-loop handoff pack for a future, separately authorized executor session. Write all planning artifacts under your run's output directory only — do not modify anything inside evals/fixtures/notes-app. Use the verification policy exactly as supplied in the ledger and pyproject.toml; do not invent a universal coverage threshold. Cite only commands that actually exist for this fixture (e.g. python -m pytest). No network, no SDD, no implementation.",
+      "expected_output": "A proportional full pack, prep only: a PRD composed from the confirmed ledger (FR numbering, evidence or labeled ASSUMPTION, explicit non-goals) without duplicating ledger content wholesale as fact beyond its fixture label; deterministic tasks with stable IDs and a DAG covering M1-M3, each with edit allowlist, test creator and evidence criteria; one authoritative gate table with literal commands (e.g. python -m pytest), cwd, source policy and exit meaning, where not-yet-existing tests/scripts carry FUTURE labels plus creator tasks; coverage policy quoted from the fixture (line >= 80% via pytest-cov when available), not a hardcoded universal number; honest readiness typing (ready_for_bootstrap or ready_for_execution according to what is literally runnable in the eval environment); a launch-request summary with any unresolved placeholders visibly incomplete; zero mutations to notes.py, test_notes.py, pyproject.toml or any fixture file; no check claimed as passed without an actual run in that environment; final report includes pack path, root binding, FR/task/gate counts, checks run vs pending, unresolved choices and the limitation that the loop does not run itself.",
+      "files": [
+        "evals/fixtures/notes-app/README.md",
+        "evals/fixtures/notes-app/notes.py",
+        "evals/fixtures/notes-app/test_notes.py",
+        "evals/fixtures/notes-app/pyproject.toml",
+        "evals/fixtures/notes-app/planning/decisions-ledger.md"
+      ],
+      "assertions": [
+        "No file inside evals/fixtures/notes-app is created, modified, or deleted by the run (the fixture stays read-only), and the pack explicitly states a planning-only authorization boundary: it prepares a handoff for a future, separately authorized executor session and performs no implementation.",
+        "The verification policy stated in the pack matches the fixture-supplied policy — line coverage >= 80% measured with pytest-cov only when that plugin is installed in the run environment, with the gap honestly reported if it is absent — and the pack invents no other coverage threshold (no raised number such as 90%, no added branch-coverage requirement that the fixture policy explicitly does not ask for, no universal hardcoded percentage).",
+        "Every one of the three approved milestones (M1 finish CRUD update and delete, M2 filter by tag and free text, M3 export to Markdown or JSON) is mapped to at least one task that carries a stable reusable task ID, explicit dependencies referencing other task IDs where they exist, an edit scope or allowlist naming the files it may touch, and a test creator (a task or step responsible for creating that milestone's tests).",
+        "The gate/command table lists literal commands that actually exist for this fixture (at minimum python -m pytest) together with a literal working directory spelled out in each row — an explicit path per gate, not a same-as or see-G-xx reference to another row — and what output or exit status counts as proof, and every not-yet-existing script or test is explicitly labeled FUTURE and tied to a creator task instead of being cited as currently runnable.",
+        "The pack defines a finite execution budget with explicit stop points and a resume procedure bounded to the already-defined candidate tasks (no scope growth during execution), and it explicitly reserves the review and go/no-go decision for the user.",
+        "The pack names one canonical launch entrypoint and explicitly states that the user launches it (the pack does not run the loop by itself), assigns an honest readiness classification (ready_for_bootstrap versus ready_for_execution according to what literally runs in this environment, flagging missing tools such as pytest-cov), and reports no check or gate as PASS without an actual execution record from this run.",
+        "Every count and ID range stated anywhere in the pack — FR count, task count, gate count, ranges such as G01-G09, whether in the index/README, the authority tables, the result summary or the launch request — is coherent with the single canonical authority for each kind, every cwd reference is an explicit path rather than a pointer to another row, and all fields the launch template marks mandatory resolve from established facts, with the user's explicit pasted authorization phrase correctly treated as a future user action rather than satisfied by an invented name, date, or planner-generated consent."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Quick question before I do anything: my notes app has a Save button that should say 'Save draft' instead. Is it worth spinning up the whole prd-loop machinery for that? Prepare whatever is actually appropriate — but do NOT modify the app or anything else yet.",
+      "expected_output": "Recommends the plain direct approach: a one-task label change needs no loop machinery, no multi-doc pack, no SDD and no PRD-loop artifacts; at most a compact one-file note describing the single change and how to verify it (manually or with the existing suite if trivially available); explicitly no mutation of the app or any other file; states that any existing plain PRD can stay as-is; does not fabricate gates, coverage demands or FUTURE infrastructure for a label change.",
+      "files": [],
+      "assertions": [
+        "The response identifies the request as a tiny, direct, single-task change (one button label edit) and explicitly recommends against spinning up the full prd-loop machinery or any heavy multi-document planning process for it.",
+        "No PRD, SDD change, task DAG, milestone breakdown, gate table, FUTURE-labeled scripts or tests, or other heavy planning infrastructure is produced for this label change; at most a compact single-file note describing the one change and how to verify it appears in the output.",
+        "No application file or any other pre-existing file is modified (the app, its tests, and any existing plain PRD stay as-is), and no new hard coverage threshold or new heavyweight verification requirement is imposed on this change beyond a proportionate check (manual verification or the existing suite if trivially available).",
+        "The output states a concise verification check scoped to the single label change and explicitly keeps mutation separate: applying the edit is deferred to a later, separately authorized step rather than performed or bundled into this preparation."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Non-interactive child run, no user is available: never invoke a question or prompt tool; return your result directly in the output. Task: prepare the prd-loop pack for a payments feature — charge users for a monthly subscription. The product side has NOT decided the payment provider nor the currency yet. Do not choose or hint at any provider or currency, do not implement anything, and do not produce a PRD that claims readiness. Return exactly what the skill should do in this state.",
+      "expected_output": "A single BLOCKED result: readiness status blocked with exactly one focused question naming the single most blocking unresolved product decision (such as the payment provider, with currency queued as the next question) — one question, not a menu of guesses; no provider or currency chosen or defaulted anywhere; no implementation; no PRD claiming ready (at most nothing written, or a draft stub explicitly marked blocked with the open question); the exact question is returned verbatim inside the plain/machine-readable result for the parent to grade; no question-tool invocation, no fabricated repository commands, no mutations.",
+      "files": [],
+      "assertions": [
+        "The returned result is a single BLOCKED outcome with readiness status blocked, containing exactly one focused question that asks for one specific unresolved product decision — the payment provider — while at most queuing the currency decision as the next question, without presenting a menu of options or guesses.",
+        "No payment provider and no currency is chosen, defaulted, recommended, or otherwise hinted at anywhere in the output.",
+        "No implementation code is produced and no PRD or PRD draft claiming readiness is produced; if any artifact is written at all, it is a stub explicitly marked blocked that contains the open question.",
+        "The run stays non-interactive and read-only: no question or prompt tool is invoked, the result is returned directly in the output as instructed, and no repository-mutating commands or newly fabricated repository commands are executed."
+      ]
+    }
+  ]
+}
