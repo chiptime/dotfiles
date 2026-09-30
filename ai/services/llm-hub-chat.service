@@ -1,0 +1,17 @@
+[Unit]
+Description=llm-hub chat backend (TikTok ingest synthesis) — start existing container
+Documentation=file://%h/.dotfiles/ai/tiktok-ingest/OPERATIONS.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Starts ONLY llm-hub-chat (created by llm-hub's podman-compose). Unlike
+# podman-restart.service, it never starts unrelated restart:always containers.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/podman start llm-hub-chat
+ExecStop=/usr/bin/podman stop -t 30 llm-hub-chat
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target
