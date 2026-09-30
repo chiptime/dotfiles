@@ -34,7 +34,7 @@ three unsynchronised places (live `opencode.json`, stale `profiles/`, router jso
 - [x] T2 Write `scripts/install-opencode-settings-v2.sh` + `ai/agents/opencode/models/README.md`. Route: delegated writer was attempted and FAILED (provider 5h usage limit, reset 07:15) -> wrote inline. Route deviation recorded on purpose.
 - [x] T3 Functional verification in sandbox (`scripts/test-install-opencode-settings-v2.sh`). Route: inline.
 - [x] T4 Real-config check (`--check` => no changes, exit 0) and archive of stale profiles. Route: inline.
-- [ ] T5 Commits: (a) router re-render, (b) models v2. Route: inline.
+- [x] T5 Commits on `feat/opencode-models-v2`: 2906558 (router re-render), 3cd7499 (models v2). Route: inline.
 
 ## Progress
 - T1-T4 done. Router re-render done before this document (committed in T5a).
@@ -54,4 +54,4 @@ three unsynchronised places (live `opencode.json`, stale `profiles/`, router jso
   (re-run installer after sync; `--check` detects drift).
 
 ## Next step
-T5 commits, then report.
+Done. Branch is local only (no push, no PR): delivery stays the user's decision.
