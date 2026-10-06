@@ -103,6 +103,18 @@ describe('unit: outcomes — classify run signals', () => {
 		expect(classifyRun({ exitCode: 1, log: '429 rate limit AND captcha challenge' }).outcome).toBe('auth_captcha');
 	});
 
+	test('AUTH_RE does not match auth-like substrings inside ordinary words', () => {
+		for (const word of ['assigning', 'designing', 'resigning', 'consigning']) {
+			expect(classifyRun({ exitCode: 1, log: `error while ${word} models` }).outcome).toBe('task_failure');
+		}
+	});
+
+	test('AUTH_RE still matches real sign-in prompts', () => {
+		for (const log of ['please sign in to continue', 'Sign-In required', 'signin failed']) {
+			expect(classifyRun({ exitCode: 1, log }).outcome).toBe('auth_captcha');
+		}
+	});
+
 	test('artifact-backed success outranks auth and quota markers', () => {
 		expect(classifyRun({ exitCode: 0, artifactBytes: 412, log: '429 rate limit AND captcha challenge' }).outcome).toBe('success');
 	});

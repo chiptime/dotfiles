@@ -101,7 +101,7 @@ export interface Classification {
 	outcome: Outcome;
 	reason: string;
 }
-const AUTH_RE = /captcha|sign.?in|log.?in required|unauthenticated|forbidden|\b401\b|invalid credentials|authentication/i;
+const AUTH_RE = /captcha|\bsign[\s._-]?in\b|log.?in required|unauthenticated|forbidden|\b401\b|invalid credentials|authentication/i;
 const QUOTA_RE = /quota|rate.?limit|\b429\b|resource.?exhausted|too many requests/i;
 const TRANSIENT_RE = /unavailable|outage|overloaded|connection\s+(?:refused|reset|failed)|network\s+error|\b5\d\d\b|internal error|server error/i;
 const PRINT_WAIT_TIMEOUT_RE = /timeout waiting for response/i;
