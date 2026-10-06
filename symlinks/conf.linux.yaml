@@ -17,5 +17,6 @@
     ~/.pi/agent/skills/hub-session-close: ai/agents/pi/skills/hub-session-close
     ~/.config/opencode/scripts/teams-to-tasks-cron.sh: ai/teams-to-tasks/cron.sh
     ~/bin/projects: scripts/projects-dashboard.sh
+    ~/.gemini/config/skills/projects-tracker: ai/agents/antigravity/skills/projects-tracker
     ~/.config/systemd/user/opencode-web.service: ai/services/opencode-web.service
     ~/.config/systemd/user/mobile-proxy.service: ai/services/mobile-proxy.service
