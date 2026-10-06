@@ -20,26 +20,26 @@ dotfiles:
 agy-bridge:
   scope: personal
   status: active
-  desc: Bridge agy para hosts CLI (opencode + pi) — Rev2 sin commit termination_unconfirmed no reintentable, terminación acotada SIGTERM→SIGKILL, lock por conversación, concurrencia 10 sesiones probada
-  next: reconstruir dist + commit/PR de la Rev2 (851 tests verdes, 3 typechecks); slice 3 sigue bloqueado en evidencia de resume-safety del CLI
+  desc: Bridge agy para hosts CLI (opencode + pi) — ventana modal in-TUI (/agy-open, Alt+A) con split Herdr/Tmux y visor transcript, lock por conversación, 884 tests verdes
+  next: git push de commits locales a origin/main (a8f145e); slice 3 sigue bloqueado en evidencia de resume-safety del CLI
 
 herdr-tts:
   scope: personal
-  status: active
-  desc: Voz para agentes en Herdr — HT-13 host consume la API pública del motor, HT-15 SHIPPED reader pipeline markdown→HTML con anclas engine-oracle (lib/reader_pipeline.py + --render-html + sidecar anchors@1, cero deps), Ajustes en submenús de dos niveles, dashboard v3.1, push ntfy con audio; distribución completa (instalador 1 línea, skill install, npm, Homebrew); HT-16 SHIPPED popup karaoke en vivo (IPC read-only), auto-apertura TTS_READER_AUTO; tema oscuro/claro config-only; contrato lector documentado (docs/reader-pipeline-contract.md); main en origin 259f834, suite 983/0
-  next: cortar release v0.17; posición top de popups = petición upstream herdr; HT-11 audición de voces (P1)
+  status: archived
+  desc: Plugin de voz y TTS para Herdr — migrado al monorepo agent-tts (hosts/herdr/tts-plugin/); tombstone añadido; repo independiente archivado
+  next: desarrollo unificado en monorepo chiptime/agent-tts (hosts/herdr/tts-plugin/)
 
 herdr-brain:
   scope: personal
-  status: active
-  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — PWA móvil con llamada continua (endpointing propio, drawer de llamada sobre cockpit, anuncios SSE hablados), STT whisper servidor / Navegador con VAD adaptativo, despliegue systemd, consume contract v1 de herdr-tts; SHIPPED conversation-reader: superficies de lectura maquetadas por defecto (endpoint /conversation/{pane}/rendered con caché por contenido SHA-256, anclas data-sent-idx, fail-soft, CSP en index) + toast de avisos maquetado (CSS-clip), presupuesto 16 renders/petición; suite pytest 429 + node 109
-  next: pushear master (33 commits locales: reader + toast + PRDs conversation-mode de la otra sesión); parche CSP en GET / (sirve StaticFiles sin la cabecera); HT-16 popup karaoke ANSI en herdr-tts consumiendo el pipeline; PRD escucha (STT duplica palabras) pendiente; Fase B socket de control cuando el uso lo pida
+  status: archived
+  desc: Cerebro conversacional voz+LLM sobre agentes Herdr — migrado al monorepo agent-tts (hosts/herdr/brain/); tombstone añadido; repo independiente archivado
+  next: desarrollo unificado en monorepo chiptime/agent-tts (hosts/herdr/brain/)
 
 agent-tts:
   scope: personal
   status: active
-  desc: Capa de voz universal para agentes CLI (v0.3.0) — core purificado con API pública estable en main, streaming pipelined, --play-file con targets remotos, transportes Windows, Kokoro real E2E; BLOQUE 1.1 (AT-09 propiedad del canal IPC) y BLOQUE 1.2 (AT-04 daemon vía única) en main y pusheados (885442f), BLOQUE 1.2 revisado con JD dual (APPROVED: 23 hallazgos, 13 fijados, catálogo de issues abiertos en engram)
-  next: BLOQUE 1.3 (AT-08 cola-y-cadena): decidir framing IPC v2 (length-prefixed) ANTES del congelado del contrato y si viajan A3/A5/A7; cerrar mediciones DoD 1.2 (edge p95, RAM kokoro, smoke 8h); sidecar de texto para replays remotas; luego monorepo PRD-AT-10 Fases 1-5; AT-03 recortada y P3: AT-07→AT-06→AT-01; tag/release 0.3.x; subir docs/prds/ (9 PRDs sin trackear)
+  desc: Monorepo consolidado del ecosistema (v0.3.0) — PRD-AT-10 y PRD-AT-03 COMPLETADAS y archivadas: engine/ (motor autónomo con API pública, daemon vía única, cola y cadena), contracts/ (fuente normativa ipc-v2 y tts-brain-v1), hosts/herdr/ (tts-plugin y brain absorbidos con historiales completos 3-way); tests de frontera RF-AT-10-5 verdes; 1.501 tests pasando sin fallos a través de todos los componentes
+  next: reiniciar herdr-brain con fix/brain-open-session-inventory (list_open_sessions, sin commit) y repetir "qué sesiones tengo abiertas?" + prueba móvil de transcripciones sin duplicados; luego autoloop L1-L6 en feat/autoloop; pendiente: voz en segundo plano (bloqueo/cambio de app) y eval modelo real en backlog Notion
 
 compare-prices:
   scope: personal
@@ -79,7 +79,14 @@ busqueda-vacaciones:
 odata-batch:
   scope: personal
   status: closed
-  desc: Librería npm OData V2 batch — v2.0.0 publicada (multi-changeset, hardening, TS 5.9, 100% cobertura, 99.32% mutación)
+  desc: Librería npm OData V2 batch — v2.1.0 publicada con retrieve GET-only sin changesets; 170 tests verificados
+  next: retomar revisión independiente pendiente del modo retrieve en sesión enraizada en odata-batch
+
+ssff-mcp:
+  scope: personal
+  status: active
+  desc: MCP local SSFF OData v2 — Fase 2 implementada y subida hasta 20a233e; OAuth, cursor, XML, allowlist y batch; 188 tests y lote PROD de 180 GET verificados
+  next: obtener evidencia read-only de roles SAP; completar revisiones nativas en runtime compatible; brainstorming de mejoras en otro chat
 
 llm-hub:
   scope: personal
