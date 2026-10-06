@@ -1,8 +1,10 @@
 """Browser boundary tests: fake controller + scripted consent, zero browser.
 
 Covers the Phase 0 browser boundary: run-scoped isolated profile
-(created and removed), explicit visibility confirmation before any
-inventory, denial/EOF paths that capture nothing, no login/captcha
+(created and removed), the press-Enter READINESS checkpoint before any
+inventory (a readiness signal, never a yes/no authorization — the
+browser grant already named the snapshot/audit writes), refusal paths
+that capture nothing (denial, missing readiness, EOF), no login/captcha
 automation (the controller surface has no such capability), reuse of
 the existing collection DOM rules (container scope, recommendations
 excluded, DOM change = explicit failure), auditable HTML persistence,
@@ -12,6 +14,7 @@ and honest close/cleanup reporting on success, error and Ctrl-C.
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,13 +29,25 @@ COLLECTION_URL = "https://www.tiktok.com/@fixture_author/collection/live-col"
 REF = parse_collection_url(COLLECTION_URL)
 
 
-def page_html(*, container: bool = True, items: int = 3, outside: int = 2) -> str:
+def page_html(
+    *,
+    container: bool = True,
+    items: int = 3,
+    outside: int = 2,
+    i18n_scripts: bool = False,
+) -> str:
+    """Sanitized page shaped like the VERIFIED live collection page.
+
+    The live authenticated page marks the collection with
+    div[data-e2e=collection-item-list] and carries its unavailability
+    strings ONLY inside script i18n JSON (never rendered text).
+    """
     inner = "".join(
         f'<a href="/@fixture_author/video/{7400000000000000000 + n}">v{n}</a>'
         for n in range(items)
     )
     container_div = (
-        f'<div data-testid="collection-container">{inner}</div>'
+        f'<div data-e2e="collection-item-list">{inner}</div>'
         if container
         else "<div>nothing here</div>"
     )
@@ -40,8 +55,16 @@ def page_html(*, container: bool = True, items: int = 3, outside: int = 2) -> st
         f'<a href="https://www.tiktok.com/@fixture_author/video/{7500000000000000000 + n}">rec{n}</a>'
         for n in range(outside)
     )
+    scripts = (
+        "<script>window.__i18n__ = {"
+        '"unavailable":"This collection isn\u2019t available. Log in to continue.",'
+        '"login":"Log in"'
+        "};</script>"
+        if i18n_scripts
+        else ""
+    )
     return (
-        "<!DOCTYPE html><html><body>"
+        "<!DOCTYPE html><html><head>" + scripts + "</head><body>"
         + container_div
         + f'<div class="recommendations">{outside_links}</div>'
         + "</body></html>"
@@ -78,15 +101,27 @@ class CloseFailsController(FakeController):
 
 
 class ScriptedConsent:
-    def __init__(self, script: list[tuple[str, bool]]) -> None:
+    """Human double: scripted yes/no windows plus a readiness signal.
+
+    ``ready`` drives the press-Enter readiness checkpoint, which is NOT
+    a consent window and is recorded separately in readiness_prompts.
+    """
+
+    def __init__(self, script: list[tuple[str, bool]], *, ready: bool = True) -> None:
         self.script = list(script)
+        self.ready = ready
         self.windows: list[ConsentWindow] = []
+        self.readiness_prompts: list[str] = []
 
     def ask(self, window: ConsentWindow) -> bool:
         self.windows.append(window)
         expected, granted = self.script.pop(0)
         assert window.kind == expected, f"expected {expected}, got {window.kind}"
         return granted
+
+    def await_readiness(self, prompt: str) -> bool:
+        self.readiness_prompts.append(prompt)
+        return self.ready
 
 
 class BrowserTestCase(unittest.TestCase):
@@ -120,7 +155,7 @@ class BrowserTestCase(unittest.TestCase):
 class TestHappyPath(BrowserTestCase):
     def test_capture_close_cleanup_and_state_persisted(self) -> None:
         controller = FakeController(page_html())
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", True)])
+        consent = ScriptedConsent([("browser", True)])
         report = self.run_inventory(controller, consent)
 
         self.assertEqual(report.observed_items, 3)
@@ -143,7 +178,7 @@ class TestHappyPath(BrowserTestCase):
 
     def test_profile_is_run_scoped_and_under_base(self) -> None:
         controller = FakeController(page_html())
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", True)])
+        consent = ScriptedConsent([("browser", True)])
         self.run_inventory(controller, consent)
         profile = controller.profile_dirs[0]
         self.assertTrue(profile.startswith(str(self.profile_base)))
@@ -151,7 +186,7 @@ class TestHappyPath(BrowserTestCase):
 
     def test_declared_count_and_end_evidence_are_recorded(self) -> None:
         controller = FakeController(page_html(items=3))
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", True)])
+        consent = ScriptedConsent([("browser", True)])
         self.run_inventory(
             controller, consent, declared_count=3, end_evidence="end of list"
         )
@@ -163,15 +198,60 @@ class TestHappyPath(BrowserTestCase):
     def test_capture_is_merge_only_across_runs(self) -> None:
         first = FakeController(page_html(items=2))
         self.run_inventory(
-            first, ScriptedConsent([("browser", True), ("browser-confirm", True)])
+            first, ScriptedConsent([("browser", True)])
         )
         second = FakeController(page_html(items=3))
         self.run_inventory(
-            second, ScriptedConsent([("browser", True), ("browser-confirm", True)])
+            second, ScriptedConsent([("browser", True)])
         )
         scan = CollectionScanStore(self.state).load(REF.collection_key)
         assert scan is not None
         self.assertEqual(len(scan.items), 3, "merge-only: items accumulate")
+
+
+class TestLiveSelectorDefaults(unittest.TestCase):
+    def test_production_defaults_match_the_verified_live_selector(self) -> None:
+        self.assertEqual(browser.DEFAULT_CONTAINER_ATTR, "data-e2e")
+        self.assertEqual(browser.DEFAULT_CONTAINER_VALUE, "collection-item-list")
+
+
+class TestAuthenticatedPage(BrowserTestCase):
+    def test_i18n_scripts_do_not_block_the_authenticated_inventory(self) -> None:
+        controller = FakeController(page_html(items=3, i18n_scripts=True))
+        consent = ScriptedConsent([("browser", True)])
+        report = self.run_inventory(controller, consent)
+        self.assertEqual(report.observed_items, 3)
+        self.assertEqual(report.access_markers, ())
+        scan = CollectionScanStore(self.state).load(REF.collection_key)
+        assert scan is not None
+        self.assertEqual(scan.status, "in_progress")
+        self.assertEqual(scan.captures[-1].access_markers, ())
+
+    def test_consent_text_names_the_live_container_selector(self) -> None:
+        controller = FakeController(page_html())
+        consent = ScriptedConsent([("browser", True)])
+        self.run_inventory(controller, consent)
+        operations = "\n".join(consent.windows[0].operations)
+        self.assertIn("data-e2e", operations)
+        self.assertIn("collection-item-list", operations)
+
+    def test_browser_grant_names_readiness_and_the_snapshot_audit_writes(self) -> None:
+        # The FIRST grant must name the subsequent snapshot/audit write
+        # so the later press-Enter readiness checkpoint carries no hidden
+        # authority of its own.
+        controller = FakeController(page_html())
+        consent = ScriptedConsent([("browser", True)])
+        self.run_inventory(controller, consent)
+        window = consent.windows[0]
+        blob = json.dumps(window.to_dict())
+        self.assertIn("readiness", blob.lower())
+        self.assertIn("NOT a second authorization", blob)
+        effects = "\n".join(window.effects)
+        self.assertIn("audit", effects.lower())
+        self.assertIn("scan state", effects.lower())
+        # The readiness prompt itself is clearly labeled as readiness.
+        self.assertIn("readiness", consent.readiness_prompts[0].lower())
+        self.assertIn("NOT an authorization", consent.readiness_prompts[0])
 
 
 class TestDenials(BrowserTestCase):
@@ -185,12 +265,21 @@ class TestDenials(BrowserTestCase):
         self.assertFalse(CollectionScanStore(self.state).load(REF.collection_key) is not None)
         self.assertFalse(list(self.profile_base.iterdir()))
 
-    def test_confirmation_denied_captures_nothing_but_cleans_up(self) -> None:
+    def test_missing_readiness_captures_nothing_but_cleans_up(self) -> None:
+        # The readiness checkpoint is not an authorization, but inventory
+        # still refuses to start without it (fail closed).
         controller = FakeController(page_html())
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", False)])
+        consent = ScriptedConsent([("browser", True)], ready=False)
         with self.assertRaises(browser.BrowserInventoryError) as ctx:
             self.run_inventory(controller, consent)
         self.assertIn("no inventory was captured", str(ctx.exception))
+        self.assertIn("readiness", str(ctx.exception))
+        self.assertEqual(len(consent.readiness_prompts), 1)
+        self.assertEqual(
+            [w.kind for w in consent.windows],
+            ["browser"],
+            "readiness is not a consent window",
+        )
         self.assertIn("close", [c[0] for c in controller.calls])
         self.assertNotIn("content", [c[0] for c in controller.calls])
         self.assertFalse(list(self.profile_base.iterdir()))
@@ -215,6 +304,29 @@ class TestDenials(BrowserTestCase):
         self.assertEqual(controller.calls, [])
         self.assertFalse(list(self.profile_base.iterdir()))
 
+    def test_readiness_eof_on_console_provider_never_captures(self) -> None:
+        from tiktok_ingest.guided import ConsoleConsentProvider
+
+        controller = FakeController(page_html())
+        # The browser grant is answered "yes", then the readiness
+        # checkpoint hits EOF: readiness is never assumed.
+        provider = ConsoleConsentProvider(
+            stdin=io.StringIO("yes\n"), out=lambda *a, **k: None
+        )
+        with self.assertRaises(browser.BrowserInventoryError) as ctx:
+            browser.run_browser_inventory(
+                state=self.state,
+                ref=REF,
+                consent=provider,
+                out=lambda _t: None,
+                controller=controller,
+                profile_base=self.profile_base,
+            )
+        self.assertIn("readiness", str(ctx.exception))
+        self.assertIn("open", [c[0] for c in controller.calls])
+        self.assertNotIn("content", [c[0] for c in controller.calls])
+        self.assertFalse(list(self.profile_base.iterdir()))
+
 
 class TestNoAutomation(BrowserTestCase):
     def test_controller_surface_has_no_login_automation(self) -> None:
@@ -228,7 +340,7 @@ class TestNoAutomation(BrowserTestCase):
 
     def test_operator_instructions_mention_manual_login(self) -> None:
         controller = FakeController(page_html())
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", True)])
+        consent = ScriptedConsent([("browser", True)])
         messages: list[str] = []
         browser.run_browser_inventory(
             state=self.state,
@@ -239,12 +351,16 @@ class TestNoAutomation(BrowserTestCase):
             profile_base=self.profile_base,
         )
         self.assertTrue(any("login/captcha" in m.lower() for m in messages))
+        self.assertTrue(
+            any("readiness" in m.lower() for m in messages),
+            "the operator is told about the readiness checkpoint",
+        )
 
 
 class TestDomAndAudit(BrowserTestCase):
     def test_dom_change_fails_explicitly_and_preserves_audit_html(self) -> None:
         controller = FakeController(page_html(container=False))
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", True)])
+        consent = ScriptedConsent([("browser", True)])
         with self.assertRaises(browser.BrowserInventoryError) as ctx:
             self.run_inventory(controller, consent)
         message = str(ctx.exception)
@@ -257,10 +373,38 @@ class TestDomAndAudit(BrowserTestCase):
         self.assertFalse(list(self.profile_base.iterdir()))
         self.assertIsNone(CollectionScanStore(self.state).load(REF.collection_key))
 
+    def test_access_blocked_page_gives_login_guidance_and_preserves_audit_html(self) -> None:
+        # Real unavailable run: visible "This collection isn’t available"
+        # (U+2019) + "Log in" link, no container, no item links.
+        unavailable_html = (
+            "<!DOCTYPE html><html><body><main>"
+            "<h1>This collection isn\u2019t available</h1>"
+            '<a href="https://www.tiktok.com/login">Log in</a>'
+            "</main></body></html>"
+        )
+        controller = FakeController(unavailable_html)
+        consent = ScriptedConsent([("browser", True)])
+        with self.assertRaises(browser.BrowserInventoryError) as ctx:
+            self.run_inventory(controller, consent)
+        message = str(ctx.exception)
+        self.assertNotIn("DOM", message)  # access evidence, not a DOM change
+        lowered = message.lower()
+        self.assertIn("log in manually", lowered)
+        self.assertIn("verify the collection actually", lowered)
+        self.assertIn("before signaling readiness", lowered)
+        captures = list(
+            (self.state.collections_dir / f"{REF.collection_key}-captures").glob("*.html")
+        )
+        self.assertEqual(len(captures), 1, "audit HTML preserved for diagnosis")
+        self.assertEqual(captures[0].read_text(encoding="utf-8"), unavailable_html)
+        self.assertIn(str(captures[0]), message)
+        self.assertFalse(list(self.profile_base.iterdir()))
+        self.assertIsNone(CollectionScanStore(self.state).load(REF.collection_key))
+
     def test_audit_html_is_the_captured_content(self) -> None:
         html = page_html()
         controller = FakeController(html)
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", True)])
+        consent = ScriptedConsent([("browser", True)])
         report = self.run_inventory(controller, consent)
         self.assertEqual(Path(report.audit_html_path).read_text(encoding="utf-8"), html)
 
@@ -268,7 +412,7 @@ class TestDomAndAudit(BrowserTestCase):
 class TestCleanupHonesty(BrowserTestCase):
     def test_close_failure_is_reported_not_hidden(self) -> None:
         controller = CloseFailsController(page_html())
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", True)])
+        consent = ScriptedConsent([("browser", True)])
         report = self.run_inventory(controller, consent)
         self.assertTrue(
             any("context close failed" in note for note in report.cleanup_notes)
@@ -291,7 +435,7 @@ class TestCleanupHonesty(BrowserTestCase):
         from unittest import mock
 
         controller = FakeController(page_html())
-        consent = ScriptedConsent([("browser", True), ("browser-confirm", True)])
+        consent = ScriptedConsent([("browser", True)])
         with mock.patch.object(
             shutil, "rmtree", side_effect=OSError("fixture: disk on fire")
         ):

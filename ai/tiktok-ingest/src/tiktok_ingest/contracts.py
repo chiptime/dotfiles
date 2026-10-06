@@ -323,6 +323,19 @@ class JobManifest:
     # the canonical stage order, so it is recorded here rather than as a
     # pseudo-stage. ``None`` on manifests created before a fetch existed.
     extraction: dict[str, Any] | None = None
+    # Phase 0 addendum (swap-quiet-retry PRD section 5.1): durable
+    # provenance of the ONE bounded vision swap-retry for this job.
+    # ``None`` on every manifest written before the feature or when no
+    # retry ran. Append-only evidence inside the EXISTING manifest —
+    # never a second job ledger: ``original`` archives the failed
+    # attempt this retry responds to (stage record, gate evidence,
+    # artifact archive dir, scope fingerprints), ``consent`` records the
+    # dedicated retry authorization, ``attempt`` records the retry's own
+    # start/finish, cooldown samples and outcome. A retry in a LATER
+    # invocation chains any previous ``swap_retry`` under ``prior``
+    # instead of discarding it (the per-invocation cap is NOT a lifetime
+    # ``attempts >= 2`` rejection — PRD FR-17).
+    swap_retry: dict[str, Any] | None = None
     schema_version: str = MANIFEST_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -340,6 +353,8 @@ class JobManifest:
             raise ContractError("JobManifest.resource_gates must be an object")
         if self.extraction is not None and not isinstance(self.extraction, dict):
             raise ContractError("JobManifest.extraction must be an object or null")
+        if self.swap_retry is not None and not isinstance(self.swap_retry, dict):
+            raise ContractError("JobManifest.swap_retry must be an object or null")
         if not isinstance(self.stages, dict):
             raise ContractError("JobManifest.stages must be an object")
         normalized: dict[str, StageRecord] = {}

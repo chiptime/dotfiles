@@ -226,6 +226,26 @@ class IsolationGates:
 GATES = IsolationGates()
 
 # --------------------------------------------------------------------------
+# Phase 0 addendum: bounded vision swap-retry cooldown (PRD D-04).
+# Proposed operational heuristics requiring validation — NOT efficacy
+# claims (assumption A-03): waiting may or may not quiet the host.
+# --------------------------------------------------------------------------
+
+# Read-only sampling interval of the cumulative swap I/O counters.
+SWAP_RETRY_COOLDOWN_INTERVAL_SECONDS = 5.0
+# Admission eligible no earlier than this, from cooldown start.
+SWAP_RETRY_COOLDOWN_FLOOR_SECONDS = 60.0
+# Hard total cap from cooldown start; NEVER restarted (instability or
+# final-conditions drift reset only the consecutive-stable count).
+SWAP_RETRY_COOLDOWN_CAP_SECONDS = 180.0
+# Stability = this many consecutive intervals at or below the rate limit.
+SWAP_RETRY_COOLDOWN_STABLE_INTERVALS = 3
+# Swap I/O need per interval computed from the CUMULATIVE counters.
+SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S = 1.0
+# Truthful progress narration cadence (stderr) during the cooldown.
+SWAP_RETRY_NARRATION_INTERVAL_SECONDS = 15.0
+
+# --------------------------------------------------------------------------
 # Milestone 3: isolated Ollama runtime (methodology sections 2 and 5)
 # --------------------------------------------------------------------------
 

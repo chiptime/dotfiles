@@ -21,6 +21,7 @@ from unittest import mock
 from tiktok_ingest.cli import main
 from tiktok_ingest.collection import (
     DEFAULT_ACCESS_BLOCK_MARKERS,
+    CollectionAccessBlockedError,
     CollectionDOMError,
     CollectionError,
     CollectionScanState,
@@ -57,6 +58,15 @@ T2 = "2026-09-18T12:01:00Z"
 T3 = "2026-09-18T12:02:00Z"
 
 ACCESS_TEXT = "Collection isn't available. Log in to continue."
+
+# Visible text of the real unavailable run: typographic apostrophe
+# (U+2019), a login link, no collection container, no item links.
+UNAVAILABLE_PAGE = (
+    "<!DOCTYPE html><html><body><main>"
+    "<h1>This collection isn\u2019t available</h1>"
+    '<a href="https://www.tiktok.com/login">Log in</a>'
+    "</main></body></html>"
+)
 
 
 def fake_id(n: int) -> str:
@@ -258,6 +268,243 @@ class ExtractPageItemsTests(unittest.TestCase):
         )
         self.assertEqual(len(observation.items), 1)
         self.assertEqual(observation.access_markers, ("verify to continue",))
+
+    def test_missing_container_with_access_evidence_is_access_blocked_not_dom_change(self) -> None:
+        with self.assertRaises(CollectionAccessBlockedError) as ctx:
+            extract_page_items(UNAVAILABLE_PAGE, CONTAINER_ATTR, CONTAINER_VALUE)
+        message = str(ctx.exception)
+        self.assertIn("access-block evidence", message)
+        self.assertIn(DEFAULT_ACCESS_BLOCK_MARKERS[0], message)
+        self.assertIn("log in", message)
+        self.assertIn("not proof it is private or deleted", message)
+        self.assertNotIn("DOM", message)
+        self.assertNotIsInstance(ctx.exception, CollectionDOMError)
+
+    def test_access_blocked_error_is_a_distinct_collection_error(self) -> None:
+        self.assertTrue(issubclass(CollectionAccessBlockedError, CollectionError))
+        self.assertFalse(issubclass(CollectionAccessBlockedError, CollectionDOMError))
+
+    def test_curly_apostrophe_and_entity_variants_still_match_availability_marker(self) -> None:
+        for text in (
+            "This collection isn\u2019t available. Log in to continue.",
+            "This collection isn&rsquo;t available. Log in to continue.",
+            "This collection isn&#8217;t available. Log in to continue.",
+            "This collection isn&#x2019;t available. Log in to continue.",
+        ):
+            with self.subTest(text=text):
+                page = collection_page(item_href(1), access_text=text)
+                observation = extract_page_items(page, CONTAINER_ATTR, CONTAINER_VALUE)
+                lowered = [marker.lower() for marker in observation.access_markers]
+                self.assertIn(DEFAULT_ACCESS_BLOCK_MARKERS[0], lowered)
+                self.assertIn("log in", lowered)
+
+    def test_missing_container_without_access_evidence_still_dom_error(self) -> None:
+        with self.assertRaises(CollectionDOMError) as ctx:
+            extract_page_items(
+                "<html><body><div class='something-else'>no marker</div></body></html>",
+                CONTAINER_ATTR,
+                CONTAINER_VALUE,
+            )
+        self.assertNotIsInstance(ctx.exception, CollectionAccessBlockedError)
+
+
+# --------------------------------------------------------------------------
+# 2b) Access evidence scope: rendered text nodes only
+# --------------------------------------------------------------------------
+
+I18N_HEAD = (
+    "<script>window.__i18n__ = {"
+    '"unavailable":"This collection isn\u2019t available. Log in to continue.",'
+    '"login":"Log in","login_cta":"Log in"'
+    "};</script>"
+    '<script type="application/json">{"msg":"Collection isn&rsquo;t available"}</script>'
+)
+
+
+def _document(body: str, *, head: str = "") -> str:
+    return f"<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>"
+
+
+def _container_body(extra: str = "") -> str:
+    inner = _anchor(item_href(1))
+    return (
+        f'<div {CONTAINER_ATTR}="{CONTAINER_VALUE}">{inner}</div>{extra}'
+    )
+
+
+class AccessMarkerRenderedTextTests(unittest.TestCase):
+    """Access markers must come from RENDERED text nodes only.
+
+    The saved authenticated capture (2026-09-30) carried the
+    unavailability string ONLY inside script i18n JSON: raw-markup
+    substring scanning produced a false access block. Evidence scope
+    here: text nodes of parsable elements, excluding script/style/
+    template/noscript subtrees, attribute values, comments and
+    explicitly hidden (hidden/aria-hidden) subtrees. No CSS or
+    computed visibility is claimed or inspected.
+    """
+
+    def test_script_i18n_strings_do_not_block_a_page_with_items(self) -> None:
+        page = _document(_container_body(), head=I18N_HEAD)
+        observation = extract_page_items(page, CONTAINER_ATTR, CONTAINER_VALUE)
+        self.assertEqual(observation.access_markers, ())
+        self.assertEqual(len(observation.items), 1)
+
+    def test_style_template_noscript_comment_and_attributes_are_never_evidence(
+        self,
+    ) -> None:
+        body = (
+            "<style>.x::after{content:'Collection isn&#39;t available. Log in'}</style>"
+            "<template><p>Collection isn't available. Log in</p></template>"
+            "<noscript><p>Collection isn't available. Log in</p></noscript>"
+            "<!-- Collection isn't available. Log in -->"
+            "<div data-foo=\"collection isn't available log in\"></div>"
+            + _container_body()
+        )
+        observation = extract_page_items(
+            _document(body), CONTAINER_ATTR, CONTAINER_VALUE
+        )
+        self.assertEqual(observation.access_markers, ())
+        self.assertEqual(len(observation.items), 1)
+
+    def test_explicitly_hidden_subtrees_are_not_rendered_text(self) -> None:
+        body = _container_body(
+            "<div hidden><p>Collection isn&rsquo;t available. Log in</p></div>"
+            '<span aria-hidden="true">Collection isn&#8217;t available. Log in</span>'
+            '<span aria-hidden="false">visible, not evidence</span>'
+        )
+        observation = extract_page_items(
+            _document(body), CONTAINER_ATTR, CONTAINER_VALUE
+        )
+        self.assertEqual(observation.access_markers, ())
+        self.assertEqual(len(observation.items), 1)
+
+    def test_adjacent_text_fragments_never_fabricate_a_marker(self) -> None:
+        # Source-concatenation would read "collection isn't available.
+        # Log in" across three fragments; separate text nodes joined
+        # WITH a space must not fabricate the marker (and a fabricated
+        # "log in" alone never blocks anyway).
+        body = _container_body(
+            "<p><span>collection isn</span><span>'t available. Log</span>"
+            "<span>in</span></p>"
+        )
+        observation = extract_page_items(
+            _document(body), CONTAINER_ATTR, CONTAINER_VALUE
+        )
+        self.assertEqual(observation.access_markers, ())
+
+    def test_visible_blocked_text_split_across_inline_elements_still_matches(
+        self,
+    ) -> None:
+        body = _container_body(
+            "<main><h1><span>Collection isn't </span><span>available</span></h1>"
+            '<a href="https://www.tiktok.com/login">Log in</a></main>'
+        )
+        observation = extract_page_items(
+            _document(body), CONTAINER_ATTR, CONTAINER_VALUE
+        )
+        lowered = [marker.lower() for marker in observation.access_markers]
+        self.assertIn(DEFAULT_ACCESS_BLOCK_MARKERS[0], lowered)
+        self.assertIn("log in", lowered)
+
+    def test_whitespace_variants_of_visible_blocked_text_still_match(self) -> None:
+        body = _container_body(
+            "<p>Collection   isn't\navailable.</p>"
+            "<a href='https://www.tiktok.com/login'>Log\tin</a>"
+        )
+        observation = extract_page_items(
+            _document(body), CONTAINER_ATTR, CONTAINER_VALUE
+        )
+        lowered = [marker.lower() for marker in observation.access_markers]
+        self.assertIn(DEFAULT_ACCESS_BLOCK_MARKERS[0], lowered)
+        self.assertIn("log in", lowered)
+
+    def test_visible_unavailable_body_still_blocks_even_with_i18n_scripts(
+        self,
+    ) -> None:
+        page = _document(
+            "<main><h1>This collection isn\u2019t available</h1>"
+            '<a href="https://www.tiktok.com/login">Log in</a></main>',
+            head=I18N_HEAD,
+        )
+        with self.assertRaises(CollectionAccessBlockedError):
+            extract_page_items(page, CONTAINER_ATTR, CONTAINER_VALUE)
+
+    def test_unknown_dom_without_rendered_markers_fails_as_dom_error(self) -> None:
+        page = _document(
+            "<div class='something-else'>no container here</div>", head=I18N_HEAD
+        )
+        with self.assertRaises(CollectionDOMError) as ctx:
+            extract_page_items(page, CONTAINER_ATTR, CONTAINER_VALUE)
+        self.assertNotIsInstance(ctx.exception, CollectionAccessBlockedError)
+
+
+class VerifiedLiveCollectionShapeTests(unittest.TestCase):
+    """Sanitized synthetic mirror of the verified authenticated capture.
+
+    Shape only (fake author, synthetic 19-digit IDs, no real markup):
+    unavailability strings exist ONLY in script i18n JSON; exactly one
+    div[data-e2e=collection-item-list] holds the collection cards whose
+    anchors repeat IDs; a separate notifications inbox holds item links
+    that are NOT collection members. The live browser inventory scans
+    this selector.
+    """
+
+    LIVE_ATTR = "data-e2e"
+    LIVE_VALUE = "collection-item-list"
+
+    @staticmethod
+    def _page(*, with_collection: bool = True) -> str:
+        cards = "".join(
+            '<div data-e2e="collection-item">'
+            f'<a href="/@{FAKE_AUTHOR}/video/{fake_id(n)}">card {n}</a>'
+            f'<a href="/@{FAKE_AUTHOR}/video/{fake_id(n)}?is_copy=1">copy {n}</a>'
+            "</div>"
+            for n in range(1, 10)  # 9 cards, 18 anchors, 9 unique IDs
+        )
+        notifications = "".join(
+            f'<a href="https://www.tiktok.com/@{FAKE_AUTHOR}/video/{fake_id(100 + n)}">notif {n}</a>'
+            f'<a href="https://www.tiktok.com/@{FAKE_AUTHOR}/video/{fake_id(100 + n)}?from=notify">dup {n}</a>'
+            for n in range(1, 18)  # 34 anchors, 17 unique IDs, disjoint
+        )
+        collection_div = (
+            f'<div {VerifiedLiveCollectionShapeTests.LIVE_ATTR}='
+            f'"{VerifiedLiveCollectionShapeTests.LIVE_VALUE}">{cards}</div>'
+            if with_collection
+            else ""
+        )
+        return _document(
+            collection_div
+            + '<div data-e2e="inbox-notifications">' + notifications + "</div>",
+            head=I18N_HEAD,
+        )
+
+    def _observe(self, *, with_collection: bool = True):
+        return extract_page_items(
+            self._page(with_collection=with_collection),
+            self.LIVE_ATTR,
+            self.LIVE_VALUE,
+        )
+
+    def test_nine_members_deduped_and_notifications_kept_outside(self) -> None:
+        observation = self._observe()
+        self.assertTrue(observation.container_found)
+        self.assertEqual(len(observation.items), 9)
+        self.assertEqual(len({item.stable_id for item in observation.items}), 9)
+        self.assertEqual(observation.out_of_container_count, 34)
+        self.assertEqual(observation.access_markers, ())
+
+    def test_no_member_id_comes_from_the_notifications_inbox(self) -> None:
+        observation = self._observe()
+        notification_ids = {fake_id(100 + n) for n in range(1, 18)}
+        self.assertFalse(
+            notification_ids & {item.stable_id for item in observation.items}
+        )
+
+    def test_missing_live_container_is_dom_change_not_access_block(self) -> None:
+        with self.assertRaises(CollectionDOMError) as ctx:
+            self._observe(with_collection=False)
+        self.assertNotIsInstance(ctx.exception, CollectionAccessBlockedError)
 
 
 # --------------------------------------------------------------------------

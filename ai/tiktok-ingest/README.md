@@ -284,32 +284,41 @@ python3 -m tiktok_ingest collection-run "<collection-url>" [--dry-run] \
 
 Journey: read-only preflight (dependencies, local state, exclusive
 writer, planned destinations) → headed Playwright browser with a
-DEDICATED run-scoped profile (the operator handles login/captcha by
-hand and explicitly confirms visibility — the browser controller
+DEDICATED run-scoped profile under the ONE browser grant (the operator
+handles login/captcha by hand and signals readiness with a press-Enter
+CHECKPOINT that is not an authorization — the browser controller
 exposes only open/read/close, so login automation is impossible by
 construction) → collection-scoped capture through the EXISTING
 `collection.py` contracts (recommendations counted, never items;
 declared/observed/end/access recorded separately; DOM change fails
 explicitly; audit HTML persisted) → browser closed and profile removed
-before any media work → batches of at most five through the EXISTING
-`guided-run` coordinator → automatic synthesis → bounded verification
+before any media work → ONE whole-current-run plan grant over the
+FROZEN inventory → batches of at most five through the EXISTING
+`guided-run` coordinator (stage windows discharged by the run-plan
+grant) → automatic synthesis → ONE grouped verification authorization
 → local `pending` backlog entries only.
 
 Key boundaries:
 
-- **Batches**: the plan is recomputed FRESH from current state before
-  every batch; `new_processable` + `partial_resumable` ids are
-  eligible, capped at 5; completed/rejected ids are skipped; a batch
-  that makes no NEW progress stops with a loop-guard reason instead of
-  re-asking forever. Progress reporting is a view derived from the
-  product's stores — never a second ledger.
+- **Batches**: the inventory is FROZEN once after the capture; batches
+  are fixed slices of at most five, so each frozen id is attempted in
+  exactly ONE batch, a failed id is never reattempted this invocation,
+  the loop is bounded by construction and ids that become eligible
+  later are never absorbed without a new scope decision. Progress
+  reporting is a view derived from the product's stores — never a
+  second ledger.
 - **Whisper coordination** (`src/tiktok_ingest/whisper_lifecycle.py`):
   when the known shared service (`voice-assistant-whisper`) is running,
-  collection-run verifies its identity/configuration BEFORE any consent,
-  then asks TWO separate windows BEFORE any mutation: `whisper-stop`
+  collection-run verifies its identity/configuration read-only BEFORE
+  the run-plan window and binds that exact identity into the grant;
+  the coordinator then asks TWO separate windows BEFORE any mutation —
+  `whisper-stop`
   (bounded `podman stop --timeout 30`, positively verified) and a
   STANDING `whisper-restore` authorization for the recovery of the SAME
-  service/configuration. Denial of either blocks BEFORE any mutation.
+  service/configuration — both discharged by the plan grant when (and
+  only when) the service text matches the binding; a drifted
+  configuration is forwarded to the human as new scope. Denial of
+  either blocks BEFORE any mutation.
   The restore runs under that prior authorization once the GPU window
   ends — normally, on failure, or after an interruption (a Ctrl-C never
   grants a window and never triggers a new prompt) — UNLESS the
@@ -322,6 +331,35 @@ Key boundaries:
   blocks ALL further progress, reports the actual partial state and
   promises no rollback. Standalone `guided-run` keeps its documented
   behavior (whisper operator-managed, blocks with instructions).
+- **Bounded vision swap-retry** (`src/tiktok_ingest/swap_cooldown.py`,
+  Phase 0 addendum): when a batch's vision stage fails ONLY the
+  `swap_delta` gate with verified cleanup (decided from the persisted
+  TYPED gate id, never reason prose), collection-run may offer ONE
+  extra vision attempt per video per invocation — never covered by the
+  run-plan grant: a dedicated `vision-swap-retry` consent window names
+  the id, the measured overshoot, the full budget, the whisper
+  stop/restore under this new lifecycle authority and the effects of a
+  second failure. Before the prompt, the batch cycle's standing restore
+  is positively verified (SAME service, healthy). After consent, a
+  READ-ONLY cooldown samples the cumulative swap I/O counters every 5 s
+  (admission floor 60 s, hard cap 180 s that instability or drift never
+  restarts, stability = 3 consecutive intervals ≤ 1 MiB/s; unreadable or
+  decreasing counters fail closed distinctly from expiry; truthful 15 s
+  narration to stderr). Re-admission then stops whisper again under the
+  retry authority, re-checks the identical configuration and fresh free
+  VRAM (final-conditions drift resets the stability count inside the
+  SAME cap, never a fresh 180 s), and the single vision-only re-run
+  reuses fetch/prepare and never repeats completed audio/synthesis/
+  verify. The original failure evidence and partial artifacts are
+  archived unmodified (`vision-attempt-N/` + `meta.json` `swap_retry`,
+  append-only — no second ledger); the final stdout JSON gains an
+  additive per-video retry object. A fired gate still ends the original
+  GPU window: remaining same-window ids stay pending EVEN after a
+  successful retry, a failed second attempt ends the matter (no third,
+  no re-prompt), and retry exhaustion stays video/window-scoped — never
+  relabeled as the global service-restoration hard stop. Waiting is not
+  a cure: the cooldown measures, it promises nothing (V3 real-GPU
+  validation remains a separate authorization).
 - **Automatic synthesis** (`src/tiktok_ingest/synthesis_api.py`): ONE
   OpenAI-compatible adapter (`POST {base}/chat/completions`) configured
   ONLY through the documented environment variables
@@ -339,12 +377,29 @@ Key boundaries:
   malformed output, denial or missing configuration are RESUMABLE
   synthesis stops — completed vision/audio are never repeated and no
   classification is ever manufactured.
-- **Consent**: every effect sits behind its own window (browser,
-  browser-confirm, tanda, fetch, prepare, gpu, whisper-stop,
-  whisper-restore, synthesis-api, verify), each naming exact
-  ids/destinations/operations/limits/effects. Denial/EOF/non-TTY/Ctrl-C
-  stop without assuming consent; there is no global `--yes`; a grant
-  never persists into a later window, batch or invocation.
+- **Consent** (user-approved two-decision contract): ONE browser grant
+  opens the headed browser and names the isolated profile, the audit
+  HTML write and the scan/inventory merge; a press-Enter READINESS
+  checkpoint after manual login (a readiness signal, NOT a second
+  authorization) starts the capture under that grant. ONE
+  whole-current-run plan grant then covers the FROZEN inventory —
+  exact eligible ids and canonical URLs with stage reuse states,
+  batches of at most five (each id in exactly ONE batch, never
+  reattempted this invocation), the whisper stop/restore authority for
+  the exact service identity bound read-only before the plan, the
+  synthesis endpoint/model, and the retry policy. Stage windows
+  provably inside that scope (tanda, fetch, prepare, gpu,
+  whisper-stop, whisper-restore, synthesis-api) are discharged by the
+  run authorization wrapper and audited as `covered_by_run_plan` —
+  never fabricated human yeses; unknown kinds, excess ids, unapproved
+  destinations or whisper config drift are forwarded to the human as
+  genuinely new scope and never auto-granted. Verification candidate
+  URLs are unknown until synthesis, so the batches defer the verify
+  window and ONE grouped authorization shows every exact validated URL
+  before any retrieval. Denial/EOF/non-TTY/Ctrl-C stop without
+  assuming consent; there is no global `--yes`; a grant never persists
+  into a later window, batch or invocation. Standalone `guided-run`
+  keeps its own per-window flow unchanged.
 - **Dry run**: `--dry-run` prints preflight + the document-only plan
   with zero browser, zero network, zero containers, zero GPU, zero API
   calls and zero writes.
@@ -373,7 +428,11 @@ tested:
   collection with end evidence is a valid complete empty result).
 - "Collection isn't available" plus "log in" is ACCESS-block evidence:
   status `blocked`. It does NOT prove deletion or privacy and is
-  distinct from an honestly empty collection.
+  distinct from an honestly empty collection. Markers must appear in
+  RENDERED text nodes: script/style/template/noscript payloads,
+  attribute values, comments and explicitly hidden
+  (`hidden`/`aria-hidden`) subtrees are never evidence (the live page
+  ships the unavailability string as script i18n JSON on every page).
 - A changed DOM (container marker missing) fails explicitly with
   `CollectionDOMError` — never a fake empty list.
 - Scan state is MERGE-ONLY: a later partial observation never removes
@@ -403,8 +462,8 @@ Commands (all accept `--state-root`):
 python3 -m tiktok_ingest inventory-collect \
   "https://www.tiktok.com/@author/collection/<slug>" \
   --html page-snapshot.html \
-  --container-attr data-testid \
-  --container-value collection-container \
+  --container-attr data-e2e \
+  --container-value collection-item-list \
   [--declared-count N] [--end-evidence TEXT] [--stop-reason TEXT] \
   [--blocked-marker "verify to continue"]   # repeatable
 
@@ -435,7 +494,7 @@ python3 -m tiktok_ingest fetch-url https://www.tiktok.com/@author/video/<id>
 #     then inspect status and the document-only plan (see "Collection
 #     inventory (offline core)"):
 python3 -m tiktok_ingest inventory-collect "<collection-url>" --html snapshot.html \
-  --container-attr data-testid --container-value collection-container
+  --container-attr data-e2e --container-value collection-item-list
 python3 -m tiktok_ingest inventory-status "<collection-url-or-key>"
 python3 -m tiktok_ingest inventory-plan "<collection-url-or-key>"
 

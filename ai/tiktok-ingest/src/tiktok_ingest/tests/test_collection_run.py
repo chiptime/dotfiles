@@ -2,22 +2,29 @@
 
 Covers the Phase 0 application layer end to end with fakes: the
 browser controller double, stage doubles that seed REAL durable state
-(so the product's own fingerprints drive resume), the scripted/recording
+(so the product's fingerprints drive resume), the scripted/recording
 consent provider, the fake text-API transport and the fake podman
 runner. Zero network, zero browser, zero GPU, zero containers.
 
-The coordination contract proven here: fresh plan recomputation per
-batch, batch cap 5, exclusion of completed/rejected ids, loop-guard on
-no progress, whisper stop/restore ordering and failure blocking, the
-synthesis API consent + resumable stops (timeout/refusal/denial/
-missing config) without vision/audio repetition, exact-URL verify
-consent from the VALIDATED document, pending-only delivery without
-duplicates, and dry-run zero effects.
+The TWO-decision authorization contract proven here (user-approved
+2026-09-30): ONE browser grant naming the readiness checkpoint and the
+snapshot/audit writes; a press-Enter readiness checkpoint that is NOT
+a yes/no authorization; ONE whole-current-run plan grant over the
+FROZEN inventory (exact ids/URLs/reuse states, batches of <= 5, each
+id attempted exactly once, whisper identity bound read-only, synthesis
+endpoint+model named upfront, verification deferred); and ONE grouped
+verification authorization showing every exact validated candidate
+URL. Stage windows covered by the plan are discharged by the run
+authorization wrapper and audited as covered — never fabricated human
+yeses. Genuinely new scope (unknown kinds, excess ids, unapproved
+destinations, whisper config drift) is forwarded to the human and
+never auto-granted.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import io
 import json
 import tempfile
 import unittest
@@ -38,7 +45,11 @@ from tiktok_ingest.contracts import (
     StageRecord,
     StageResult,
 )
-from tiktok_ingest.guided import ConsentWindow, StageFunctions
+from tiktok_ingest.guided import (
+    ConsentWindow,
+    ConsoleConsentProvider,
+    StageFunctions,
+)
 from tiktok_ingest.state import Backlog, StateRoot
 from tiktok_ingest.synthesis_api import (
     ENV_API_KEY,
@@ -56,6 +67,11 @@ from tiktok_ingest.whisper_lifecycle import WhisperServiceInfo
 
 COLLECTION_URL = "https://www.tiktok.com/@fixture_author/collection/run-col"
 REF = parse_collection_url(COLLECTION_URL)
+
+# The only yes/no windows a HUMAN sees in one invocation of the new
+# contract (the grouped verification window only appears when some id
+# reached a validated synthesis document).
+HUMAN_KINDS = ["browser", "run-plan", "verify"]
 
 
 def seed_scan_for_run(state: StateRoot, video_ns: list[int]) -> None:
@@ -83,6 +99,7 @@ def seed_scan_for_run(state: StateRoot, video_ns: list[int]) -> None:
     )
     CollectionScanStore(state).save(merged)
     sync_inventory_from_scan(state, merged)
+
 
 API_ENV = {
     ENV_BASE_URL: "https://api.example.com/v1",
@@ -154,15 +171,26 @@ class FakeApiResponse:
 
 
 class RecordingConsent:
-    """Grants everything except the denied kinds; records every window."""
+    """Human-side provider double for the TWO-decision contract.
 
-    def __init__(self, deny: set[str] | None = None) -> None:
+    Records every yes/no window it is asked (only browser, run-plan,
+    verify and genuinely-extra-scope questions should ever arrive) and
+    every readiness checkpoint prompt (which is NOT a window).
+    """
+
+    def __init__(self, deny: set[str] | None = None, *, ready: bool = True) -> None:
         self.deny = deny or set()
+        self.ready = ready
         self.windows: list[ConsentWindow] = []
+        self.readiness_prompts: list[str] = []
 
     def ask(self, window: ConsentWindow) -> bool:
         self.windows.append(window)
         return window.kind not in self.deny
+
+    def await_readiness(self, prompt: str) -> bool:
+        self.readiness_prompts.append(prompt)
+        return self.ready
 
     @property
     def kinds(self) -> list[str]:
@@ -182,15 +210,24 @@ KNOWN_INFO = WhisperServiceInfo(
 
 OTHER_INFO = dataclasses.replace(KNOWN_INFO, name="some-other-whisper")
 
+# Same known name/image (passes verify_known_service) with a DIFFERENT
+# identity-relevant configuration: a run plan bound to DRIFTED_INFO must
+# NOT cover a stop/restore of the real KNOWN_INFO service.
+DRIFTED_INFO = dataclasses.replace(
+    KNOWN_INFO, env=(("COMPUTE_TYPE", "int8"), ("DEVICE", "cuda"))
+)
+
 
 def page_html(items: int) -> str:
+    # Verified live shape: the collection container is marked with
+    # data-e2e=collection-item-list (matches the browser defaults).
     links = "".join(
         f'<a href="/@fixture_author/video/{fake_id(n)}">item</a>'
         for n in range(items)
     )
     return (
         "<!DOCTYPE html><html><body>"
-        f'<div data-testid="collection-container">{links}</div>'
+        f'<div data-e2e="collection-item-list">{links}</div>'
         "</body></html>"
     )
 
@@ -238,6 +275,7 @@ class CollectionStages:
         *,
         whisper_running: bool = False,
         whisper_info: WhisperServiceInfo | None = KNOWN_INFO,
+        whisper_infos: list[WhisperServiceInfo | None] | None = None,
         whisper_stop_fails: bool = False,
         whisper_stop_raises_ki: bool = False,
         whisper_restore_fails: bool = False,
@@ -251,6 +289,10 @@ class CollectionStages:
         self.calls: list[str] = []
         self.whisper_running = whisper_running
         self.whisper_info = whisper_info
+        # Optional scripted inspect sequence (popped per inspect call):
+        # used to make the plan-time binding see a DIFFERENT service
+        # configuration than the batch-time coordination does.
+        self.whisper_infos = list(whisper_infos) if whisper_infos else None
         self.whisper_stop_fails = whisper_stop_fails
         self.whisper_stop_raises_ki = whisper_stop_raises_ki
         self.whisper_restore_fails = whisper_restore_fails
@@ -385,6 +427,9 @@ class CollectionStages:
 
     def do_whisper_inspect(self) -> WhisperServiceInfo | None:
         self.calls.append("whisper-inspect")
+        if self.whisper_infos is not None:
+            info = self.whisper_infos.pop(0)
+            return info
         if not self.whisper_running:
             return None
         return self.whisper_info
@@ -483,6 +528,21 @@ class CollectionRunTestCase(unittest.TestCase):
         )
         return code, report, transport
 
+    # -- report shorthands ------------------------------------------------
+
+    def stage_windows(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+        return report["run_authorization"]["stage_windows"]
+
+    def covered_kinds(self, report: dict[str, Any]) -> list[str]:
+        return [
+            entry["window"]["kind"]
+            for entry in self.stage_windows(report)
+            if entry["decision"] == "covered_by_run_plan"
+        ]
+
+    def human_decisions(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+        return report["run_authorization"]["human_decisions"]
+
 
 # --------------------------------------------------------------------------
 # Dry run
@@ -500,6 +560,7 @@ class TestDryRun(CollectionRunTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(report["mode"], "dry-run")
         self.assertEqual(consent.kinds, [], "dry run never asks")
+        self.assertEqual(consent.readiness_prompts, [], "dry run never waits")
         self.assertEqual(stages.calls, [], "dry run never stages")
         self.assertEqual(transport.requests, [], "dry run never calls the API")
         self.assertFalse(
@@ -523,12 +584,12 @@ class TestDryRun(CollectionRunTestCase):
 
 
 # --------------------------------------------------------------------------
-# Happy path and batching
+# Happy path: the TWO-decision contract end to end
 # --------------------------------------------------------------------------
 
 
 class TestHappyPath(CollectionRunTestCase):
-    def test_full_journey_to_pending_entries(self) -> None:
+    def test_full_journey_asks_exactly_two_decisions_plus_grouped_verify(self) -> None:
         stages = CollectionStages()
         consent = RecordingConsent()
         code, report, transport = self.run_collection(stages, consent)
@@ -540,13 +601,20 @@ class TestHappyPath(CollectionRunTestCase):
         self.assertTrue(all(entry["status"] == "pending" for entry in backlog))
         # One outbound API request per id, none extra.
         self.assertEqual(len(transport.requests), 3)
-        # Window order: browser -> confirm -> tanda -> fetch -> prepare
-        # -> gpu -> synthesis-api(x3) -> verify.
+        # The ONLY human yes/no windows: browser -> run-plan -> verify.
+        self.assertEqual(consent.kinds, HUMAN_KINDS)
+        # The readiness checkpoint is a separate, non-authorizing signal.
+        self.assertEqual(len(consent.readiness_prompts), 1)
+        self.assertIn("readiness", consent.readiness_prompts[0].lower())
+        self.assertNotIn(
+            "browser-confirm",
+            consent.kinds + self.covered_kinds(report),
+            "readiness must not be a consent window",
+        )
+        # Stage windows were discharged BY THE PLAN, not by a human.
         self.assertEqual(
-            consent.kinds,
+            self.covered_kinds(report),
             [
-                "browser",
-                "browser-confirm",
                 "tanda",
                 "fetch",
                 "prepare",
@@ -554,13 +622,21 @@ class TestHappyPath(CollectionRunTestCase):
                 "synthesis-api",
                 "synthesis-api",
                 "synthesis-api",
-                "verify",
             ],
         )
         self.assertIn("review_next", report)
         self.assertEqual(report["backlog_pending_view"], 3)
+        # The grouped verification phase verified every id once.
+        self.assertEqual(report["verification"]["ids"], [fake_id(n) for n in range(3)])
+        self.assertTrue(report["verification"]["granted"])
+        self.assertTrue(
+            all(
+                rec["outcome"] == "complete"
+                for rec in report["verification"]["outcomes"].values()
+            )
+        )
 
-    def test_second_run_reuses_everything_and_duplicates_nothing(self) -> None:
+    def test_second_run_reuses_everything_and_asks_no_empty_plan(self) -> None:
         stages = CollectionStages()
         code1, report1, _ = self.run_collection(stages, RecordingConsent())
         self.assertEqual(code1, 0)
@@ -570,6 +646,10 @@ class TestHappyPath(CollectionRunTestCase):
         code2, report2, _ = self.run_collection(stages2, consent2)
         self.assertEqual(code2, 0, report2.get("hard_stop_reason"))
         self.assertEqual(report2["batches"], [], "nothing eligible remains")
+        # Nothing to authorize: only the browser grant is asked again —
+        # the first run's plan grant NEVER carries into this invocation.
+        self.assertEqual(consent2.kinds, ["browser"])
+        self.assertIsNone(report2["run_plan"], "no plan window when nothing is eligible")
         self.assertEqual(
             [c for c in stages2.calls if c.startswith(("fetch:", "vision:", "audio:"))],
             [],
@@ -577,7 +657,7 @@ class TestHappyPath(CollectionRunTestCase):
         )
         self.assertEqual(len(Backlog(self.state).entries()), 3, "no duplicates")
 
-    def test_batches_cap_at_five(self) -> None:
+    def test_batches_cap_at_five_with_one_grouped_verify(self) -> None:
         controller_html = page_html(7)
         stages = CollectionStages()
         consent = RecordingConsent()
@@ -586,8 +666,16 @@ class TestHappyPath(CollectionRunTestCase):
         self.assertEqual(len(report["batches"]), 2)
         self.assertEqual(len(report["batches"][0]["ids"]), 5)
         self.assertEqual(len(report["batches"][1]["ids"]), 2)
-        self.assertEqual(consent.kinds.count("tanda"), 2)
+        # Still exactly the same three human decisions across TWO batches.
+        self.assertEqual(consent.kinds, HUMAN_KINDS)
+        self.assertEqual(consent.kinds.count("verify"), 1, "one grouped verify")
+        # Every covered tanda/fetch/prepare/gpu window discharged by plan.
+        self.assertEqual(self.covered_kinds(report).count("tanda"), 2)
+        self.assertEqual(self.covered_kinds(report).count("fetch"), 2)
         self.assertEqual(len(Backlog(self.state).entries()), 7)
+        # Batch numbering is stated, never faked.
+        self.assertTrue(any("collection batch 1/2" in m for m in self.messages))
+        self.assertTrue(any("collection batch 2/2" in m for m in self.messages))
 
     def test_completed_and_rejected_ids_are_excluded(self) -> None:
         seed_scan_for_run(self.state, [0, 1, 2])
@@ -614,6 +702,7 @@ class TestHappyPath(CollectionRunTestCase):
         self.assertEqual(code, 0)
         batch_ids = report["batches"][0]["ids"]
         self.assertEqual(batch_ids, [fake_id(0)])
+        self.assertEqual(report["run_plan"]["frozen_ids"], [fake_id(0)])
         self.assertEqual(len(Backlog(self.state).entries()), 1)
 
     def test_resume_reuses_valid_completed_stages(self) -> None:
@@ -636,6 +725,103 @@ class TestHappyPath(CollectionRunTestCase):
         )
         self.assertIn("verify:" + fake_id(0), stages.calls)
         self.assertEqual(len(Backlog(self.state).entries()), 1)
+        # The plan named the reuse state of the frozen id.
+        self.assertEqual(
+            report["run_plan"]["stage_states"][fake_id(0)]["fetch"],
+            "complete",
+        )
+
+
+# --------------------------------------------------------------------------
+# The run-plan grant (decision 2)
+# --------------------------------------------------------------------------
+
+
+class TestRunPlan(CollectionRunTestCase):
+    def test_plan_window_names_frozen_scope_policies_and_consequences(self) -> None:
+        stages = CollectionStages(whisper_running=True)
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(stages, consent)
+        self.assertEqual(code, 0, report.get("hard_stop_reason"))
+        windows = consent.of("run-plan")
+        self.assertEqual(len(windows), 1)
+        window = windows[0]
+        self.assertEqual(
+            list(window.ids),
+            [fake_id(n) for n in range(3)],
+            "the plan names the exact frozen ids",
+        )
+        blob = " ".join(window.destinations)
+        for n in range(3):
+            self.assertIn(f"https://www.tiktok.com/@fixture_author/video/{fake_id(n)}", blob)
+        self.assertIn("https://api.example.com/v1", blob, "synthesis endpoint named upfront")
+        self.assertIn(KNOWN_INFO.describe(), blob, "bound whisper identity named upfront")
+        operations = " ".join(window.operations)
+        self.assertIn("glm-5.3-flash", operations, "synthesis model named upfront")
+        self.assertIn("one additional grouped", operations.lower())
+        limits = " ".join(window.limits)
+        self.assertIn("exactly ONE batch", limits)
+        self.assertIn("never reattempted", limits)
+        effects = " ".join(window.effects)
+        self.assertIn("PENDING backlog", effects)
+        self.assertNotIn(API_ENV[ENV_API_KEY], json.dumps(window.to_dict()))
+        # The report mirrors the frozen scope for audit.
+        run_plan = report["run_plan"]
+        self.assertTrue(run_plan["granted"])
+        self.assertEqual(run_plan["frozen_ids"], [fake_id(n) for n in range(3)])
+        self.assertEqual(run_plan["batch_cap"], 5)
+        self.assertEqual(run_plan["batch_count"], 1)
+        self.assertEqual(run_plan["text_api"]["origin"], "https://api.example.com/v1")
+        self.assertEqual(run_plan["text_api"]["model"], "glm-5.3-flash")
+        self.assertEqual(run_plan["whisper"]["bound"], KNOWN_INFO.describe())
+        # The binding was a read-only inspect BEFORE the plan window.
+        self.assertLess(
+            stages.calls.index("whisper-inspect"),
+            stages.calls.index("whisper-stopped-check"),
+            "plan-time identity binding precedes any batch coordination",
+        )
+
+    def test_plan_denial_runs_no_stage(self) -> None:
+        stages = CollectionStages(whisper_running=True)
+        consent = RecordingConsent(deny={"run-plan"})
+        code, report, _ = self.run_collection(stages, consent)
+        self.assertEqual(code, 1)
+        self.assertIn("run plan denied", report["hard_stop_reason"])
+        self.assertEqual(report["batches"], [])
+        self.assertEqual(stages.calls, ["whisper-inspect"], "read-only binding only")
+        self.assertEqual(stages.whisper_stops, 0, "no mutation without the plan grant")
+        self.assertEqual(Backlog(self.state).entries(), [])
+        self.assertEqual(consent.kinds, ["browser", "run-plan"], "no later asks")
+
+    def test_expired_run_grant_never_carries_into_the_next_invocation(self) -> None:
+        seed_scan_for_run(self.state, [0])
+        seed_job(
+            self.state,
+            fake_id(0),
+            complete=("fetch", "prepare", "vision", "audio"),
+            evidence=True,
+        )
+        # First invocation: the human DENIES the plan — nothing runs.
+        stages = CollectionStages()
+        consent1 = RecordingConsent(deny={"run-plan"})
+        code1, _, _ = self.run_collection(stages, consent1, browser_html=page_html(1))
+        self.assertEqual(code1, 1)
+        self.assertEqual(consent1.kinds, ["browser", "run-plan"])
+        self.assertEqual(Backlog(self.state).entries(), [])
+        # Second invocation: the plan must be asked AGAIN (no remembered
+        # grant), and the resume completes without repeating media work.
+        stages2 = CollectionStages()
+        consent2 = RecordingConsent()
+        code2, report2, _ = self.run_collection(
+            stages2, consent2, browser_html=page_html(1)
+        )
+        self.assertEqual(code2, 0, report2.get("hard_stop_reason"))
+        self.assertEqual(consent2.kinds, HUMAN_KINDS, "a new invocation asks again")
+        self.assertEqual(
+            [c for c in stages2.calls if c.startswith(("vision:", "audio:"))], []
+        )
+        self.assertIn("verify:" + fake_id(0), stages2.calls)
+        self.assertEqual(len(Backlog(self.state).entries()), 1)
 
 
 # --------------------------------------------------------------------------
@@ -653,29 +839,21 @@ class TestConsent(CollectionRunTestCase):
         self.assertEqual(report["batches"], [])
         self.assertEqual(stages.calls, [])
         self.assertEqual(consent.kinds, ["browser"])
+        self.assertEqual(consent.readiness_prompts, [], "never waits after denial")
         self.assertEqual(Backlog(self.state).entries(), [])
 
-    def test_confirmation_denial_stops_everything(self) -> None:
+    def test_readiness_not_signaled_captures_nothing_and_stops(self) -> None:
         stages = CollectionStages()
-        consent = RecordingConsent(deny={"browser-confirm"})
+        consent = RecordingConsent(ready=False)
         code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
+        self.assertIn("readiness", report["hard_stop_reason"])
+        self.assertEqual(report["batches"], [])
         self.assertEqual(stages.calls, [])
+        self.assertEqual(consent.kinds, ["browser"], "no plan window without readiness")
         self.assertEqual(Backlog(self.state).entries(), [])
 
-    def test_tanda_denial_runs_no_stage_and_loop_guards(self) -> None:
-        stages = CollectionStages()
-        consent = RecordingConsent(deny={"tanda"})
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        self.assertIn("loop guard", report["hard_stop_reason"])
-        self.assertEqual(stages.calls, [], "no stage before permission")
-        self.assertEqual(Backlog(self.state).entries(), [])
-        # Exactly ONE tanda ask: the loop guard fires before a second
-        # identical no-progress batch is even attempted (no re-asking).
-        self.assertEqual(consent.kinds.count("tanda"), 1)
-
-    def test_verify_window_lists_exact_validated_candidate_urls(self) -> None:
+    def test_grouped_verify_window_lists_exact_validated_candidate_urls(self) -> None:
         document = sample_synthesis_document()
         stages = CollectionStages()
         consent = RecordingConsent()
@@ -699,14 +877,253 @@ class TestConsent(CollectionRunTestCase):
             }
         )
         self.assertEqual(sorted(verify_windows[0].destinations), expected)
+        self.assertEqual(
+            list(verify_windows[0].ids),
+            [fake_id(n) for n in range(3)],
+            "one window groups every ready id",
+        )
+        self.assertEqual(report["verification"]["candidate_urls"], expected)
 
-    def test_verify_denial_emits_nothing(self) -> None:
+    def test_grouped_verify_denial_emits_nothing_and_stays_resumable(self) -> None:
         stages = CollectionStages()
         consent = RecordingConsent(deny={"verify"})
         code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
-        self.assertIn("loop guard", report["hard_stop_reason"])
         self.assertEqual(Backlog(self.state).entries(), [], "no entry without verify consent")
+        self.assertFalse(report["verification"]["granted"])
+        self.assertEqual(report["verification"]["outcomes"], {})
+        # Batches themselves succeeded; a resumable re-invocation with
+        # the grouped grant verifies without repeating media work.
+        stages2 = CollectionStages()
+        consent2 = RecordingConsent()
+        code2, report2, _ = self.run_collection(stages2, consent2)
+        self.assertEqual(code2, 0, report2.get("hard_stop_reason"))
+        self.assertEqual(
+            [c for c in stages2.calls if c.startswith(("vision:", "audio:"))], []
+        )
+        self.assertEqual(len(Backlog(self.state).entries()), 3)
+
+
+# --------------------------------------------------------------------------
+# Authorization wrapper: coverage, audit, deferral
+# --------------------------------------------------------------------------
+
+
+class TestAuthorizationWrapper(CollectionRunTestCase):
+    def test_audit_distinguishes_human_grants_from_covered_operations(self) -> None:
+        stages = CollectionStages()
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(stages, consent)
+        self.assertEqual(code, 0)
+        humans = self.human_decisions(report)
+        self.assertEqual([h["window"]["kind"] for h in humans], HUMAN_KINDS)
+        self.assertTrue(all(h["basis"].startswith("human") for h in humans))
+        for entry in self.stage_windows(report):
+            if entry["decision"] == "covered_by_run_plan":
+                self.assertTrue(
+                    entry["window"]["kind"]
+                    in ("tanda", "fetch", "prepare", "gpu", "synthesis-api",
+                        "whisper-stop", "whisper-restore"),
+                    entry,
+                )
+            else:
+                self.assertIn(
+                    entry["decision"],
+                    ("deferred", "human_granted", "human_denied"),
+                    entry,
+                )
+
+    def test_unknown_kind_is_forwarded_never_auto_granted(self) -> None:
+        plan = collection_run.RunPlan(
+            collection_url=COLLECTION_URL,
+            frozen_ids=(fake_id(1),),
+            canonical_urls={fake_id(1): "https://www.tiktok.com/@fixture_author/video/1"},
+            stage_states={},
+            batch_cap=5,
+            batch_count=1,
+            plan_counts={},
+            whisper_bound=None,
+            whisper_note="",
+            text_api_origin=None,
+            text_api_model=None,
+        )
+        human = RecordingConsent(deny={"mystery"})
+        wrapper = collection_run.RunScopedAuthorization(human=human, plan=plan)
+        window = ConsentWindow(kind="mystery", title="unknown future window")
+        self.assertFalse(wrapper.ask(window))
+        self.assertEqual(human.kinds, ["mystery"], "unknown kinds reach the human")
+        self.assertEqual(wrapper.authorization_log[0]["decision"], "human_denied")
+        # Authority for unknown kinds comes ONLY from the human: a
+        # granting human is recorded as the grant, never the plan.
+        granter = RecordingConsent()
+        granter_wrapper = collection_run.RunScopedAuthorization(
+            human=granter, plan=plan
+        )
+        self.assertTrue(granter_wrapper.ask(window))
+        self.assertEqual(
+            granter_wrapper.authorization_log[-1]["decision"], "human_granted"
+        )
+
+    def test_excess_ids_and_unknown_destinations_are_not_covered(self) -> None:
+        plan = collection_run.RunPlan(
+            collection_url=COLLECTION_URL,
+            frozen_ids=(fake_id(1),),
+            canonical_urls={
+                fake_id(1): f"https://www.tiktok.com/@fixture_author/video/{fake_id(1)}"
+            },
+            stage_states={},
+            batch_cap=5,
+            batch_count=1,
+            plan_counts={},
+            whisper_bound=None,
+            whisper_note="",
+            text_api_origin="https://api.example.com/v1",
+            text_api_model="glm-5.3-flash",
+        )
+        human = RecordingConsent()
+        wrapper = collection_run.RunScopedAuthorization(human=human, plan=plan)
+        # A fetch window naming an id OUTSIDE the frozen inventory.
+        excess = ConsentWindow(
+            kind="fetch",
+            title="x",
+            ids=(fake_id(9),),
+            destinations=("https://www.tiktok.com/@fixture_author/video/9",),
+        )
+        self.assertTrue(wrapper.ask(excess), "forwarded to the human, who grants")
+        self.assertEqual(human.kinds, ["fetch"])
+        self.assertEqual(wrapper.authorization_log[0]["decision"], "human_granted")
+        self.assertIn("not covered", wrapper.authorization_log[0]["basis"])
+        # A fetch window with an UNAPPROVED destination URL.
+        stranger = ConsentWindow(
+            kind="fetch",
+            title="x",
+            ids=(fake_id(1),),
+            destinations=("https://evil.example/video/1",),
+        )
+        human2 = RecordingConsent()
+        wrapper2 = collection_run.RunScopedAuthorization(human=human2, plan=plan)
+        wrapper2.ask(stranger)
+        self.assertEqual(human2.kinds, ["fetch"], "unapproved destination is asked")
+        self.assertEqual(
+            [e["decision"] for e in wrapper2.authorization_log],
+            ["human_granted"],
+            "an unapproved destination is never covered, only asked",
+        )
+        # A synthesis window to a DIFFERENT endpoint is never covered.
+        other_api = ConsentWindow(
+            kind="synthesis-api",
+            title="x",
+            ids=(fake_id(1),),
+            destinations=("https://evil.example/v1",),
+        )
+        human3 = RecordingConsent()
+        wrapper3 = collection_run.RunScopedAuthorization(human=human3, plan=plan)
+        wrapper3.ask(other_api)
+        self.assertEqual(human3.kinds, ["synthesis-api"])
+
+    def _api_plan(self) -> collection_run.RunPlan:
+        return collection_run.RunPlan(
+            collection_url=COLLECTION_URL,
+            frozen_ids=(fake_id(1),),
+            canonical_urls={
+                fake_id(1): f"https://www.tiktok.com/@fixture_author/video/{fake_id(1)}"
+            },
+            stage_states={},
+            batch_cap=5,
+            batch_count=1,
+            plan_counts={},
+            whisper_bound=None,
+            whisper_note="",
+            text_api_origin="https://api.example.com/v1",
+            text_api_model="glm-5.3",
+        )
+
+    def test_synthesis_model_matches_exactly_never_by_substring(self) -> None:
+        plan = self._api_plan()
+        # Same endpoint, a model whose name merely CONTAINS the plan
+        # model as a substring: an impersonator, never covered.
+        sneaky = ConsentWindow(
+            kind="synthesis-api",
+            title="x",
+            ids=(fake_id(1),),
+            destinations=("https://api.example.com/v1",),
+            operations=(
+                "ONE request using model glm-5.3-quantized-evil "
+                "(NOT the approved model)",
+            ),
+        )
+        human = RecordingConsent()
+        wrapper = collection_run.RunScopedAuthorization(human=human, plan=plan)
+        self.assertTrue(wrapper.ask(sneaky), "impersonator forwarded to the human")
+        self.assertEqual(human.kinds, ["synthesis-api"])
+        self.assertNotEqual(
+            wrapper.authorization_log[0]["decision"],
+            "covered_by_run_plan",
+            "substring model match must never discharge a window",
+        )
+        # Structured binding: the exact model attribute discharges.
+        exact_structured = ConsentWindow(
+            kind="synthesis-api",
+            title="x",
+            ids=(fake_id(1),),
+            destinations=("https://api.example.com/v1",),
+            operations=("fixture operation",),
+            model="glm-5.3",
+        )
+        human2 = RecordingConsent()
+        wrapper2 = collection_run.RunScopedAuthorization(human=human2, plan=plan)
+        self.assertTrue(wrapper2.ask(exact_structured))
+        self.assertEqual(
+            wrapper2.authorization_log[0]["decision"], "covered_by_run_plan"
+        )
+        # Structured prefix/suffix impersonation is rejected exactly.
+        for evil in ("glm-5.3-quantized-evil", "evil-glm-5.3", "glm-5.3 ", "GLM-5.3"):
+            impersonator = ConsentWindow(
+                kind="synthesis-api",
+                title="x",
+                ids=(fake_id(1),),
+                destinations=("https://api.example.com/v1",),
+                operations=("fixture operation",),
+                model=evil,
+            )
+            human3 = RecordingConsent()
+            wrapper3 = collection_run.RunScopedAuthorization(human=human3, plan=plan)
+            wrapper3.ask(impersonator)
+            self.assertEqual(
+                human3.kinds,
+                ["synthesis-api"],
+                f"model {evil!r} must be asked as new scope, never covered",
+            )
+        # Legacy window without the attribute: the EXACT token parsed from
+        # the stable generated "(model <token>)" pattern still discharges.
+        legacy_exact = ConsentWindow(
+            kind="synthesis-api",
+            title="x",
+            ids=(fake_id(1),),
+            destinations=("https://api.example.com/v1",),
+            operations=(
+                "ONE request to https://api.example.com/v1 (model glm-5.3) "
+                "carrying ONLY sanitized evidence text",
+            ),
+        )
+        human4 = RecordingConsent()
+        wrapper4 = collection_run.RunScopedAuthorization(human=human4, plan=plan)
+        self.assertTrue(wrapper4.ask(legacy_exact))
+        self.assertEqual(
+            wrapper4.authorization_log[0]["decision"], "covered_by_run_plan"
+        )
+        # A legacy window with no parseable exact token is never covered.
+        legacy_vague = ConsentWindow(
+            kind="synthesis-api",
+            title="x",
+            ids=(fake_id(1),),
+            destinations=("https://api.example.com/v1",),
+            operations=("request using some model somewhere"),
+        )
+        human5 = RecordingConsent()
+        wrapper5 = collection_run.RunScopedAuthorization(human=human5, plan=plan)
+        wrapper5.ask(legacy_vague)
+        self.assertEqual(human5.kinds, ["synthesis-api"])
 
 
 # --------------------------------------------------------------------------
@@ -742,33 +1159,73 @@ class TestWhisperCoordination(CollectionRunTestCase):
         )
         self.assertEqual(stages.whisper_stops, 1)
         self.assertEqual(stages.whisper_restores, 1)
-        self.assertIn("whisper-stop", consent.kinds)
-        self.assertIn("whisper-restore", consent.kinds)
-        # GPU window consent comes before the whisper-stop window.
-        self.assertLess(consent.kinds.index("gpu"), consent.kinds.index("whisper-stop"))
+        # The whisper windows were covered by the plan — no human asks.
+        self.assertEqual(consent.kinds, HUMAN_KINDS)
+        covered = self.covered_kinds(report)
+        self.assertIn("whisper-stop", covered)
+        self.assertIn("whisper-restore", covered)
+        self.assertLess(
+            covered.index("gpu"), covered.index("whisper-stop"),
+            "gpu window (covered) precedes the covered whisper-stop",
+        )
 
-    def test_stop_denial_blocks_vision_without_mutation(self) -> None:
+    def test_each_batch_stop_cycle_is_covered_no_extra_prompts(self) -> None:
         stages = CollectionStages(whisper_running=True)
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            stages, consent, browser_html=page_html(7)
+        )
+        self.assertEqual(code, 0, report.get("hard_stop_reason"))
+        # One stop/restore cycle per batch, each honored exactly once.
+        self.assertEqual(stages.whisper_stops, 2)
+        self.assertEqual(stages.whisper_restores, 2)
+        covered = self.covered_kinds(report)
+        self.assertEqual(covered.count("whisper-stop"), 2)
+        self.assertEqual(covered.count("whisper-restore"), 2)
+        self.assertEqual(consent.kinds, HUMAN_KINDS, "no per-batch human prompts")
+
+    def test_config_drift_fails_closed_to_a_new_authority_question(self) -> None:
+        # The plan binds DRIFTED_INFO (known name/image, different env);
+        # the batch then sees the real KNOWN_INFO service: the stop is
+        # NOT covered and must be asked as genuinely new scope.
+        stages = CollectionStages(
+            whisper_running=True,
+            whisper_infos=[DRIFTED_INFO, KNOWN_INFO],
+        )
         consent = RecordingConsent(deny={"whisper-stop"})
         code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
-        self.assertEqual(stages.whisper_stops, 0, "denied consent stops before mutation")
         self.assertEqual(
-            [c for c in stages.calls if c.startswith("vision:")],
-            [],
-            "no vision without the whisper precondition",
+            consent.kinds, ["browser", "run-plan", "whisper-stop"],
+            "drifted config is an extra-scope question, never auto-granted",
         )
-        self.assertFalse(any("ollama-start" == c for c in stages.calls))
+        self.assertEqual(stages.whisper_stops, 0, "denial blocks before mutation")
+        self.assertEqual(
+            [c for c in stages.calls if c.startswith("vision:")], [],
+            "no vision without the drifted-config authority",
+        )
+        self.assertFalse(any(c == "ollama-start" for c in stages.calls))
         self.assertEqual(Backlog(self.state).entries(), [])
+        drift_entry = [
+            e
+            for e in self.stage_windows(report)
+            if e["window"]["kind"] == "whisper-stop"
+        ][0]
+        self.assertEqual(drift_entry["decision"], "human_denied")
 
-    def test_unidentified_service_is_refused_before_consent(self) -> None:
+    def test_unidentified_service_is_refused_before_any_window(self) -> None:
         stages = CollectionStages(
             whisper_running=True, whisper_info=OTHER_INFO
         )
         consent = RecordingConsent()
         code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
-        self.assertNotIn("whisper-stop", consent.kinds, "no consent for an unidentified service")
+        # Identity verification fails read-only at plan time (no bound)
+        # AND inside the batch coordination (blocked before any window).
+        self.assertEqual(consent.kinds, ["browser", "run-plan"])
+        self.assertNotIn("whisper-stop", self.covered_kinds(report))
+        self.assertEqual(report["run_plan"]["whisper"]["bound"], None)
+        self.assertIn("verification failed", report["run_plan"]["whisper"]["note"])
         self.assertEqual(stages.whisper_stops, 0)
         self.assertEqual([c for c in stages.calls if c.startswith("vision:")], [])
 
@@ -794,33 +1251,8 @@ class TestWhisperCoordination(CollectionRunTestCase):
             report["batches"][0]["cleanup_notes"],
         )
 
-    def test_restore_authorization_denied_blocks_before_any_mutation(self) -> None:
-        stages = CollectionStages(whisper_running=True)
-        consent = RecordingConsent(deny={"whisper-restore"})
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        # Denial of the standing restore authorization happens BEFORE the
-        # stop: no mutation at all, vision blocked.
-        self.assertEqual(stages.whisper_stops, 0, "no stop without restore authorization")
-        self.assertEqual(stages.whisper_restores, 0)
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("vision:")], [],
-            "vision blocked when recovery cannot be pre-authorized",
-        )
-        self.assertFalse(any(c == "ollama-start" for c in stages.calls))
-        failures = report["batches"][0]["failures"]
-        self.assertTrue(
-            any(
-                "standing authorization denied" in f["reason"]
-                and "no mutation" in f["reason"]
-                for f in failures
-            ),
-            failures,
-        )
-        self.assertEqual(Backlog(self.state).entries(), [])
-
     def test_ctrl_c_during_stop_itself_reports_unknown_no_restore(self) -> None:
-        """W-1r: KI inside the whisper stop after BOTH authorizations.
+        """W-1r: KI inside the whisper stop after the plan grant.
 
         The stop result is UNKNOWN: no restore is attempted (it cannot
         be verified that the stop was ours/completed), no vision/audio
@@ -835,12 +1267,15 @@ class TestWhisperCoordination(CollectionRunTestCase):
         code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
         self.assertTrue(report["interrupted"])
-        # Both exact authorizations were asked and granted BEFORE the
-        # stop attempt — the standing consent is not weakened.
-        kinds = consent.kinds
-        self.assertIn("whisper-stop", kinds)
-        self.assertIn("whisper-restore", kinds)
-        self.assertLess(kinds.index("whisper-stop"), kinds.index("whisper-restore"))
+        # The plan grant and BOTH covered whisper windows happened
+        # BEFORE the stop attempt — the standing consent is not weakened.
+        covered = self.covered_kinds(report)
+        self.assertIn("whisper-stop", covered)
+        self.assertIn("whisper-restore", covered)
+        self.assertLess(covered.index("whisper-stop"), covered.index("whisper-restore"))
+        # No human window and no covered window arrives after the KI.
+        self.assertEqual(consent.kinds, ["browser", "run-plan"])
+        self.assertEqual(covered[-1], "whisper-restore")
         # The interrupted stop is never counted as completed...
         self.assertEqual(stages.whisper_stops, 0)
         # ...and NO restore, vision, audio or Ollama lifecycle ran.
@@ -887,21 +1322,19 @@ class TestWhisperCoordination(CollectionRunTestCase):
         code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
         self.assertTrue(report["interrupted"])
-        # BOTH exact authorizations were asked BEFORE the stop, in order.
-        kinds = consent.kinds
-        self.assertLess(kinds.index("gpu"), kinds.index("whisper-stop"))
-        self.assertLess(kinds.index("whisper-stop"), kinds.index("whisper-restore"))
+        # The covered windows precede the interrupt; nothing is asked
+        # after it (human or covered).
+        covered = self.covered_kinds(report)
+        self.assertLess(covered.index("gpu"), covered.index("whisper-stop"))
+        self.assertLess(covered.index("whisper-stop"), covered.index("whisper-restore"))
+        self.assertEqual(covered[-1], "whisper-restore")
+        self.assertEqual(consent.kinds, ["browser", "run-plan"])
         # Ollama cleanup (finally) still ran; whisper was stopped once and
         # restored once under the standing authorization — with NO window
         # asked after the interrupt.
         self.assertIn("ollama-stop", stages.calls)
         self.assertEqual(stages.whisper_stops, 1)
         self.assertEqual(stages.whisper_restores, 1)
-        windows_after_interrupt = kinds[kinds.index("whisper-restore") + 1:]
-        self.assertEqual(
-            windows_after_interrupt, [],
-            "an interrupt never triggers a new consent window",
-        )
         self.assertEqual(
             [c for c in stages.calls if c.startswith("audio:")], [],
             "no audio after an interrupt in the GPU window",
@@ -938,12 +1371,21 @@ class TestWhisperCoordination(CollectionRunTestCase):
             whisper_healthy=False,
         )
         consent = RecordingConsent()
-        code, report, _ = self.run_collection(stages, consent)
+        # The bounded restore-readiness wait must never really sleep in
+        # tests: deterministic clock, same bounded logical course (health
+        # stays false until the 60s deadline). Assertions unchanged.
+        from unittest import mock
+
+        from tiktok_ingest import guided
+        from tiktok_ingest.tests.test_guided import FakeRestoreClock
+
+        with mock.patch.object(guided, "time", FakeRestoreClock()):
+            code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
         self.assertTrue(report["interrupted"])
         self.assertEqual(stages.whisper_restores, 1)
         self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")], []
+            [c for c in stages.calls if c.startswith("audio:")] , []
         )
         notes = " ".join(report["batches"][0]["cleanup_notes"])
         self.assertIn("NOT healthy", notes)
@@ -963,7 +1405,7 @@ class TestWhisperCoordination(CollectionRunTestCase):
             stages.whisper_restores, 1, "the interrupted restore is never retried"
         )
         self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")], []
+            [c for c in stages.calls if c.startswith("audio:")] , []
         )
         notes = " ".join(report["batches"][0]["cleanup_notes"])
         self.assertIn("UNKNOWN", notes)
@@ -976,21 +1418,29 @@ class TestWhisperCoordination(CollectionRunTestCase):
 
 
 class TestSynthesisApi(CollectionRunTestCase):
-    def api_window(self, consent: RecordingConsent) -> ConsentWindow:
-        windows = consent.of("synthesis-api")
-        self.assertTrue(windows, "synthesis API consent window must be asked")
-        return windows[0]
+    def api_windows(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+        windows = [
+            entry["window"]
+            for entry in self.stage_windows(report)
+            if entry["window"]["kind"] == "synthesis-api"
+        ]
+        self.assertTrue(windows, "synthesis API window must be asked (covered)")
+        return windows
 
-    def test_window_shows_origin_model_and_limits_never_the_key(self) -> None:
+    def test_covered_windows_show_origin_model_and_limits_never_the_key(self) -> None:
         stages = CollectionStages()
         consent = RecordingConsent()
-        code, _, _ = self.run_collection(stages, consent)
+        code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 0)
-        window = self.api_window(consent)
-        self.assertIn("https://api.example.com/v1", " ".join(window.destinations))
-        self.assertIn("glm-5.3-flash", " ".join(window.operations))
-        blob = json.dumps(window.to_dict())
+        window = self.api_windows(report)[0]
+        self.assertIn("https://api.example.com/v1", " ".join(window["destinations"]))
+        self.assertIn("glm-5.3-flash", " ".join(window["operations"]))
+        blob = json.dumps(window)
         self.assertNotIn(API_ENV[ENV_API_KEY], blob)
+        # Multiple synthesis ids discharge under the plan with no extra
+        # human prompts.
+        self.assertEqual(len(self.api_windows(report)), 3)
+        self.assertEqual(consent.kinds, HUMAN_KINDS)
 
     def test_outbound_payload_is_sanitized_evidence_only(self) -> None:
         stages = CollectionStages()
@@ -1009,40 +1459,6 @@ class TestSynthesisApi(CollectionRunTestCase):
             self.assertIn("video.md evidence", user_text)
             self.assertIn("audio.md evidence", user_text)
 
-    def test_denial_is_blocked_and_resumable_without_rerunning_media(self) -> None:
-        seed_scan_for_run(self.state, [0])
-        seed_job(
-            self.state,
-            fake_id(0),
-            complete=("fetch", "prepare", "vision", "audio"),
-            evidence=True,
-        )
-        stages = CollectionStages()
-        consent = RecordingConsent(deny={"synthesis-api"})
-        code, report, _ = self.run_collection(
-            stages, consent, browser_html=page_html(1)
-        )
-        self.assertEqual(code, 1)
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith(("vision:", "audio:"))],
-            [],
-            "completed media stages are not repeated on a synthesis stop",
-        )
-        self.assertEqual(Backlog(self.state).entries(), [])
-        # Resume with consent granted: synthesis and verify run; media
-        # stages stay untouched.
-        stages2 = CollectionStages()
-        consent2 = RecordingConsent()
-        code2, report2, _ = self.run_collection(
-            stages2, consent2, browser_html=page_html(1)
-        )
-        self.assertEqual(code2, 0, report2.get("hard_stop_reason"))
-        self.assertEqual(
-            [c for c in stages2.calls if c.startswith(("vision:", "audio:"))], []
-        )
-        self.assertIn("verify:" + fake_id(0), stages2.calls)
-        self.assertEqual(len(Backlog(self.state).entries()), 1)
-
     def test_timeout_is_resumable_and_never_verifies(self) -> None:
         stages = CollectionStages()
         consent = RecordingConsent()
@@ -1053,6 +1469,7 @@ class TestSynthesisApi(CollectionRunTestCase):
         )
         self.assertEqual(code, 1)
         self.assertNotIn("verify", consent.kinds, "no verify without validated synthesis")
+        self.assertIsNone(report["verification"], "no grouped verify without synthesis")
         self.assertEqual(Backlog(self.state).entries(), [])
         failures = report["batches"][0]["failures"]
         self.assertTrue(
@@ -1079,11 +1496,20 @@ class TestSynthesisApi(CollectionRunTestCase):
         consent = RecordingConsent()
         code, report, _ = self.run_collection(stages, consent, env={})
         self.assertEqual(code, 1)
-        self.assertNotIn("synthesis-api", consent.kinds, "no API window without config")
+        self.assertEqual(
+            [],
+            [
+                entry
+                for entry in self.stage_windows(report)
+                if entry["window"]["kind"] == "synthesis-api"
+            ],
+            "no API window without config",
+        )
         waiting = report["batches"][0]["waiting_for_synthesis"]
         self.assertEqual(waiting, [fake_id(0), fake_id(1), fake_id(2)])
         self.assertEqual(Backlog(self.state).entries(), [])
         self.assertEqual(report["preflight"]["text_api_configured"], False)
+        self.assertIsNone(report["run_plan"]["text_api"])
 
 
 # --------------------------------------------------------------------------
@@ -1110,6 +1536,249 @@ class TestOllama(CollectionRunTestCase):
         self.assertEqual(code, 0)
         self.assertIn("ollama-start", stages.calls)
         self.assertIn("ollama-stop", stages.calls)
+
+
+# --------------------------------------------------------------------------
+# Frozen inventory: once per id, no reattempts
+# --------------------------------------------------------------------------
+
+
+class TestFrozenDriver(CollectionRunTestCase):
+    def test_failed_ids_are_never_reattempted_in_later_batches(self) -> None:
+        stages = CollectionStages(fetch_fails=True)
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            stages, consent, browser_html=page_html(7)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(len(report["batches"]), 2, "unrelated ids still get their batch")
+        fetches = [c for c in stages.calls if c.startswith("fetch:")]
+        self.assertEqual(len(fetches), 7, "every frozen id attempted exactly once")
+        self.assertEqual(len(set(fetches)), 7, "no id is ever repeated")
+        self.assertEqual(Backlog(self.state).entries(), [])
+        self.assertEqual(consent.kinds, ["browser", "run-plan"], "no re-asking on failure")
+
+    def test_no_absorption_outside_the_frozen_inventory(self) -> None:
+        # limit below the item count: batches are fixed slices of the
+        # frozen inventory — every frozen id attempted exactly once and
+        # NOTHING outside it is ever attempted, in any batch.
+        stages = CollectionStages()
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(stages, consent, limit=2)
+        self.assertEqual(code, 0, report.get("hard_stop_reason"))
+        frozen = report["run_plan"]["frozen_ids"]
+        self.assertEqual(frozen, [fake_id(n) for n in range(3)])
+        attempted = [i for b in report["batches"] for i in b["ids"]]
+        self.assertEqual(attempted, list(frozen), "fixed slices, no absorption")
+        self.assertEqual(len(report["batches"]), 2)
+
+
+# --------------------------------------------------------------------------
+# Hard stops block the grouped verification phase too
+# --------------------------------------------------------------------------
+
+
+class TestHardStopBlocksGroupedVerification(CollectionRunTestCase):
+    def test_restore_failure_after_ready_batch_skips_grouped_verify(self) -> None:
+        """Validator Check B regression: "ALL further progress is blocked"
+        must include the grouped verification phase.
+
+        Batch 1's five ids fully synthesize (ready for verification);
+        batch 2's whisper restore fails -> the run hard-stops. No grouped
+        verification prompt, no verify stage, no backlog write may happen
+        afterwards; the ready results stay resumable in a NEW authorized
+        run with zero re-inference.
+        """
+
+        class SecondRestoreFails(CollectionStages):
+            def do_whisper_restore(
+                self, info: WhisperServiceInfo
+            ) -> WhisperServiceInfo:
+                if self.whisper_restores >= 1:
+                    self.whisper_restore_fails = True
+                return super().do_whisper_restore(info)
+
+        stages = SecondRestoreFails(whisper_running=True)
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            stages, consent, browser_html=page_html(7)
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("whisper restoration failed", report["hard_stop_reason"])
+        self.assertEqual(len(report["batches"]), 2)
+        self.assertEqual(stages.whisper_restores, 2, "batch 2 restore failed")
+        # Batch 1's ids DID reach validated synthesis before the hard stop.
+        self.assertEqual(
+            len(transport_ready(report)), 5, "five ids ready for verification"
+        )
+        # ...and yet NOTHING verifies after the hard stop:
+        self.assertNotIn(
+            "verify", consent.kinds, "no grouped prompt after a hard stop"
+        )
+        self.assertIsNone(report["verification"])
+        self.assertEqual([c for c in stages.calls if c.startswith("verify:")], [])
+        self.assertEqual(Backlog(self.state).entries(), [])
+        # Resumable: a NEW authorized run completes the journey without
+        # repeating any completed media stage.
+        stages2 = CollectionStages()
+        consent2 = RecordingConsent()
+        code2, report2, _ = self.run_collection(stages2, consent2)
+        self.assertEqual(code2, 0, report2.get("hard_stop_reason"))
+        self.assertEqual(consent2.kinds, HUMAN_KINDS, "a new run asks again")
+        self.assertEqual(
+            [c for c in stages2.calls if c.startswith("vision:")], [],
+            "ready results resume with zero re-inference",
+        )
+        self.assertEqual(
+            sorted(c for c in stages2.calls if c.startswith("audio:")),
+            sorted(f"audio:{fake_id(n)}" for n in (5, 6)),
+            "only the two audio-incomplete ids transcribe",
+        )
+        self.assertEqual(
+            len([c for c in stages2.calls if c.startswith("verify:")]), 7
+        )
+        self.assertEqual(len(Backlog(self.state).entries()), 7)
+
+
+def transport_ready(report: dict[str, Any]) -> list[str]:
+    """Ids whose synthesis completed (would be verify candidates)."""
+    ready: list[str] = []
+    for batch in report["batches"]:
+        for video_id, records in (batch.get("stage_outcomes_this_run") or {}).items():
+            if isinstance(records, dict) and records.get("synthesis", {}).get(
+                "outcome"
+            ) == "complete":
+                ready.append(video_id)
+    return ready
+
+
+# --------------------------------------------------------------------------
+# The REAL default consent provider, end to end (validator Check A)
+# --------------------------------------------------------------------------
+
+
+class TestRealConsoleConsentJourney(CollectionRunTestCase):
+    def test_two_batches_managed_whisper_need_exactly_three_yes_and_one_enter(
+        self,
+    ) -> None:
+        stages = CollectionStages(whisper_running=True)
+
+        class CountingStdin(io.StringIO):
+            lines_read = 0
+
+            def readline(self, *args: Any) -> str:
+                CountingStdin.lines_read += 1
+                return super().readline(*args)
+
+        stdin = CountingStdin("yes\n\nyes\nyes\n")
+        provider_lines: list[str] = []
+        real_consent = ConsoleConsentProvider(
+            stdin=stdin, out=lambda text, end="\n": provider_lines.append(text)
+        )
+        transport = FakeApiTransport(
+            [FakeApiResponse(sample_synthesis_document()) for _ in range(50)]
+        )
+        controller = FakeBrowserController(page_html(7))
+        code, report = collection_run.run_collection(
+            collection_url=COLLECTION_URL,
+            state=self.state,
+            consent=real_consent,
+            out=self.messages.append,
+            browser_controller=controller,
+            browser_profile_base=self.profile_base,
+            api_transport=transport,
+            env=API_ENV,
+            podman_runner=lambda argv, timeout=None: (0, "", ""),
+            stages=stages.functions(),
+        )
+        self.assertEqual(code, 0, report.get("hard_stop_reason"))
+        self.assertEqual(len(report["batches"]), 2)
+        # EXACTLY three yes/no decisions and ONE readiness Enter across
+        # the whole two-batch run with managed whisper. (The browser
+        # window's DISPLAY text also mentions the checkpoint; count only
+        # actual prompt lines, which start with the checkpoint wording.)
+        asks = [l for l in provider_lines if "authorize this window?" in l]
+        readiness = [
+            l
+            for l in provider_lines
+            if l.strip().startswith("readiness checkpoint (NOT")
+        ]
+        self.assertEqual(len(asks), 3, asks)
+        self.assertEqual(len(readiness), 1, readiness)
+        self.assertEqual(
+            [h["window"]["kind"] for h in report["run_authorization"]["human_decisions"]],
+            HUMAN_KINDS,
+        )
+        self.assertTrue(
+            all(h["granted"] for h in report["run_authorization"]["human_decisions"])
+        )
+        self.assertFalse(
+            [
+                e
+                for e in report["run_authorization"]["stage_windows"]
+                if e["decision"] not in ("covered_by_run_plan", "deferred")
+            ],
+            "zero routine prompts: every stage window covered or deferred",
+        )
+        # Exactly four input lines consumed (yes, Enter, yes, yes) — the
+        # stdin is exhausted afterwards.
+        self.assertEqual(CountingStdin.lines_read, 4)
+        self.assertEqual(stdin.read(), "")
+        # All seven ids processed, synthesized and verified.
+        self.assertEqual(len(transport.requests), 7)
+        self.assertEqual(len([c for c in stages.calls if c.startswith("verify:")]), 7)
+        self.assertEqual(len(Backlog(self.state).entries()), 7)
+        self.assertEqual(stages.whisper_stops, 2)
+        self.assertEqual(stages.whisper_restores, 2)
+
+
+# --------------------------------------------------------------------------
+# Progress narration honesty
+# --------------------------------------------------------------------------
+
+
+class TestProgress(CollectionRunTestCase):
+    def test_stage_start_finish_and_batch_lines_are_truthful(self) -> None:
+        stages = CollectionStages()
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(stages, consent)
+        self.assertEqual(code, 0)
+        joined = "\n".join(self.messages)
+        self.assertIn("collection batch 1/1", joined)
+        self.assertIn(f"stage fetch start: {fake_id(0)}", joined)
+        self.assertIn(
+            f"stage fetch finish: {fake_id(0)} complete (reused=False,", joined
+        )
+        self.assertIn(f"stage vision start: {fake_id(0)}", joined)
+        self.assertIn(
+            f"stage audio finish: {fake_id(0)} complete (reused=False,", joined
+        )
+        self.assertIn(f"stage verify start: {fake_id(0)}", joined)
+        self.assertIn(
+            f"stage verify finish: {fake_id(0)} complete (reused=False,", joined
+        )
+        # The synthesis stage is narrated like every other stage: start
+        # line plus finish line with the actual outcome and duration,
+        # with no intermediate fake progress and no evidence dumping.
+        self.assertIn(f"stage synthesis-api start: {fake_id(0)}", joined)
+        self.assertIn(
+            f"stage synthesis-api finish: {fake_id(0)} complete (reused=False,",
+            joined,
+        )
+        self.assertFalse(
+            any("evidence" in m and "start" in m for m in self.messages),
+            "no evidence text is ever narrated",
+        )
+        # No fabricated percentage claims.
+        self.assertFalse(any("%" in m for m in self.messages), self.messages)
+
+    def test_final_report_remains_parseable_json(self) -> None:
+        stages = CollectionStages()
+        code, report, _ = self.run_collection(stages, RecordingConsent())
+        self.assertEqual(code, 0)
+        parsed = json.loads(json.dumps(report, default=str))
+        self.assertEqual(parsed["mode"], "execute")
+        self.assertIn("run_authorization", parsed)
 
 
 # --------------------------------------------------------------------------

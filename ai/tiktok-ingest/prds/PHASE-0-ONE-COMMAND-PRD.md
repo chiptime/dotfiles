@@ -62,7 +62,7 @@ Kept consistent across all phase PRDs:
 | Collection inventory | Offline merge of operator-captured HTML snapshots; the live browser scan is not implemented | The application drives a headed, run-scoped Playwright browser for inventory; the operator handles login/captcha and confirms visibility |
 | Synthesis | Operator-supplied document via `--from-file`; the pipeline makes no model calls | One OpenAI-compatible adapter produces the synthesis document automatically, validated by the same strict contract |
 | Shared Whisper service | Operator-managed; runs block with instructions when preconditions (stopped for vision, healthy for audio) are unmet | The application offers bounded stop/restore of the known shared Whisper service inside the GPU window — each mutation only after exact consent and positive identity/config verification, with restored health validated; otherwise it fails closed with instructions |
-| Coordination | Guided coordination of one batch behind consent windows | `collection-run` sequences the whole collection journey in batches of at most five, still behind explicit per-window consent |
+| Coordination | Guided coordination of one batch behind consent windows | `collection-run` sequences the whole collection journey in batches of at most five behind TWO upfront authorization decisions plus ONE grouped verification authorization (amended 2026-09-30: stage windows inside the frozen run scope are discharged by the run-plan grant and audited; no routine per-stage prompts) |
 
 ## 5. Goals and non-goals
 
@@ -105,18 +105,25 @@ Kept consistent across all phase PRDs:
    condition, storage, GPU capacity, service identity, and the planned
    external destinations of this run.
 3. A headed Playwright browser opens with a dedicated run-scoped profile.
-4. The operator completes login and captcha manually, then explicitly
-   confirms that the selected collection is visible.
-5. The application captures collection-scoped evidence, persists the
-   inventory and scan state, closes the browser context, and removes the
-   run-scoped profile.
-6. The processing plan is recomputed from current inventory, processed state,
-   and blocklist; eligible videos are processed in batches of at most five.
-7. Each batch proceeds through explicit consent windows: network download of
-   exactly the selected URLs, CPU preparation, the GPU window (isolated
-   Ollama lifecycle, gated vision, Whisper stop/restore coordination, audio),
-   automatic synthesis, and verification retrieval of exactly the validated
-   candidate URLs.
+ 4. The operator completes login and captcha manually, then signals
+    readiness at a press-Enter checkpoint (a readiness signal, not an
+    authorization — amended 2026-09-30) confirming that the selected
+    collection is visible.
+ 5. The application captures collection-scoped evidence, persists the
+    inventory and scan state, closes the browser context, and removes the
+    run-scoped profile.
+ 6. The processing plan is FROZEN from the current inventory, processed
+    state, and blocklist (amended 2026-09-30); eligible videos are
+    processed in batches of at most five, each frozen id in exactly one
+    batch, under ONE whole-current-run authorization.
+ 7. Stage windows inside the frozen scope (network download of exactly
+    the selected URLs, CPU preparation, the GPU window with its Ollama
+    lifecycle, gated vision, Whisper stop/restore coordination and
+    audio, automatic synthesis) are discharged by that ONE run-plan
+    grant and audited as covered; anything outside it is asked as
+    genuinely new scope. Verification retrieval of exactly the
+    validated candidate URLs sits behind ONE additional grouped
+    authorization shown after synthesis (amended 2026-09-30).
 8. Successful results are appended to the local backlog as `pending`. The run
    ends with a concise batch summary and the existing review commands.
 
@@ -137,8 +144,10 @@ Kept consistent across all phase PRDs:
   or automate the operator's default browser profile, ambient sessions, or
   cookies.
 - **P0-FR-04** Inventory MUST NOT start until the operator has completed
-  login/captcha handling and has explicitly confirmed that the selected
-  collection is visible.
+  login/captcha handling and has signaled readiness at the press-Enter
+  checkpoint (a readiness signal carrying no authority of its own; the
+  browser grant names the capture and its audit/state writes — amended
+  2026-09-30).
 - **P0-FR-05** Inventory MUST apply the existing collection-scoped DOM and
   inventory rules: recommendation links never become collection members;
   declared count, observed count, end-of-list evidence, access-block markers,
@@ -230,8 +239,15 @@ Kept consistent across all phase PRDs:
 
 - Every external effect — network download, container preparation, GPU
   window, Whisper stop/restore, synthesis API call, verification retrieval —
-  MUST sit behind an explicit consent window showing the exact IDs/URLs,
-  operations, limits, and effects before anything runs. Denial, EOF,
+  MUST sit behind an explicit authorization showing the exact IDs/URLs,
+  operations, limits, and effects before anything runs (amended
+  2026-09-30: under `collection-run` that authority is the ONE browser
+  grant plus the ONE whole-current-run plan grant that names the frozen
+  scope, with ONE grouped verification authorization after synthesis;
+  stage windows inside the named scope are discharged by that grant and
+  audited as covered, and anything outside it — including unknown
+  action kinds and drifted service configurations — is asked as
+  genuinely new scope and never auto-granted). Denial, EOF,
   cancellation, or a non-interactive environment MUST stop without assuming
   consent. There is no global yes; an authorization never persists into a
   later invocation or window.

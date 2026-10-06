@@ -46,6 +46,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -58,10 +59,11 @@ from .contracts import JobManifest, ProcessedEntry, utc_now_iso
 from .ollama_runtime import start_server, stop_server, wait_ready
 from .pipeline import fetch_url
 from .prepare import prepare_video
+from .runtime import subprocess_runner
 from .state import Blocklist, Processed, StateRoot
 from .synthesis import SynthesisDocument, run_synthesis_stage
 from .verify import run_verify_stage
-from .vision import assert_whisper_stopped, run_vision_stage
+from .vision import assert_whisper_stopped, query_gpu, run_vision_stage
 from .whisper_client import health_precheck, run_audio_stage
 
 # The canonical order this coordinator drives. "emit" is displayed but
@@ -76,6 +78,16 @@ GUIDED_STAGES: tuple[str, ...] = (
 )
 
 GUIDED_MAX_BATCH = config.BUDGETS.batch_pilot_clips
+
+# Bounded read-only readiness wait after the ONE authorized whisper
+# restore: a freshly started service can need a moment before its
+# health endpoint answers (observed in a real run: an immediate
+# connection reset that a later read-only precheck showed healthy).
+# Polling NEVER performs another start. Worst-case overshoot past the
+# deadline is ONE probe — the health precheck's own bounded timeout
+# (5s default, see whisper_client.health_precheck) — never unbounded.
+WHISPER_RESTORE_READY_DEADLINE_SECONDS = 60.0
+WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS = 1.0
 
 
 class GuidedError(RuntimeError):
@@ -95,6 +107,12 @@ class ConsentWindow:
     ``verify``. Every field is display text for the operator; the
     guided command maps a granted window to exactly the operations
     named here and nothing else.
+
+    ``model`` is the ONE non-display field: a structured binding
+    attribute (e.g. the exact synthesis model for ``synthesis-api``
+    windows) so run-scoped authorization wrappers can compare EXACT
+    identity tokens instead of substrings of display prose. It grants
+    nothing by itself and stays ``None`` for ordinary windows.
     """
 
     kind: str
@@ -104,16 +122,28 @@ class ConsentWindow:
     operations: tuple[str, ...] = ()
     limits: tuple[str, ...] = ()
     effects: tuple[str, ...] = ()
+    model: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
 
 class ConsentProvider:
-    """Authorization source. ``ask`` returns True ONLY on explicit grant."""
+    """Authorization source. ``ask`` returns True ONLY on explicit grant.
+
+    ``await_readiness`` is a SEPARATE press-Enter readiness signal (not
+    an authorization): the default implementation fails closed because a
+    provider without an interactive readiness channel can never confirm
+    operator readiness. The standalone guided coordinator never calls
+    it; only the browser inventory boundary uses it.
+    """
 
     def ask(self, window: ConsentWindow) -> bool:  # pragma: no cover - iface
         raise NotImplementedError
+
+    def await_readiness(self, prompt: str) -> bool:
+        """Refuse by default: readiness is never assumed. NOT a grant."""
+        return False
 
 
 class ConsoleConsentProvider(ConsentProvider):
@@ -176,6 +206,35 @@ class ConsoleConsentProvider(ConsentProvider):
         self._out("granted" if granted else "denied — stopping before this window")
         return granted
 
+    def await_readiness(self, prompt: str) -> bool:
+        """Press-Enter readiness checkpoint; NOT a yes/no authorization.
+
+        Any input line (typically just Enter) signals that the operator
+        has finished the manual steps named in the prompt. EOF, a
+        non-interactive stdin or a read error refuses: readiness is
+        never assumed. The signal carries NO authority of its own — the
+        effects that follow were already named by the prior browser
+        authorization window.
+        """
+        self._out(prompt, end=" ")
+        stream = self._stdin if self._stdin is not None else sys.stdin
+        if self._stdin is None and not stream.isatty():
+            self._out(
+                "refused: non-interactive environment; readiness cannot "
+                "be signaled (re-run from a terminal)"
+            )
+            return False
+        try:
+            answer = stream.readline()
+        except OSError as exc:
+            self._out(f"refused: could not read readiness ({exc})")
+            return False
+        if not answer:
+            self._out("refused: end of input; readiness is never assumed")
+            return False
+        self._out("readiness signaled")
+        return True
+
 
 # --------------------------------------------------------------------------
 # Injectable stage boundary (production defaults call the real stages)
@@ -223,6 +282,12 @@ class StageFunctions:
     whisper_inspect: Callable[[], Any] | None = None
     whisper_stop: Callable[[Any], Any] | None = None
     whisper_restore: Callable[[Any], Any] | None = None
+    # Phase 0 addendum: read-only free-VRAM probe (MiB) used ONLY by the
+    # collection-run swap-retry re-admission drift check (PRD FR-10/
+    # FR-11). ``None`` keeps older fixture doubles working unchanged;
+    # the vision stage's own admission gate stays authoritative in every
+    # case — this seam only enables the pre-attempt drift check.
+    gpu_free_mib: Callable[[], int] | None = None
 
     def whisper_lifecycle_ready(self) -> bool:
         return (
@@ -249,6 +314,45 @@ def _ollama_reachable() -> bool:
         return False
 
 
+def _wait_for_whisper_health(
+    health: Callable[[], tuple[bool, str]],
+    *,
+    deadline_seconds: float = WHISPER_RESTORE_READY_DEADLINE_SECONDS,
+    poll_interval_seconds: float = WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS,
+    monotonic: Callable[[], float] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    waiting_feedback: Callable[[float], None] | None = None,
+) -> tuple[bool, str]:
+    """Poll the ALREADY-RESTORED service until healthy or deadline.
+
+    Read-only readiness polling after the one authorized restore: the
+    first probe runs immediately (an already-healthy service never
+    sleeps or waits), a failed probe is followed by exactly one bounded
+    interval (no busy loop), and crossing the deadline stops with the
+    last REAL detail — the caller then blocks all progress. Success
+    stops the polling outright. ``KeyboardInterrupt`` is never caught
+    here: an interruption stays an interruption. The total wait can
+    overshoot ``deadline_seconds`` by at most one probe (the health
+    precheck's own bounded timeout).
+    """
+    now = monotonic or time.monotonic
+    do_sleep = sleep or time.sleep
+    started = now()
+    announced = False
+    while True:
+        healthy, detail = health()
+        if healthy:
+            return True, detail
+        if not announced and waiting_feedback is not None:
+            # Bounded operator feedback: emitted once when the wait
+            # actually starts, never per probe.
+            waiting_feedback(deadline_seconds)
+            announced = True
+        if now() - started >= deadline_seconds:
+            return False, detail
+        do_sleep(poll_interval_seconds)
+
+
 def default_stage_functions() -> StageFunctions:
     """The real pipeline stages; guided-run adds no behavior of its own."""
     return StageFunctions(
@@ -260,12 +364,13 @@ def default_stage_functions() -> StageFunctions:
             video_id, state=state, from_file=from_file
         ),
         verify=lambda video_id, state: run_verify_stage(video_id, state=state),
-        whisper_stopped=lambda: assert_whisper_stopped(),
+        whisper_stopped=lambda: assert_whisper_stopped(subprocess_runner),
         whisper_health=lambda: health_precheck(),
         ollama_reachable=_ollama_reachable,
         ollama_start=lambda: start_server(),
         ollama_wait_ready=lambda handle: wait_ready(),
         ollama_stop=lambda handle: stop_server(handle),
+        gpu_free_mib=lambda: query_gpu(subprocess_runner).free_mib,
     )
 
 
@@ -947,13 +1052,24 @@ class GuidedRun:
     def _whisper_restore_now(self, report_items: dict, *, context: str) -> bool:
         """Restore under the standing authorization; report honestly.
 
-        Performs the bounded start of the SAME container, positive
-        identity/config verification (inside the hook) and a health
-        check. Any failure — or an interruption that leaves the restore
+        Performs the ONE bounded start of the SAME container (positive
+        identity/config verification inside the hook), then a BOUNDED
+        read-only readiness wait: the freshly started service may need a
+        moment before its health endpoint answers, so health is polled
+        (first probe immediate, fixed interval, small monotonic
+        deadline) instead of being decided by a single immediate probe.
+        Any failure — or an interruption that leaves the restore
         incomplete — blocks ALL further progress (audio included): the
         run reports the actual partial service state with instructions
-        and promises no rollback. Never re-asked, never retried.
+        and promises no rollback. Never re-asked, never retried, and
+        the start itself is never repeated: one attempt per execution
+        context, polling only.
         """
+        if self._whisper_restore_attempted:
+            # The ONE authorized restore already ran (or was in flight):
+            # never a second start, never a re-ask — only the recorded
+            # outcome decides whether progress may continue.
+            return self._whisper_restore_completed
         info = self._whisper_we_stopped
         assert info is not None  # narrowing: callers check before calling
         service_text = getattr(info, "describe", lambda: str(info))()
@@ -995,15 +1111,45 @@ class GuidedRun:
             self.cleanup_notes.append(reason)
             self.out(reason)
             return False
-        healthy, detail = self.stages.whisper_health()
+        try:
+            healthy, detail = _wait_for_whisper_health(
+                self.stages.whisper_health,
+                waiting_feedback=lambda deadline: self.out(
+                    f"waiting for Whisper readiness after the restore "
+                    f"(read-only health polling for up to {deadline:.0f}s; "
+                    "no further start is attempted)"
+                ),
+            )
+        except KeyboardInterrupt:
+            # The service WAS started and identity-verified above; only
+            # its health is UNKNOWN. Honest unknown semantics, no
+            # swallow, no second start, no retry: report and re-raise.
+            self.whisper_restore_failed = True
+            reason = (
+                f"whisper restore health wait was interrupted {context}: "
+                f"the service {service_text} was STARTED (identity "
+                "verified) but its health is UNKNOWN (the readiness "
+                "polling may or may not have completed) — verify it "
+                "explicitly (health endpoint, podman inspect/ps); ALL "
+                "further progress is blocked; the ONE authorized start "
+                "already happened and is never repeated; no rollback is "
+                "performed or implied"
+            )
+            self.failures.append(
+                {"id": "*", "stage": "whisper-restore", "outcome": "failed", "reason": reason}
+            )
+            self.cleanup_notes.append(reason)
+            self.out(reason)
+            raise
         if not healthy:
             self.whisper_restore_failed = True
             reason = (
-                f"restored whisper service failed its health check "
+                f"restored whisper service did not become healthy within "
+                f"{WHISPER_RESTORE_READY_DEADLINE_SECONDS:.0f}s "
                 f"({detail}); the service {service_text} was started but "
                 "is NOT healthy — ALL further progress is blocked; verify "
-                "the service state explicitly; no rollback is performed "
-                "or implied"
+                "the service state explicitly; the ONE authorized start "
+                "is never repeated; no rollback is performed or implied"
             )
             self.failures.append(
                 {"id": "*", "stage": "whisper-restore", "outcome": "failed", "reason": reason}
@@ -1037,10 +1183,18 @@ class GuidedRun:
                 item.video_id for item in selection.items
                 if self._item_stage_state(item, "vision") == "complete"
             ]
-        self.out(
-            "gpu phase: whisper service must be STOPPED for vision "
-            "(operator-managed; this command never stops or starts it)"
-        )
+        if self.stages.whisper_lifecycle_ready():
+            self.out(
+                "gpu phase: whisper must be STOPPED for vision — when it is "
+                "running, this run stops the KNOWN shared service behind "
+                "explicit consent and restores it under the standing "
+                "authorization"
+            )
+        else:
+            self.out(
+                "gpu phase: whisper service must be STOPPED for vision "
+                "(operator-managed; this command never stops or starts it)"
+            )
         handle: Any = None
         try:
             try:
@@ -1196,12 +1350,56 @@ class GuidedRun:
         ]
         if not vision_pending and not audio_pending:
             return
+        # Conditional audio: ids that reach audio ONLY if their vision
+        # completes inside this window. The consent line must state that
+        # condition honestly — audio is possible, never guaranteed: a
+        # vision failure, a fired gate or a denial means no audio for
+        # that id. Ids whose audio is already complete are reused, never
+        # re-transcribed, and are named as such.
+        audio_pending_ids = {item.video_id for item in audio_pending}
+        audio_conditional = [
+            item for item in audio_possible
+            if item.video_id not in audio_pending_ids
+        ]
+        audio_already_complete = [
+            item for item in selection.items
+            if self._item_stage_state(item, "audio") == "complete"
+        ]
         window_ids: list[str] = [
             item.video_id for item in vision_pending
         ]
         for item in audio_possible:
             if item.video_id not in window_ids:
                 window_ids.append(item.video_id)
+        if audio_pending and audio_conditional:
+            audio_operation = (
+                "full-audio transcription through the shared whisper WS "
+                f"service for the {len(audio_pending)} vision-complete "
+                f"id(s), and CONDITIONALLY for the {len(audio_conditional)} "
+                "id(s) whose vision completes inside this window — if an "
+                "id's vision fails, a gate fires or the window closes, "
+                "that id's audio does not run"
+            )
+        elif audio_pending:
+            audio_operation = (
+                "full-audio transcription through the shared whisper WS "
+                "service per pending id"
+            )
+        elif audio_conditional:
+            audio_operation = (
+                "conditional full-audio transcription through the shared "
+                f"whisper WS service for the {len(audio_conditional)} id(s) "
+                "whose vision completes inside this window — audio runs "
+                "only after that id's vision succeeds; vision failure, a "
+                "fired gate or denial means no audio runs"
+            )
+        else:
+            audio_operation = "no audio transcription (none pending)"
+        if audio_already_complete:
+            audio_operation += (
+                f"; the {len(audio_already_complete)} id(s) whose audio is "
+                "already complete are reused as-is, never re-transcribed"
+            )
         window = ConsentWindow(
             kind="gpu",
             title="local GPU inference window (vision and/or audio)",
@@ -1218,12 +1416,7 @@ class GuidedRun:
                     if vision_pending
                     else "no vision inference (none pending)"
                 ),
-                (
-                    "full-audio transcription through the shared whisper WS "
-                    "service per pending id"
-                    if audio_pending
-                    else "no audio transcription (none pending)"
-                ),
+                audio_operation,
             ),
             limits=(
                 f"free VRAM >= {config.GATES.free_vram_gate_mib} MiB before each "
@@ -1237,9 +1430,16 @@ class GuidedRun:
             effects=(
                 "loads the vision model on the GPU and verifies unload after "
                 "the stage (empty residency + observed release)",
-                "whisper must be STOPPED for vision and RUNNING for audio — "
-                "both are operator actions; this command never manages that "
-                "service",
+                (
+                    "whisper must be STOPPED for vision and RUNNING for "
+                    "audio — when it is running, this run coordinates the "
+                    "KNOWN shared service behind explicit consent (bounded "
+                    "stop before vision, standing restore after the window)"
+                    if self.stages.whisper_lifecycle_ready()
+                    else "whisper must be STOPPED for vision and RUNNING "
+                    "for audio — both are operator actions; this command "
+                    "never manages that service"
+                ),
                 "the isolated Ollama server started here is stopped at window "
                 "end or on failure",
             ),

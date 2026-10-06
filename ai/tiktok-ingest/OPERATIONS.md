@@ -353,12 +353,21 @@ Tested (720 tests in the 2026-09-23 local run, fixture-only, zero
 network/GPU/podman/ollama):
 
 - The Phase 0 application layer with every external boundary doubled:
-  the `collection-run` batch loop (fresh recomputation per batch, cap
+  the `collection-run` batch loop (frozen-inventory slices, cap
   5, exclusion of completed/rejected ids, resume without stage
-  repetition, loop-guard on no progress, second run with zero
-  re-processing and zero duplicate entries), the browser boundary
-  (run-scoped profile created/removed, explicit visibility
-  confirmation, denial/EOF paths that capture nothing, no
+  repetition, each frozen id attempted exactly once with no reattempt
+  after failure, second run with zero
+  re-processing and zero duplicate entries), the TWO-decision
+  authorization contract (browser grant naming the readiness
+  checkpoint and the snapshot/audit writes; press-Enter readiness that
+  is not an authorization; whole-current-run plan grant over the exact
+  frozen ids/URLs with stage reuse states; covered stage windows
+  audited as `covered_by_run_plan`; unknown kinds, excess ids,
+  unapproved destinations and whisper config drift forwarded to the
+  human and never auto-granted; ONE grouped verification window with
+  the exact validated URLs), the browser boundary
+  (run-scoped profile created/removed, readiness checkpoint,
+  denial/EOF paths that capture nothing, no
   login-automation surface, container-scoped capture with
   recommendations excluded, DOM change failing explicitly with the
   audit HTML preserved, honest close/cleanup reporting on success,
@@ -442,7 +451,15 @@ operations, limits and effects before anything runs)
 3. **CPU preparation** — the pinned container, per-clip budgets.
 4. **GPU window** — isolated Ollama lifecycle + gated vision for all
    pending ids, then audio through the shared whisper service. The
-   consent explicitly covers STARTING and STOPPING the isolated server
+   audio line in the consent states what can ACTUALLY run: ids whose
+   vision was already complete are named for transcription outright,
+   while ids that reach audio only when their vision completes inside
+   this window are named CONDITIONALLY — audio is possible, never
+   guaranteed, and a vision failure, a fired gate or a denial means
+   that id's audio does not run. Ids whose audio is already complete
+   are named as reused (never re-transcribed) and no audio runs that
+   was not named in the window. The consent explicitly covers STARTING
+   and STOPPING the isolated server
    this run started (stop runs at window end or on failure, so an
    authorized window never leaves a loaded server waiting on another
    answer). A server already answering on the isolated port is NEVER
@@ -528,53 +545,81 @@ second state.
    (missing env NAMES only, never values), current scan state, the
    exclusive-writer requirement and the planned destinations of the
    run.
-2. **Browser inventory**: a headed Chromium through Playwright with a
-   DEDICATED run-scoped profile (never your default profile or ambient
-   sessions). You handle login/captcha manually — the controller can
-   only open/read/close, so automation of login is impossible — and
-   confirm explicitly that the collection is visible. The capture
-   applies the existing collection contracts: recommendations are
-   counted, never items; declared/observed/end/access evidence is
-   recorded separately; a changed DOM fails explicitly; the HTML is
-   persisted under `<state>/collections/<key>-captures/` for audit.
-   The browser closes and the profile is removed BEFORE any media
-   work. An abrupt kill cannot guarantee cleanup: recover from real
-   state, never from a promise.
-3. **Batches**: the plan is recomputed FRESH before every batch;
-   `new_processable` and `partial_resumable` ids are eligible in
-   batches of at most five; completed and blocklisted ids are skipped.
-   Each batch is a full `guided-run` invocation (section 8): every
-   effectful phase asks its own window again — a grant never carries
-   over. A batch that makes no NEW progress stops with a loop-guard
-   reason instead of re-asking.
-4. **Automatic synthesis**: configured ONLY via
-   `TIKTOK_INGEST_TEXT_API_BASE_URL`, `TIKTOK_INGEST_TEXT_API_KEY`,
-   `TIKTOK_INGEST_TEXT_MODEL` (optional
-   `TIKTOK_INGEST_TEXT_API_TIMEOUT_SECONDS`, default 120 s). Values
-   are never persisted and are scrubbed from errors. One
-   OpenAI-compatible request per id, tools/retrieval/execution
-   disabled, structured JSON requested, carrying only sanitized
-   `video.md`/`audio.md` text. The response is a CANDIDATE document:
-   it is persisted only after passing the existing strict
-   `SynthesisDocument` validation and credential scrub. Timeout,
-   refusal, malformed output, denial or missing configuration are
-   resumable synthesis stops — vision/audio are never repeated.
-5. **Verification and delivery**: exactly the validated document's
-   `candidate_urls`, after showing them; entries are appended as
-   `pending` only; review stays with `backlog-list` →
-   `backlog-show` → `backlog-decide` → `backlog-plan` →
-   `backlog-apply`.
+2. **Browser inventory (decision 1 of 2)**: a headed Chromium through
+    Playwright with a
+    DEDICATED run-scoped profile (never your default profile or ambient
+    sessions). You handle login/captcha manually — the controller can
+    only open/read/close, so automation of login is impossible — and
+    then signal readiness at a press-Enter CHECKPOINT that is a
+    readiness signal, NOT a second authorization (the browser grant
+    already named the capture and its audit/state writes). The capture
+    applies the existing collection contracts: recommendations are
+    counted, never items; declared/observed/end/access evidence is
+    recorded separately; a changed DOM fails explicitly; the HTML is
+    persisted under `<state>/collections/<key>-captures/` for audit.
+    Verified live scope (2026-09-30 authenticated capture): the
+    collection renders inside `div[data-e2e=collection-item-list]`
+    (the production defaults); the notifications inbox renders
+    elsewhere and its links stay `out_of_container_count`. Access
+    markers match rendered text only — the page ships its
+    unavailability string as script i18n JSON on every page, which is
+    never evidence.
+    The browser closes and the profile is removed BEFORE any media
+    work. An abrupt kill cannot guarantee cleanup: recover from real
+    state, never from a promise.
+3. **Run-plan grant (decision 2 of 2)**: right after the capture the
+    eligible inventory is FROZEN (exact ids, canonical download URLs,
+    stage reuse states) and the known whisper service identity is bound
+    read-only. ONE window asks you to accept the WHOLE current run:
+    batches of at most five (each frozen id in exactly ONE batch, a
+    failed id never reattempted this invocation), the stage pipeline,
+    the whisper stop/restore authority for the exact bound service, the
+    synthesis endpoint/model, and the deferred grouped verification.
+    Denial stops before any processing. Stage windows provably inside
+    this scope are discharged by the grant and audited as
+    `covered_by_run_plan`; unknown kinds, excess ids, unapproved
+    destinations or whisper config drift are asked as genuinely new
+    scope — never auto-granted.
+4. **Batches**: fixed slices of the frozen inventory, at most five per
+    batch; completed and blocklisted ids were already excluded by the
+    freeze. Each batch is a full `guided-run` invocation (section 8)
+    whose windows are discharged by the plan grant; the loop is bounded
+    by construction and nothing outside the frozen scope is absorbed.
+5. **Automatic synthesis**: configured ONLY via
+    `TIKTOK_INGEST_TEXT_API_BASE_URL`, `TIKTOK_INGEST_TEXT_API_KEY`,
+    `TIKTOK_INGEST_TEXT_MODEL` (optional
+    `TIKTOK_INGEST_TEXT_API_TIMEOUT_SECONDS`, default 120 s). Values
+    are never persisted and are scrubbed from errors. One
+    OpenAI-compatible request per id, tools/retrieval/execution
+    disabled, structured JSON requested, carrying only sanitized
+    `video.md`/`audio.md` text. The response is a CANDIDATE document:
+    it is persisted only after passing the existing strict
+    `SynthesisDocument` validation and credential scrub. Timeout,
+    refusal, malformed output or missing configuration are
+    resumable synthesis stops — vision/audio are never repeated.
+6. **Verification and delivery (one grouped decision)**: candidate URLs
+    are unknown until synthesis, so ONE grouped window shows every
+    exact validated URL accumulated over the run before any retrieval;
+    a grant verifies each ready id once. Entries are appended as
+    `pending` only; review stays with `backlog-list` →
+    `backlog-show` → `backlog-decide` → `backlog-plan` →
+    `backlog-apply`.
 
 ### Whisper coordination (collection-run only)
 
 If the known shared service `voice-assistant-whisper` is running when
 vision needs the GPU, collection-run verifies its identity and
-configuration BEFORE asking anything, then asks TWO separate windows
-BEFORE any mutation: the `whisper-stop` window (bounded `podman stop
+configuration read-only BEFORE the run-plan window and binds that
+exact identity into the grant. The coordinator still asks TWO
+separate windows BEFORE any mutation: the `whisper-stop` window
+(bounded `podman stop
 --timeout 30`, positively verified — no arbitrary or unidentified
 workload is ever stopped) and a STANDING `whisper-restore`
-authorization for the recovery of the SAME service/configuration.
-Denial of either blocks BEFORE any mutation (no stop happens). The
+authorization for the recovery of the SAME service/configuration —
+both discharged by the plan grant when (and only when) the window's
+service text matches the binding; a drifted configuration is asked as
+genuinely new scope and fails closed on denial. Denial of either
+blocks BEFORE any mutation (no stop happens). The
 restore then runs under that prior authorization once the GPU window
 ends — normally, on failure, or after an interruption (Ctrl-C, which
 itself never grants anything and never triggers a new prompt) —
@@ -582,13 +627,92 @@ UNLESS the interruption lands inside the stop itself: then the stop
 result is UNKNOWN, NO restore is attempted (it cannot be verified that
 the stop was ours/completed) and manual verification/recovery of the
 exact service is required. In every restore that does run, the SAME
-container is started, identity/configuration are verified, and health
-is validated before any audio work. A failed restore or health
-check — or an interruption that leaves the restore incomplete — blocks
+container is started exactly ONCE, identity/configuration are verified,
+and health is validated before any audio work through a BOUNDED
+read-only readiness wait: the first health probe is immediate (an
+already-healthy service does not wait), a transiently unreachable
+endpoint is retried at a fixed ~1s interval, the run prints a single
+`waiting for Whisper readiness` line while polling, and a 60s monotonic
+deadline ends ALL progress — the report then states the actual
+started-but-not-healthy service state with the last real probe detail.
+Worst-case overshoot past the deadline is one probe (the health
+precheck's own 5s timeout bound). The one authorized start is never
+repeated and the wait itself implies no new consent. A failed restore
+or deadline-exceeded health wait — or an interruption that leaves the
+restore or its health check incomplete — blocks
 ALL further progress, reports the actual partial service state with
 recovery instructions and promises no rollback. Standalone
 `guided-run` keeps its documented behavior (whisper operator-managed;
 blocks with instructions).
+
+### Bounded vision swap-retry (collection-run only)
+
+After a batch whose vision stage failed ONLY the `swap_delta` gate with
+positively verified cleanup, collection-run may offer ONE extra vision
+attempt for that video THIS invocation. It is never automatic and never
+covered by the run-plan grant.
+
+**What you see, in order.**
+
+1. The batch ends normally: the fired gate closed the GPU window (the
+   remaining same-window ids stay pending — that rule is NOT relaxed),
+   the isolated server stopped, and the standing authorization restored
+   the SAME whisper service. The retry verifies that restoration
+   positively BEFORE any prompt; a mismatched identity/configuration or
+   an unhealthy service blocks all progress (the existing
+   service-restoration hard stop, not a retry failure).
+2. A DEDICATED `vision-swap-retry` window names the video id, the
+   measured overshoot (e.g. `+18.56 MiB over the 512 MiB budget`), the
+   cooldown bounds, the unchanged gates and stage deadline, the whisper
+   stop/restore under this new named lifecycle authority, the exact
+   scope fingerprints (model/media/sampling — any change is a NEW
+   authorization question), and the effects of a second failure.
+   Denial/EOF/non-TTY stops without assuming consent; the video stays
+   pending and resumable.
+3. After consent a READ-ONLY cooldown samples the cumulative
+   `pswpin + pswpout` counters every 5 s: admission no earlier than
+   60 s, one hard cap of 180 s from cooldown start that instability,
+   expiry-near misses and re-admission drift NEVER restart (only the
+   consecutive-stable count resets), stability = 3 consecutive
+   intervals ≤ 1 MiB/s. The rate is computed from the cumulative
+   counters — never from a decreasing occupied-swap reading — and
+   unreadable, missing or decreasing counters fail closed with a
+   terminal state DISTINCT from expiry. Narration goes to stderr every
+   15 s with the measured rate, the stable count and the remaining
+   time; sustained above-threshold rates are reported as NOT recovered.
+4. Re-admission stops whisper again under the retry authority, re-checks
+   the identical configuration at that moment, and probes fresh free
+   VRAM after the transition. Final-conditions drift (VRAM no longer
+   free, service state changed) restores whisper and resumes sampling
+   inside the SAME 180 s cap — never a fresh budget. Each new attempt
+   takes its immediate baselines only at its own start.
+5. The single vision-only re-run reuses valid fetch/prepare results and
+   never repeats completed audio, synthesis or verification. The
+   original attempt's stage record, gate evidence and partial artifacts
+   are archived unmodified first (`vision-attempt-N/` inside the run
+   dir, plus the additive `swap_retry` provenance in `meta.json`); the
+   retry is additional evidence, never a replacement. The final stdout
+   JSON keeps its shape and gains an additive per-video retry object
+   (`swap_retries`).
+
+**Terminal states (distinct, honest).** `retry_declined_pending`,
+`blocked_global` (restoration/lifecycle failure), `cooldown_expired`
+("retry not executed, video pending"), `measurement_unavailable`
+(distinct from expiry), `retry_complete`, `retry_exhausted` (no third
+attempt, no re-prompt), `interrupted_unknown`, and
+`retry_not_executed_pending` (a preexisting isolated server is never
+adopted, or scope fingerprints changed after consent — a new
+authorization question). A failed second attempt ends the matter for
+this invocation; retry exhaustion is video/window-scoped and is
+reported differently from the global service-restoration hard stop.
+
+**Not claimed.** The 5 s / 60 s / 180 s / 3×1 MiB/s values are proposed
+heuristics, not efficacy evidence: the cooldown measures and bounds the
+wait, it never promises that waiting cures swap pressure. Subsequent
+frozen batches reconcile exactly as the pre-existing driver does — the
+retry adds no batch, no window and no model load beyond the one
+separately-consented attempt. A real-GPU validation trial (V3) requires
+separate authorization.
 
 ### Local synthesis backend on the shared GPU (llm-hub)
 
