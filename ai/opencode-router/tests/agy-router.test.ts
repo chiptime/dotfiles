@@ -115,6 +115,63 @@ describe('unit: outcomes — classify run signals', () => {
 		}
 	});
 
+	describe('auth gate trusts only typed/diagnostic sources, never model text', () => {
+		// Real signature captured from agy 1.3.0 with no credentials (clean env,
+		// empty HOME), stream-json mode, natural exit after agy's own 60s wait.
+		const AUTH_STDERR = [
+			'Authentication required. Please visit the URL to log in:',
+			'  <OAUTH_URL>',
+			'',
+			'Waiting for authentication (timeout 60s)...',
+			'Or, paste the authorization code here and press Enter:',
+			'Error: authentication timed out.',
+			'error: authentication failed or timed out',
+			'',
+		].join('\n');
+		const AUTH_ENVELOPE = { status: 'ERROR' as const, error: 'authentication failed or timed out', response: '' };
+		const AUTH_RESULT_EVENT = `${JSON.stringify({ event: 'result', result: { conversation_id: '', ...AUTH_ENVELOPE, num_turns: 0 } })}\n`;
+		const streamEvent = (text: string) => `${JSON.stringify({ event: 'step_update', step_update: { text_delta: text } })}\n`;
+
+		test('the real captured auth failure classifies as auth_captcha (exit 1 and exit null)', () => {
+			for (const exitCode of [1, null]) {
+				expect(classifyRun({ exitCode, log: AUTH_STDERR + AUTH_RESULT_EVENT, envelope: AUTH_ENVELOPE })).toEqual({ outcome: 'auth_captcha', reason: 'auth_or_captcha' });
+			}
+		});
+
+		test('the typed envelope error alone is enough (empty log)', () => {
+			expect(classifyRun({ exitCode: 1, log: '', envelope: AUTH_ENVELOPE }).outcome).toBe('auth_captcha');
+		});
+
+		test('stderr diagnostics alone are enough (no envelope)', () => {
+			expect(classifyRun({ exitCode: 1, log: AUTH_STDERR }).outcome).toBe('auth_captcha');
+		});
+
+		test('quota failure stays quota when model text mentions authentication', () => {
+			const log = `${streamEvent('reviewing the authentication middleware')}429 RESOURCE_EXHAUSTED quota exceeded\n`;
+			expect(classifyRun({ exitCode: 1, log })).toEqual({ outcome: 'quota_unavailable', reason: 'quota_exhausted' });
+		});
+
+		test('outage stays transient when a tool result in the stream says 403 Forbidden', () => {
+			const log = `${streamEvent('tool_result: HTTP 403 Forbidden')}503 service unavailable\n`;
+			expect(classifyRun({ exitCode: 1, log })).toEqual({ outcome: 'transient_unavailable', reason: 'provider_outage' });
+		});
+
+		test('plain failure stays task_failure when model text mentions a 401 handler', () => {
+			expect(classifyRun({ exitCode: 1, log: streamEvent('add a 401 handler to the router') })).toEqual({ outcome: 'task_failure', reason: 'nonzero_exit' });
+		});
+
+		test('a non-auth envelope error is not auth even if the response text is', () => {
+			expect(
+				classifyRun({ exitCode: 1, log: streamEvent('authentication'), envelope: { status: 'ERROR', error: 'model refused the task', response: "I can't do authentication work" } }),
+			).toEqual({ outcome: 'task_failure', reason: 'nonzero_exit' });
+		});
+
+		test('a json-mode envelope line in the log (response text) is not scanned', () => {
+			const log = `${JSON.stringify({ status: 'ERROR', response: 'forbidden authentication 401', error: 'crashed' })}\n`;
+			expect(classifyRun({ exitCode: 1, log }).outcome).toBe('task_failure');
+		});
+	});
+
 	test('artifact-backed success outranks auth and quota markers', () => {
 		expect(classifyRun({ exitCode: 0, artifactBytes: 412, log: '429 rate limit AND captcha challenge' }).outcome).toBe('success');
 	});
