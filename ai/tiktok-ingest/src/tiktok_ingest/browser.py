@@ -17,8 +17,11 @@ changes fail explicitly, state stays merge-only.
 
 Lifecycle honesty rules:
 
-- Inventory does not start until the operator EXPLICITLY confirms the
-  collection is visible (after handling login/captcha by hand).
+- Inventory does not start until the operator signals READINESS at a
+  press-Enter checkpoint (after handling login/captcha by hand). The
+  checkpoint is a readiness signal, not a second authorization: the
+  granted browser window already named the snapshot and its audit/state
+  writes, so the Enter carries no hidden authority.
 - The browser context is closed on success, handled failure or
   interruption (``finally``); the run-scoped profile directory is
   removed afterwards. A close/cleanup failure is REPORTED, never
@@ -44,6 +47,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .collection import (
+    CollectionAccessBlockedError,
     CollectionDOMError,
     CollectionRef,
     CollectionScanStore,
@@ -55,10 +59,13 @@ from .contracts import utc_now_iso
 from .guided import ConsentProvider, ConsentWindow
 from .state import StateRoot, atomic_write_bytes
 
-# Default container scope for the live scan, identical to the offline
-# command's documented defaults (README "Collection inventory").
-DEFAULT_CONTAINER_ATTR = "data-testid"
-DEFAULT_CONTAINER_VALUE = "collection-container"
+# Verified live container scope (2026-09-30 authenticated capture): the
+# collection renders inside div[data-e2e=collection-item-list]; the old
+# data-testid=collection-container marker no longer exists on the page.
+# The offline inventory-collect command takes its selectors explicitly
+# and is unaffected by these production defaults.
+DEFAULT_CONTAINER_ATTR = "data-e2e"
+DEFAULT_CONTAINER_VALUE = "collection-item-list"
 
 
 class BrowserInventoryError(RuntimeError):
@@ -178,7 +185,7 @@ class BrowserInventoryReport:
     profile_removed: bool
     cleanup_notes: list[str]
     interrupted: bool = False
-    confirmed: bool = True
+    readiness_signaled: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -244,8 +251,9 @@ def run_browser_inventory(
             f"navigate one tab to {ref.collection_url}",
             "wait while YOU handle login/captcha manually (this command "
             "cannot and will not automate them)",
-            "after your explicit confirmation, capture the page HTML once "
-            f"and enumerate items inside the {container_attr}="
+            "when you signal readiness at the press-Enter checkpoint (a "
+            "readiness signal, NOT a second authorization), capture the "
+            f"page HTML once and enumerate items inside the {container_attr}="
             f"{container_value!r} container (recommendation links are "
             "counted, never items)",
         ),
@@ -254,11 +262,16 @@ def run_browser_inventory(
             "before any media processing",
             "the run-scoped profile is removed on success, failure or "
             "interruption; an abrupt kill cannot guarantee cleanup",
+            "the readiness checkpoint grants nothing: this window is the "
+            "ONLY authorization for the capture and the writes below",
         ),
         effects=(
-            "persists the captured HTML under the state root for audit",
-            "persists/merges collection scan state and inventory entries "
-            "(merge-only; enumeration never authorizes downloads)",
+            "after your readiness signal: persists the captured HTML "
+            "under the state root for audit (named here so the "
+            "checkpoint hides no authority)",
+            "after your readiness signal: persists/merges collection "
+            "scan state and inventory entries (merge-only; enumeration "
+            "never authorizes downloads)",
         ),
     )
     if not consent.ask(window):
@@ -276,42 +289,29 @@ def run_browser_inventory(
     )
     live = controller if controller is not None else PlaywrightController()
     interrupted = False
-    confirmed = False
+    readiness_signaled = False
     html = ""
     try:
         out(
             "browser opening: complete login/captcha in the visible "
-            "window, scroll the collection as you wish, then answer the "
-            "confirmation prompt here"
+            "window, scroll the collection as you wish, then press Enter "
+            "at the readiness prompt here once the items are visible"
         )
         live.open(ref.collection_url, profile_dir)
-        confirm = ConsentWindow(
-            kind="browser-confirm",
-            title=(
-                "confirm the collection is visible (inventory starts only "
-                "after your explicit confirmation)"
-            ),
-            destinations=(ref.collection_url,),
-            operations=(
-                "capture the CURRENT page HTML once and enumerate the "
-                "collection container",
-            ),
-            limits=(
-                "a single snapshot of what is loaded right now; without "
-                "end-of-list evidence the scan status stays honestly "
-                "incomplete (in_progress) — it never claims completeness",
-            ),
-            effects=(
-                "the captured HTML is persisted for audit and the "
-                "existing merge-only scan state/inventory are updated",
-            ),
+        # Readiness checkpoint: a press-Enter signal, NOT a yes/no
+        # authorization. The capture and its writes were already named
+        # by the granted browser window above; this only reports that
+        # the operator finished the manual login/visibility steps.
+        readiness_signaled = consent.await_readiness(
+            "readiness checkpoint (NOT an authorization): press Enter "
+            "once you have logged in and the collection items are "
+            "visible in the browser window"
         )
-        confirmed = consent.ask(confirm)
-        if not confirmed:
+        if not readiness_signaled:
             raise BrowserInventoryError(
-                "visibility confirmation denied (or input ended): no "
-                "inventory was captured; the browser was closed and the "
-                "run-scoped profile removed"
+                "readiness was not signaled (input ended or "
+                "non-interactive): no inventory was captured; the "
+                "browser was closed and the run-scoped profile removed"
             )
         html = live.current_html()
     except KeyboardInterrupt:
@@ -329,10 +329,10 @@ def run_browser_inventory(
             notes.append(f"browser close error: {exc}")
         profile_removed = _remove_profile(profile_dir, notes)
 
-    if interrupted or not confirmed:
+    if interrupted or not readiness_signaled:
         raise BrowserInventoryError(
             "browser inventory did not complete: "
-            + ("interrupted" if interrupted else "not confirmed")
+            + ("interrupted" if interrupted else "readiness not signaled")
             + f"; cleanup notes: {'; '.join(notes) or 'none'}"
         )
 
@@ -347,6 +347,15 @@ def run_browser_inventory(
         observation = extract_page_items(
             html, container_attr, container_value
         )
+    except CollectionAccessBlockedError as exc:
+        raise BrowserInventoryError(
+            f"the collection page blocked access instead of showing its "
+            f"items: {exc}; next run: log in manually in the dedicated "
+            "inventory browser window and verify the collection actually "
+            "shows its items BEFORE signaling readiness at the prompt; "
+            f"the captured HTML was preserved at {audit_path} — "
+            "failing explicitly instead of returning a fake empty list"
+        ) from exc
     except CollectionDOMError as exc:
         raise BrowserInventoryError(
             f"the collection page DOM changed: {exc}; the captured HTML "

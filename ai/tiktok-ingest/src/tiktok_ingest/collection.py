@@ -19,7 +19,9 @@ Honesty rules encoded here (MVP-PRD sections 3.A, 4 and 5):
   end evidence is a valid complete empty result.
 - "Collection isn't available" plus a "log in" marker is access-blocked
   evidence. It is NOT proof of deletion or privacy and is distinct from
-  an honestly empty collection.
+  an honestly empty collection. Markers are matched against rendered
+  text nodes only: script/style/template/noscript payloads, attribute
+  values, comments and explicitly hidden subtrees are never evidence.
 - A DOM change (container marker missing) fails explicitly with
   :class:`CollectionDOMError` instead of returning a fake empty list.
 - State is MERGE-ONLY: a later partial observation never removes known
@@ -69,6 +71,16 @@ class CollectionDOMError(CollectionError):
 
     An absent container marker is an explicit failure, never a silent
     empty enumeration.
+    """
+
+
+class CollectionAccessBlockedError(CollectionError):
+    """Raised when the page itself shows access-block evidence, not its DOM.
+
+    A missing container plus matched access markers means the collection
+    was not viewable as captured (for example the unavailability text
+    with a login prompt). This is access evidence only: it never proves
+    deletion or privacy, and it is distinct from a genuine DOM change.
     """
 
 
@@ -163,6 +175,19 @@ def parse_collection_url(url: str) -> CollectionRef:
 DEFAULT_ACCESS_BLOCK_MARKERS: tuple[str, ...] = ("collection isn't available",)
 LOGIN_EVIDENCE_MARKER = "log in"
 
+# The live page renders the availability text with a typographic
+# apostrophe (U+2019) or its HTML entities, while the markers above are
+# written with the ASCII apostrophe. Both sides are normalized to the
+# ASCII form before matching so typography never hides access evidence.
+_APOSTROPHE_EQUIVALENTS = ("\u2019", "&rsquo;", "&#8217;", "&#x2019;")
+
+
+def _normalize_access_text(text: str) -> str:
+    lowered = text.lower()
+    for variant in _APOSTROPHE_EQUIVALENTS:
+        lowered = lowered.replace(variant, "'")
+    return lowered
+
 _VOID_ELEMENTS = frozenset(
     {
         "area",
@@ -181,6 +206,95 @@ _VOID_ELEMENTS = frozenset(
         "wbr",
     }
 )
+
+# Subtrees that never hold rendered text. The saved authenticated
+# capture carried its unavailability string ONLY inside script i18n
+# JSON: non-rendered payloads are not access evidence.
+_ACCESS_TEXT_EXCLUDED_TAGS = frozenset({"script", "style", "template", "noscript"})
+
+
+class _AccessTextExtractor(html.parser.HTMLParser):
+    """Collect RENDERED text nodes from one captured page.
+
+    Text inside script/style/template/noscript subtrees, attribute
+    values (never consulted), comments and declarations is not
+    evidence. Subtrees carrying an EXPLICIT markup-level hiding flag
+    (the ``hidden`` attribute, or ``aria-hidden`` set to true) are
+    skipped whole, matching what the captured markup itself asserts.
+    No CSS or computed visibility is inspected or claimed: text hidden
+    purely by stylesheets still counts as rendered text.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._stack: list[str] = []
+        self._excluded_depth: int | None = None
+        self._hidden_depth: int | None = None
+        self.chunks: list[str] = []
+
+    @staticmethod
+    def _is_explicitly_hidden(attrs: list[tuple[str, str | None]]) -> bool:
+        for key, value in attrs:
+            lowered = (key or "").lower()
+            if lowered == "hidden":
+                return True
+            if lowered == "aria-hidden" and (value or "").strip().lower() in (
+                "",
+                "true",
+            ):
+                return True
+        return False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        lowered = tag.lower()
+        if lowered not in _VOID_ELEMENTS:
+            self._stack.append(lowered)
+        depth = len(self._stack)
+        if self._excluded_depth is None and lowered in _ACCESS_TEXT_EXCLUDED_TAGS:
+            self._excluded_depth = depth
+            return
+        if self._hidden_depth is None and self._is_explicitly_hidden(attrs):
+            self._hidden_depth = depth
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.lower()
+        if lowered in _VOID_ELEMENTS:
+            return
+        if lowered in self._stack:
+            while self._stack:
+                popped = self._stack.pop()
+                if popped == lowered:
+                    break
+        depth = len(self._stack)
+        if self._excluded_depth is not None and depth < self._excluded_depth:
+            self._excluded_depth = None
+        if self._hidden_depth is not None and depth < self._hidden_depth:
+            self._hidden_depth = None
+
+    def handle_data(self, data: str) -> None:
+        if self._excluded_depth is not None or self._hidden_depth is not None:
+            return
+        if data.strip():
+            self.chunks.append(data)
+
+
+def _rendered_text_corpus(html_text: str) -> str:
+    """Whitespace-collapsed rendered text of one captured page.
+
+    Each text node contributes its whitespace-collapsed text; separate
+    text nodes are ALWAYS joined with a space, so two fragments that
+    merely touch in the source can never fabricate a marker, while
+    genuine text split across inline elements still matches.
+    """
+    extractor = _AccessTextExtractor()
+    try:
+        extractor.feed(html_text)
+        extractor.close()
+    except Exception as exc:  # html.parser failure: fail explicitly
+        raise CollectionDOMError(
+            f"page snapshot HTML could not be parsed for access evidence: {exc}"
+        ) from exc
+    return " ".join(" ".join(extractor.chunks).split())
 
 
 @dataclasses.dataclass(frozen=True)
@@ -235,14 +349,28 @@ class PageObservation:
 def _detect_access_markers(
     html: str, extra_blocked_markers: tuple[str, ...]
 ) -> tuple[str, ...]:
-    """Case-insensitive substring scan of the raw page for access evidence.
+    """Case-insensitive scan of RENDERED text for access evidence.
 
-    Detection is independent of the container scan: a blocked page is
-    access evidence whether or not a container was found. When the
-    default availability marker matches, the login marker is looked for
-    too and the pair is recorded together.
+    The scan runs on the parsed text-node corpus, never on raw markup:
+    script/style/template/noscript payloads, attribute values, comments
+    and explicitly hidden (``hidden``/``aria-hidden``) subtrees are not
+    evidence — the live page ships its unavailability string as script
+    i18n JSON on every page, authenticated or not, and matching it
+    would falsely block healthy captures. Only markup-level hiding is
+    honored; CSS or computed visibility is neither inspected nor
+    claimed. Separate text nodes are space-joined, so markers can never
+    be fabricated by adjacent fragments and genuine text split across
+    inline elements still matches.
+
+    Detection stays independent of the container scan: a blocked page
+    is access evidence whether or not a container was found. Matching
+    runs on apostrophe-normalized text (U+2019 and its HTML entities
+    become the ASCII apostrophe) so typography never hides evidence.
+    When the default availability marker matches, the login marker is
+    looked for too and the pair is recorded together. A corpus that
+    cannot be parsed fails closed with :class:`CollectionDOMError`.
     """
-    lowered = html.lower()
+    normalized = _normalize_access_text(_rendered_text_corpus(html))
     markers: list[str] = []
     for marker in (*DEFAULT_ACCESS_BLOCK_MARKERS, *extra_blocked_markers):
         if not isinstance(marker, str) or not marker.strip():
@@ -250,13 +378,16 @@ def _detect_access_markers(
                 "access-block markers must be non-empty strings, "
                 f"got {marker!r}"
             )
-        needle = marker.lower()
-        if needle in lowered and not any(m.lower() == needle for m in markers):
+        needle = _normalize_access_text(marker)
+        if needle in normalized and not any(
+            _normalize_access_text(existing) == needle for existing in markers
+        ):
             markers.append(marker)
+    default_needle = _normalize_access_text(DEFAULT_ACCESS_BLOCK_MARKERS[0])
     default_matched = any(
-        m.lower() == DEFAULT_ACCESS_BLOCK_MARKERS[0] for m in markers
+        _normalize_access_text(m) == default_needle for m in markers
     )
-    if default_matched and LOGIN_EVIDENCE_MARKER in lowered:
+    if default_matched and LOGIN_EVIDENCE_MARKER in normalized:
         if not any(
             m.lower() == LOGIN_EVIDENCE_MARKER for m in markers
         ):
@@ -368,7 +499,10 @@ def extract_page_items(
 
     Pure stdlib HTML parsing: no network, no browser, no media. A
     missing container marker raises :class:`CollectionDOMError` instead
-    of a fake empty list; parser failures raise it too.
+    of a fake empty list; parser failures raise it too. A missing
+    container WITH access-block evidence raises
+    :class:`CollectionAccessBlockedError`: the page itself says the
+    collection was not viewable as captured.
     """
     _require_str(container_attr, "container_attr")
     _require_str(container_value, "container_value")
@@ -387,6 +521,14 @@ def extract_page_items(
             f"page snapshot HTML could not be parsed: {exc}"
         ) from exc
     if not parser.container_found:
+        if access_markers:
+            raise CollectionAccessBlockedError(
+                f"container marker {container_attr}={container_value!r} was "
+                "not found and the page itself shows access-block evidence "
+                f"({', '.join(access_markers)}): the collection was not "
+                "viewable as captured — access evidence only, not proof it "
+                "is private or deleted"
+            )
         raise CollectionDOMError(
             f"container marker {container_attr}={container_value!r} was not "
             "found in the page snapshot; the DOM appears to have changed — "

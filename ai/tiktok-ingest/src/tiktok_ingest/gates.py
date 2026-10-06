@@ -399,7 +399,21 @@ class GateLedger:
         return result
 
     def to_jsonable(self) -> list[dict[str, Any]]:
+        """Persisted JSON form (``meta.json`` resource_gates).
+
+        Phase 0 addendum (swap-quiet-retry PRD FR-16): each entry also
+        carries the raw ``detail`` — the measured counters (cumulative
+        swap bytes, baselines, limits) needed to audit the cooldown —
+        additively; the typed ``gate`` id remains the eligibility
+        authority and is never derived from prose. Old manifests without
+        ``detail`` stay readable (the field is simply absent there).
+        """
         return [
-            {"gate": result.gate, "passed": result.passed, "reason": result.reason}
+            {
+                "gate": result.gate,
+                "passed": result.passed,
+                "reason": result.reason,
+                "detail": dict(result.detail),
+            }
             for result in self.results
         ]
