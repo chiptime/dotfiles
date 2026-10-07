@@ -45,7 +45,7 @@ compare-prices:
   scope: personal
   status: active
   desc: Comparador de precios + plataforma móvil (mobile-proxy, ntfy, aprobaciones 1-tap) — vive en personal/hungry/
-  next: estabilizar proxy móvil; decidir propuestas F2 de docs
+  next: V3 proxy residencial — verificar tráfico DataImpulse tras el primer crawl (código en master, VPS env OK)
 
 vps:
   scope: personal
