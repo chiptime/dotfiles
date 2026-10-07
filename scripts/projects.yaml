@@ -38,8 +38,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo consolidado del ecosistema (v0.3.0) — main consolidado y limpio: inventario open-sessions mergeado (979edd2), docs roadmap voice-stack integrados tras resolver 19 conflictos de PRDs, AT-11 confirmada parcial (M1+2.1, c577041), poda total de ramas/worktrees y harnesses del plugin en verde (rc 0)
-  next: empujar 10 commits locales a origin y podar 6 ramas remotas obsoletas (requiere autorizar push); backlog: voz en segundo plano y eval de modelo real
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — reconciliación R1-R6 completada y pusheada a main; Bloque 2 cerrado con HT-11 audición de voces (preview bilingüe y caché LRU); suite crítica bash de 51 casos en verde; roadmap consolidado en docs/ESTADO-Y-PENDIENTES.md
+  next: avanzar con el roadmap de pendientes (Frente 1: Voice Stack VS0/VS1 bajo EXECUTION.md §1, Frente 2: onboarding AT-11, o Frente 3: radio mode HT-03)
 
 compare-prices:
   scope: personal
