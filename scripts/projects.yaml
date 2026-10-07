@@ -15,7 +15,7 @@ dotfiles:
   scope: personal
   status: active
   desc: Infra personal — skills OpenCode/agy-cli (projects-tracker migrado), config centralizada de modelos de agentes, notificaciones ntfy, teams-to-tasks + task-resolver, tools
-  next: trackear opencode.json (210KB) en el repo tras scrub de secrets; commitear cambio del router (ai/opencode-router/opencode-router.json); prueba real de task-resolver sobre Inbox; vigilar sweep teams-to-tasks y ntfy intermitente en móvil; smoke manual fzf de opencode-switch edit en un perfil + aplicar perfil deseado y reiniciar OpenCode (variant editor por agente listo)
+  next: commitear refactor de quota-balancer a tools/ai-quotas/plugin y router limpio; trackear opencode.json tras scrub de secrets; prueba real de task-resolver sobre Inbox
 
 agy-bridge:
   scope: personal
@@ -205,12 +205,16 @@ sis:
 recruiting-frontend:
   scope: work
   group: sis
-  desc: Frontend Clece (Angular)
+  status: active
+  desc: Frontend Clece (Angular) · modal adjuntos verification UX
+  next: desplegar los cambios del modal adjuntos (working tree)
 
 recruiting-backend:
   scope: work
   group: sis
-  desc: Backend Clece (SAP CAP)
+  status: active
+  desc: Backend Clece (SAP CAP) · adjuntos SC verify+heal-on-read
+  next: implantar flag ATTACHMENT_DISPATCH_MODE (diseño en Engram) + limpiar duplicado 846387/846389 clecesaT2
 
 # Products
 HyperMonitor:
