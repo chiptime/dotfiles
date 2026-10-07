@@ -38,8 +38,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo consolidado del ecosistema (v0.3.0) — PRD-AT-10 y PRD-AT-03 COMPLETADAS y archivadas: engine/ (motor autónomo con API pública, daemon vía única, cola y cadena), contracts/ (fuente normativa ipc-v2 y tts-brain-v1), hosts/herdr/ (tts-plugin y brain absorbidos con historiales completos 3-way); tests de frontera RF-AT-10-5 verdes; 1.501 tests pasando sin fallos a través de todos los componentes
-  next: reiniciar herdr-brain con fix/brain-open-session-inventory (list_open_sessions, sin commit) y repetir "qué sesiones tengo abiertas?" + prueba móvil de transcripciones sin duplicados; luego autoloop L1-L6 en feat/autoloop; pendiente: voz en segundo plano (bloqueo/cambio de app) y eval modelo real en backlog Notion
+  desc: Monorepo consolidado del ecosistema (v0.3.0) — lector externo con karaoke por fragmentos completado: resaltado sigue el fragmento del popup, anclas coverage del renderer corregidas y caché perfil 2; integrado en main (50c7e75) y verificado audible en móvil vía Tailscale HTTPS
+  next: WIP de open-session-inventory (llm/tools/tests) pendiente de su propia sesión; backlog: voz en segundo plano y eval de modelo real
 
 compare-prices:
   scope: personal
