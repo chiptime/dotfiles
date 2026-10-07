@@ -1,0 +1,12 @@
+=== Context ===
+Directory: /home/user/project
+Git branch: feature/auth
+Env: NODE_ENV=development
+
+=== Buffer ===
+git log --oneline -5
+
+=== Expectations ===
+Should show last 5 commits with short hashes
+Should include commit messages
+Should display in chronological order
