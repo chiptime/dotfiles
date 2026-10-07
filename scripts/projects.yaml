@@ -38,8 +38,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo consolidado del ecosistema (v0.3.0) — lector externo con karaoke por fragmentos completado: resaltado sigue el fragmento del popup, anclas coverage del renderer corregidas y caché perfil 2; integrado en main (50c7e75) y verificado audible en móvil vía Tailscale HTTPS
-  next: WIP de open-session-inventory (llm/tools/tests) pendiente de su propia sesión; backlog: voz en segundo plano y eval de modelo real
+  desc: Monorepo consolidado del ecosistema (v0.3.0) — main consolidado y limpio: inventario open-sessions mergeado (979edd2), docs roadmap voice-stack integrados tras resolver 19 conflictos de PRDs, AT-11 confirmada parcial (M1+2.1, c577041), poda total de ramas/worktrees y harnesses del plugin en verde (rc 0)
+  next: empujar 10 commits locales a origin y podar 6 ramas remotas obsoletas (requiere autorizar push); backlog: voz en segundo plano y eval de modelo real
 
 compare-prices:
   scope: personal
