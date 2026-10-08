@@ -61,8 +61,8 @@ engram-sync:
 ai-stack:
   scope: personal
   status: active
-  desc: Control-hub en producción — roadmap de integración COMPLETO (fases 0-4): clerk 8 ops, tareas Notion a :15, triaje determinista del sensor, espejo hub-state y panel multi-agente
-  next: Aceptación en vivo — preguntar a Gertru "¿tareas abiertas de X?" tras el primer sync de las 08:15; primer consumo de projects.json por el drain
+  desc: Control-hub en producción — sync-tasks migrado a script determinista Node sin tokens (3.3s); OpenClaw detenido en VPS a demanda; drift-alert, watchdog y backup operativos
+  next: Levantar OpenClaw (docker start) cuando se retome la actividad y verificar ejecución desatendida de sync-tasks a las 10:15
 
 voice-assistant:
   scope: personal
