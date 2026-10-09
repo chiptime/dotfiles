@@ -38,14 +38,14 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — reconciliación R1-R6 completada y pusheada a main; Bloque 2 cerrado con HT-11 audición de voces (preview bilingüe y caché LRU); suite crítica bash de 51 casos en verde; roadmap consolidado en docs/ESTADO-Y-PENDIENTES.md
-  next: avanzar con el roadmap de pendientes (Frente 1: Voice Stack VS0/VS1 bajo EXECUTION.md §1, Frente 2: onboarding AT-11, o Frente 3: radio mode HT-03)
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — F4 STT core + HT-03 radio mode + AT-11 M2 instalable (2.2-2.5) + F5 botones ntfy approval fusionados a main; suites integradas en verde (plugin 140p, brain 1498p, harness 137 OK)
+  next: F2 validación física en Android (sesión guiada) y re-slice 9a/9b/9c de AT-11 tarea 2.1 (Decisión 12, rebasando M2)
 
 compare-prices:
   scope: personal
   status: active
-  desc: Comparador de precios + plataforma móvil (mobile-proxy, ntfy, aprobaciones 1-tap) — vive en personal/hungry/
-  next: V3 proxy residencial — verificar tráfico DataImpulse tras el primer crawl (código en master, VPS env OK)
+  desc: Price comparator + mobile approvals — Nominatim allowed in CSP connect-src and deployed via Dokploy (81352366); ECI/Hipercor Moonshine markers active; production healthy
+  next: run the single budget-authorized production Hipercor finder end-to-end acceptance check (no production scraper run yet); EAN source decision open; TypeScript 1807-diag backlog handled separately
 
 vps:
   scope: personal
