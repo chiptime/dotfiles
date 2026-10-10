@@ -26,8 +26,8 @@ agy-bridge:
 opencode-plugins:
   scope: personal
   status: active
-  desc: Plugins locales de OpenCode (symlink a ~/.config/opencode/plugins) — timeline añade "[Finalizado a las HH:MM:SS]" en hora local al cierre de cada bloque de texto; 11 tests verdes
-  next: footer por bloque, no por turno completo — turno exacto bloqueado hasta tener ruta de part.update con transporte in-process; revisión nativa del commit inicial pendiente
+  desc: Plugins de OpenCode en repo propio y publicados en npm — opencode-time-footer 0.2.0: footer de hora local con soporte de idiomas (es/en/pt/fr/de/it) y prioridad label > locale > sistema > inglés; symlink a ~/.config/opencode/plugins; 78 tests verdes
+  next: marcar el turno completo, no solo cada bloque de texto (bloqueado: falta ruta de part.update con transporte in-process); valorar migrar los otros 8 plugins sueltos de ~/.config/opencode/plugins al repo
 
 herdr-tts:
   scope: personal
