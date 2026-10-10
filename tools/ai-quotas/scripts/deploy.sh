@@ -59,10 +59,17 @@ deploy_watchdog() {
   echo "==> watchdog OK"
 }
 
+deploy_plugin() {
+  echo "==> bundling opencode quota-balancer plugin"
+  (cd "$APP/plugin" && ./build.sh)
+  echo "==> plugin OK"
+}
+
 case "${1:-all}" in
   back)     deploy_back ;;
   tray)     deploy_tray ;;
   watchdog) deploy_watchdog ;;
-  all)      deploy_back; deploy_tray; deploy_watchdog ;;
-  *) echo "usage: $0 [back|tray|watchdog|all]" >&2; exit 2 ;;
+  plugin)   deploy_plugin ;;
+  all)      deploy_back; deploy_tray; deploy_watchdog; deploy_plugin ;;
+  *) echo "usage: $0 [back|tray|watchdog|plugin|all]" >&2; exit 2 ;;
 esac

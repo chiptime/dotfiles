@@ -17,6 +17,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # opencode itself may live in linuxbrew (Linux) — include it when present so
 # the launcher also works from PATH-minimal contexts (macOS brew is /opt/homebrew).
 [ -d /home/linuxbrew/.linuxbrew/bin ] && PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+[ -f "$HOME/.dotfiles/shell/private-env.sh" ] && . "$HOME/.dotfiles/shell/private-env.sh"
 CONFIG="${AI_STACK_ROUTER_CONFIG:-$HOME/.config/ai-stack/opencode-router.json}"
 
 if [ ! -f "$CONFIG" ]; then

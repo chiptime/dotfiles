@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# build.sh — bundle the quota-balancer plugin and deploy the router config.
+# build.sh — deploy the router config.
 #
 # The sdd-explore agy layer (src/agy/, the agy-explore binary, and the
 # sdd-explore-dispatch plugin) was retired: both of its consumers (the
@@ -16,18 +16,7 @@ OUT="$ROOT/opencode-router.json"
 
 [ -f "$OUT" ] || { echo "router config missing: $OUT" >&2; exit 2; }
 
-# (a) bundle the quota-balancer read-only advisor (v1 manual advisor; pure
-# core in src/balancer/core.ts). Self-contained artifact into
-# ~/.config/opencode/plugins (unversioned, auto-loaded at startup). The .ts
-# extension is deliberate: the auto-loader demonstrably picks up .ts files
-# there today, and the bundle payload is plain ESM JS (valid TS input).
-QB_SRC="$ROOT/src/plugin/quota-balancer.ts"
-QB_OUT="$HOME/.config/opencode/plugins/quota-balancer.ts"
-[ -f "$QB_SRC" ] || { echo "plugin source missing: $QB_SRC" >&2; exit 2; }
-bun build --target=bun --format=esm "$QB_SRC" --outfile "$QB_OUT"
-echo "bundled: $QB_OUT"
-
-# (b) deploy the router config to the runtime path as a REAL file, never a
+# deploy the router config to the runtime path as a REAL file, never a
 # symlink into this repo. History (2026-09-08): this path was a dotbot symlink
 # to the tracked template, so an in-place runtime rewrite (ad-hoc model-fix)
 # wrote THROUGH the link into the repo (tabs→2-space reformat + injected

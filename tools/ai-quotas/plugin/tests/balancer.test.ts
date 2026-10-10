@@ -10,7 +10,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ADVICE_SCHEMA, decide, formatNotice, type BalancerAdvice, type DecideInput, type ShownState } from '../src/balancer/core';
-import plugin, { adviseOnce, type AdvisorDeps, type AdvisorState, type FetchLike } from '../src/plugin/quota-balancer';
+import { adviseOnce, type AdvisorDeps, type AdvisorState, type FetchLike } from '../src/balancer/advisor';
+import plugin from '../src/quota-balancer';
 
 const TIERS = {
 	frontier: { 'anthropic/claude-opus-5': 'claude', 'zai/glm-4.7': 'zai' },
