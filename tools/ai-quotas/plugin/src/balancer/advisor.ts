@@ -1,16 +1,6 @@
-/**
- * quota-balancer plugin — read-only advisor adapter (v1 manual advisor).
- * chat.message READs input.model only (its output is never read back by the
- * runtime — spike RESULTS.md), consults the local ai-quotas advice endpoint
- * (localhost, 300 ms timeout, size cap), runs the pure core decide(), and
- * surfaces ONE deduplicated toast: never writes, never scores, never throws
- * (R5/R7/R10); kill switch returns before any fetch (R6); no session.created
- * hook — the spike proved per-session pinning impossible.
- */
-import type { Plugin } from "@opencode-ai/plugin"
 import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { DEFAULT_NOTICE_INTERVAL_MS, decide, type ShownState, type TierMap } from "../balancer/core"
+import { DEFAULT_NOTICE_INTERVAL_MS, decide, type ShownState, type TierMap } from "./core"
 
 /**
  * Narrow callable surface of fetch. Bun's global `fetch` carries a required
@@ -31,10 +21,10 @@ export interface AdvisorDeps {
 	maxBytes: number
 }
 export interface AdvisorState { lastShown: ShownState | null }
-const readTextOrNull = (p: string): string | null => { try { return readFileSync(p, "utf8") } catch { return null } }
+export const readTextOrNull = (p: string): string | null => { try { return readFileSync(p, "utf8") } catch { return null } }
 
 // Same config file the server scores with; absent/unparseable -> no tier truth.
-function loadTiers(d: AdvisorDeps): { tiers: TierMap | null; noticeIntervalMs: number } {
+export function loadTiers(d: AdvisorDeps): { tiers: TierMap | null; noticeIntervalMs: number } {
 	try {
 		const raw = JSON.parse(d.readText(d.env.AI_QUOTAS_BALANCER_CONFIG ?? `${homedir()}/.config/ai-stack/balancer.json`) ?? "") as { tiers?: unknown; notice_interval?: unknown }
 		const tiers = typeof raw.tiers === "object" && raw.tiers !== null ? (raw.tiers as TierMap) : null
@@ -46,7 +36,7 @@ function loadTiers(d: AdvisorDeps): { tiers: TierMap | null; noticeIntervalMs: n
 }
 
 // One bounded fetch (AbortController timeout, HTTP status, size cap, JSON parse); any failure -> null (fail open).
-async function fetchAdvice(url: string, d: AdvisorDeps): Promise<unknown> {
+export async function fetchAdvice(url: string, d: AdvisorDeps): Promise<unknown> {
 	const controller = new AbortController()
 	const timer = setTimeout(() => controller.abort(), d.timeoutMs)
 	try {
@@ -64,6 +54,7 @@ async function fetchAdvice(url: string, d: AdvisorDeps): Promise<unknown> {
 }
 
 export async function adviseOnce(model: string, state: AdvisorState, d: AdvisorDeps): Promise<void> {
+	if (!d || typeof d?.exists !== "function") return
 	// R6 kill switch: exit before any network (core re-checks for defense in depth).
 	if (d.exists(d.env.QUOTA_BALANCER_FORCE_NATIVE_FILE ?? `${homedir()}/.config/ai-stack/force-native`)) return
 	const { tiers, noticeIntervalMs } = loadTiers(d)
@@ -79,24 +70,3 @@ export async function adviseOnce(model: string, state: AdvisorState, d: AdvisorD
 		// Toast surface failure (headless/no-TUI): silent, chat proceeds (R7).
 	}
 }
-
-const QuotaBalancerPlugin: Plugin = ({ client }) => {
-	const states = new Map<string, AdvisorState>()
-	return {
-		"chat.message": async (input) => {
-			const model = input.model
-			if (!model?.providerID || !model?.modelID) return
-			const key = `${input.sessionID}/${model.providerID}/${model.modelID}`
-			let state = states.get(key)
-			if (state === undefined) states.set(key, (state = { lastShown: null }))
-			await adviseOnce(`${model.providerID}/${model.modelID}`, state, {
-				env: process.env as Record<string, string>, fetchImpl: fetch, exists: existsSync, readText: readTextOrNull,
-				showToast: (message) => client.tui.showToast({ body: { message, variant: "info" } }),
-				logDebug: (message) => void client.app.log({ body: { service: "quota-balancer", level: "debug", message } }).catch(() => {}),
-				now: Date.now, timeoutMs: 300, maxBytes: 65_536,
-			})
-		},
-	}
-}
-
-export default QuotaBalancerPlugin

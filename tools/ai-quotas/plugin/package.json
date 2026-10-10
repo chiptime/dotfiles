@@ -1,0 +1,12 @@
+{
+	"name": "ai-quotas-opencode-plugin",
+	"private": true,
+	"scripts": {
+		"build": "./build.sh",
+		"test": "bun test"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"typescript": "^7.0.2"
+	}
+}

@@ -3,7 +3,7 @@
 // Behavior-first: probes the artifacts live plugins resolve against + the runtime binary.
 // Focused test: bun test ./spike/mutation-probe.test.ts · Harness: bun spike/mutation-probe.ts
 import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -35,7 +35,8 @@ export function probe(): Contract {
   const dts = readFileSync(DTS, "utf8")
   const sig = dts.match(/"chat\.message"\?: \(input: \{([\s\S]*?)\}, output: \{([\s\S]*?)\}\) => Promise<void>/)
   if (!sig) throw new Error("chat.message signature missing from installed plugin types")
-  const bin = process.env.OPENCODE_BIN ?? execFileSync("which", ["opencode"], { encoding: "utf8" }).trim()
+  const realCandidate = `${homedir()}/.local/opt/opencode/bin/opencode`
+  const bin = process.env.OPENCODE_BIN ?? process.env.OPENCODE_REAL_BIN ?? (existsSync(realCandidate) ? realCandidate : execFileSync("which", ["opencode"], { encoding: "utf8" }).trim())
   const dispatch = grep('trigger\\("chat\\.(message|params)",\\{[^{}]*\\},\\{[^{}]*\\}\\)', bin)
   const msg = dispatch.match(/trigger\("chat\.message",\{([^{}]*)\},\{([^{}]*)\}\)/)
   if (!msg) throw new Error("chat.message dispatch missing from runtime binary")
