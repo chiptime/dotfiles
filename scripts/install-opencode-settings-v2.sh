@@ -5,11 +5,19 @@
 #   1. ~/.config/opencode/opencode.json (config viva, la escribe gentle-ai sync)
 #   2. ai/agents/opencode/settings/*.fragment.json (mecanismo del repo, igual que v1)
 #   3. settings.local.fragment.json (fragmento local de la máquina, igual que v1)
-#   4. ai/agents/opencode/models/models.v2.json (fuente única de modelos por agente)
+#   4. ai/agents/opencode/models/models.v2.json (fuente única de modelos Y variantes por agente)
 #
-# Garantías: solo toca claves `model` y `small_model`; solo en agentes que YA existen
-# (nunca crea agentes fantasma); valida cada id contra `opencode models` y aborta antes
-# de escribir si el mapa contiene uno inválido. Seguro de repetir.
+# Mapa por agente (dos formas soportadas):
+#   - par:     {"model": "provider/id", "variant": "low|medium|high|max"}  (variant
+#              ausente => default "")
+#   - legacy:  "provider/id"                                             (=> default "")
+#
+# Garantías: para cada agente mapeado solo sobrescribe `model` y `variant` (nunca
+# spread de objetos: prompt/permisos de la config viva se conservan), y la
+# variante del par/default SIEMPRE gana a la que pongan los fragmentos; solo en
+# agentes que YA existen (nunca crea agentes fantasma); valida cada id contra
+# `opencode models` y la forma del mapa, y aborta antes de escribir si algo falla.
+# Seguro de repetir.
 #
 # Uso: install-opencode-settings-v2.sh [--dry-run | --check | --help]
 set -euo pipefail
@@ -24,6 +32,8 @@ Uso: install-opencode-settings-v2.sh [--dry-run | --check | --help]
 Variables de entorno (útiles para pruebas en un sandbox):
   OPENCODE_CONFIG_FILE     config a modificar (def.: ~/.config/opencode/opencode.json)
   OPENCODE_LOCAL_FRAGMENT  fragmento local (def.: settings.local.fragment.json junto a la config)
+  OPENCODE_MODELS_FILE     mapa a aplicar (def.: ai/agents/opencode/models/models.v2.json del repo)
+  OPENCODE_SETTINGS_DIR    dir de fragmentos del repo (def.: ai/agents/opencode/settings)
   OPENCODE_MODELS_LIST     fichero con un id provider/modelo válido por línea
                            (si falta, se ejecuta `opencode models`)
 EOF
@@ -42,8 +52,8 @@ done
 NOWRITE=$((DRY_RUN + CHECK))
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SETTINGS_DIR="$REPO/ai/agents/opencode/settings"
-MODELS_FILE="$REPO/ai/agents/opencode/models/models.v2.json"
+SETTINGS_DIR="${OPENCODE_SETTINGS_DIR:-$REPO/ai/agents/opencode/settings}"
+MODELS_FILE="${OPENCODE_MODELS_FILE:-$REPO/ai/agents/opencode/models/models.v2.json}"
 CFG="${OPENCODE_CONFIG_FILE:-$HOME/.config/opencode/opencode.json}"
 LOCAL_FRAGMENT="${OPENCODE_LOCAL_FRAGMENT:-$(dirname "$CFG")/settings.local.fragment.json}"
 
@@ -58,14 +68,20 @@ done
 [ -f "$CFG" ] || fatal "no existe $CFG"
 [ -f "$MODELS_FILE" ] || fatal "no existe $MODELS_FILE"
 jq empty "$CFG" 2>/dev/null || fatal "$CFG no es JSON válido; no se toca nada"
+# Puerta de forma del mapa: cada agente debe ser "provider/id" (legacy) o un par
+# {"model": "provider/id", "variant"?: string}. Cualquier otra forma aborta
+# ANTES de tocar la config.
 jq -e '
   (.small_model | type == "string" and test("^[^/]+/.+"))
   and (.agents | type == "object")
-  and ([.agents[] | type == "string" and test("^[^/]+/.+")] | all)
+  and ([.agents[] | ((type == "string" and test("^[^/]+/.+"))
+                     or (type == "object"
+                         and (.model | type == "string" and test("^[^/]+/.+"))
+                         and ((.variant == null) or (.variant | type == "string"))))] | all)
   and (.inherit | type == "array")
   and ([.inherit[] | type == "string"] | all)
 ' "$MODELS_FILE" >/dev/null 2>&1 \
-  || fatal "$MODELS_FILE tiene una forma inválida (small_model, agents{} con provider/modelo, inherit[])"
+  || fatal "$MODELS_FILE tiene una forma inválida (small_model, agents{} con pares {model, variant} o strings provider/modelo, inherit[])"
 echo "config: $CFG"
 echo "mapa:   ${MODELS_FILE#"$REPO"/}"
 
@@ -111,44 +127,58 @@ else
       echo "  x $who = $id (no existe en opencode models)" >&2
       BAD=$((BAD + 1))
     fi
-  done < <(jq -r '("small_model\t" + .small_model), (.agents | to_entries[] | "\(.key)\t\(.value)")' "$MODELS_FILE")
-  [ "$BAD" -eq 0 ] || fatal "$BAD id(s) inválidos en el mapa; se aborta sin escribir. Corrige models.v2.json"
+  done < <(jq -r '("small_model\t" + .small_model),
+                (.agents | to_entries[] | "\(.key)\t\(.value | if type == "string" then . else .model end)")' "$MODELS_FILE")
+  [ "$BAD" -eq 0 ] || fatal "$BAD id(s) inválidos en el mapa; se aborta sin escribir. Corrige el mapa"
   echo "  mapa: todos los ids existen ($(wc -l < "$VALID" | tr -d ' ') modelos conocidos)"
 fi
 
-echo "[4/5] Aplicando el mapa de modelos (solo agentes existentes)"
+echo "[4/5] Aplicando el mapa de pares (solo model+variant, solo agentes existentes)"
 jq --slurpfile m "$MODELS_FILE" '
   $m[0] as $m | (.agent // {}) as $ag
   | . * {small_model: $m.small_model,
-         agent: ($m.agents | with_entries(select($ag[.key] != null) | .value = {model: .value}))}
+         agent: ($m.agents | with_entries(select($ag[.key] != null)
+           | .value = (if (.value | type) == "object"
+                       then {model: .value.model, variant: (.value.variant // "")}
+                       else {model: .value, variant: ""} end)))}
 ' "$MERGED" > "$WORK/patched.json" && mv "$WORK/patched.json" "$MERGED"
 
 while IFS= read -r line; do
-  [ -n "$line" ] && echo "  = capa local/repo define un modelo distinto, gana el mapa: $line"
+  [ -n "$line" ] && echo "  = capa local/repo define un valor distinto, gana el mapa: $line"
 done < <(jq -r --slurpfile m "$MODELS_FILE" '
-  $m[0] as $m
-  | (if .small_model != null and .small_model != $m.small_model
-     then "small_model: \(.small_model) -> \($m.small_model)" else empty end),
-    ((.agent // {}) | to_entries[]
-     | select(.value | type == "object" and .model != null)
-     | select($m.agents[.key] != null and .value.model != $m.agents[.key])
-     | "agent.\(.key).model: \(.value.model) -> \($m.agents[.key])")
+  def mm($k): $m[0].agents[$k] | if type == "string" then . else .model end;
+  def mv($k): if ($m[0].agents[$k] | type) == "object" then ($m[0].agents[$k].variant // "") else "" end;
+  (if .small_model != null and .small_model != $m[0].small_model
+   then "small_model: \(.small_model) -> \($m[0].small_model)" else empty end),
+  ((.agent // {}) | to_entries[]
+   | select(.value | type == "object")
+   | select($m[0].agents[.key] != null)
+   | (if .value.model != null and .value.model != mm(.key)
+      then "agent.\(.key).model: \(.value.model) -> \(mm(.key))" else empty end),
+     (if .value.variant != null and .value.variant != mv(.key)
+      then "agent.\(.key).variant: \(.value.variant) -> \(if mv(.key) == "" then "(default)" else mv(.key) end)" else empty end))
 ' "$LAYERS")
 
 CHANGES="$(jq -r -n --slurpfile a "$CFG" --slurpfile b "$MERGED" '
+  def disp($v): if $v == null or $v == "" then "(default)" else $v end;
   ($a[0].agent // {}) as $A | ($b[0].agent // {}) as $B
   | ($B | to_entries[] | select(.value | type == "object") | . as $e
      | ($A[$e.key].model // null) as $old
      | select($e.value.model != null and $e.value.model != $old)
      | (if $old == null then "+" else "~" end)
        + " agent.\($e.key).model: \($old // "(ninguno)") -> \($e.value.model)"),
+    ($B | to_entries[] | select(.value | type == "object") | . as $e
+     | ($A[$e.key].variant // null) as $oldv
+     | select($e.value.variant != null and $e.value.variant != $oldv)
+     | (if $oldv == null then "+" else "~" end)
+       + " agent.\($e.key).variant: \(if $oldv == null then "(ninguna)" else disp($oldv) end) -> \(disp($e.value.variant))"),
     (if ($a[0].small_model // null) != ($b[0].small_model // null)
      then "~ small_model: \($a[0].small_model // "(ninguno)") -> \($b[0].small_model)" else empty end)
 ')"
 if [ -n "$CHANGES" ]; then
   echo "$CHANGES" | sed 's/^/  /'
 else
-  echo "  = todos los modelos ya estaban correctos"
+  echo "  = todos los modelos y variantes ya estaban correctos"
 fi
 
 while IFS= read -r a; do

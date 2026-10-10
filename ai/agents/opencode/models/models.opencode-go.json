@@ -1,5 +1,5 @@
 {
-  "$comment": "Perfil OpenAI: Prioridad ChatGPT Plus (Sol) para Orquestador, Worker, Verify y Reviewers. models.openai.json",
+  "$comment": "Perfil OpenCode Go: Prioridad Qwen 3.8 Max de OpenCode Go / Zen. models.opencode-go.json",
   "small_model": "opencode/muse-spark-1.3-contributor-free",
   "agents": {
     "branch-pr": {
@@ -15,23 +15,23 @@
       "variant": ""
     },
     "general": {
-      "model": "openai/gpt-6.1-sol",
-      "variant": "high"
+      "model": "opencode-go/qwen3.8-max",
+      "variant": "max"
     },
     "gentle-ai-explore": {
       "model": "agy/gemini-3.8-flash",
       "variant": "high"
     },
     "gentle-ai-verify": {
-      "model": "openai/gpt-6.1-sol",
-      "variant": "high"
+      "model": "opencode-go/qwen3.8-max",
+      "variant": "max"
     },
     "gentle-ai-worker": {
-      "model": "openai/gpt-6.1-sol",
-      "variant": "high"
+      "model": "opencode-go/qwen3.8-max",
+      "variant": "max"
     },
     "gentle-ai-worker-fallback": {
-      "model": "anthropic/claude-sonnet-5-5",
+      "model": "openai/gpt-6.1-sol",
       "variant": "high"
     },
     "gentle-orchestrator": {
@@ -51,27 +51,27 @@
       "variant": ""
     },
     "jd-fix-agent": {
-      "model": "openai/gpt-6.1-sol",
+      "model": "opencode-go/qwen3.8-max",
       "variant": "max"
     },
     "jd-fix-agent-fallback": {
-      "model": "anthropic/claude-sonnet-5-5",
+      "model": "openai/gpt-6.1-sol",
       "variant": "high"
     },
     "jd-judge-a": {
-      "model": "openai/gpt-6.1-sol",
+      "model": "opencode-go/deepseek-v4-pro",
       "variant": ""
     },
     "jd-judge-a-fallback": {
-      "model": "anthropic/claude-opus-5-5",
-      "variant": ""
-    },
-    "jd-judge-b": {
       "model": "openai/gpt-6.1-sol",
       "variant": ""
     },
-    "jd-judge-b-fallback": {
+    "jd-judge-b": {
       "model": "opencode-go/qwen3.8-max",
+      "variant": ""
+    },
+    "jd-judge-b-fallback": {
+      "model": "openai/gpt-6.1-sol",
       "variant": ""
     },
     "judgment-day": {
@@ -79,43 +79,43 @@
       "variant": ""
     },
     "review-readability": {
-      "model": "openai/gpt-6.1-sol",
+      "model": "opencode-go/qwen3.8-max",
       "variant": ""
     },
     "review-readability-fallback": {
-      "model": "opencode-go/qwen3.8-max",
+      "model": "opencode-go/hy4-preview",
       "variant": ""
     },
     "review-refuter": {
-      "model": "openai/gpt-6.1-sol",
+      "model": "opencode-go/qwen3.8-max",
       "variant": ""
     },
     "review-refuter-fallback": {
-      "model": "opencode-go/qwen3.8-max",
+      "model": "openai/gpt-6.1-sol",
       "variant": ""
     },
     "review-reliability": {
-      "model": "openai/gpt-6.1-sol",
+      "model": "opencode-go/qwen3.8-max",
       "variant": ""
     },
     "review-reliability-fallback": {
-      "model": "opencode-go/qwen3.8-max",
+      "model": "openai/gpt-6.1-sol",
       "variant": ""
     },
     "review-resilience": {
-      "model": "openai/gpt-6.1-sol",
-      "variant": ""
-    },
-    "review-resilience-fallback": {
       "model": "opencode-go/qwen3.8-max",
       "variant": ""
     },
-    "review-risk": {
+    "review-resilience-fallback": {
       "model": "openai/gpt-6.1-sol",
       "variant": ""
     },
+    "review-risk": {
+      "model": "opencode-go/deepseek-v4-pro",
+      "variant": ""
+    },
     "review-risk-fallback": {
-      "model": "anthropic/claude-opus-5-5",
+      "model": "openai/gpt-6.1-sol",
       "variant": ""
     },
     "summary": {
