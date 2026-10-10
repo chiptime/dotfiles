@@ -9,3 +9,5 @@ ai/teams-to-tasks/node_modules/
 .playwright-mcp/
 .agy-attachments/
 .agy-diagnostics/
+__pycache__/
+*.pyc
