@@ -1,0 +1,76 @@
+{
+  "agent": {
+    "gentle-ai-worker-fallback": {
+      "description": "Fallback package-owned implementation writer when gentle-ai-worker primary encounters provider failure or rate limit.",
+      "mode": "subagent",
+      "hidden": true,
+      "permission": {
+        "task": "deny"
+      },
+      "variant": "high"
+    },
+    "gentle-orchestrator": {
+      "permission": {
+        "task": {
+          "gentle-ai-worker-fallback": "allow",
+          "branch-pr-fallback": "allow",
+          "issue-creation-fallback": "allow"
+        }
+      }
+    },
+    "branch-pr-fallback": {
+      "description": "Fallback executor for creating pull requests when branch-pr primary encounters rate limit.",
+      "hidden": true,
+      "mode": "subagent",
+      "prompt": "You are an executor for creating pull requests. Do NOT delegate, Do NOT call task/delegate, and Do NOT launch sub-agents. Read your skill file at ~/.config/opencode/skills/branch-pr/SKILL.md and follow it exactly.",
+      "tools": {
+        "bash": true,
+        "edit": true,
+        "read": true,
+        "write": true
+      }
+    },
+    "issue-creation-fallback": {
+      "description": "Fallback executor for creating GitHub issues when issue-creation primary encounters rate limit.",
+      "hidden": true,
+      "mode": "subagent",
+      "prompt": "You are an executor for creating GitHub issues. Do NOT delegate, Do NOT call task/delegate, and Do NOT launch sub-agents. Read your skill file at ~/.config/opencode/skills/issue-creation/SKILL.md and follow it exactly.",
+      "tools": {
+        "bash": true,
+        "edit": true,
+        "read": true,
+        "write": true
+      }
+    },
+    "gentleman-judge-fallback": {
+      "description": "Fallback blind judge for adversarial review when gentleman-judge primary encounters rate limit.",
+      "hidden": true,
+      "mode": "subagent",
+      "prompt": "You are a blind judge performing independent code review. Do NOT delegate or launch sub-agents. Review the target code thoroughly and return structured findings. You do NOT know about any other judge — your review is completely independent.",
+      "tools": {
+        "bash": true,
+        "edit": true,
+        "read": true,
+        "write": true
+      }
+    },
+    "gentleman-fix-fallback": {
+      "description": "Fallback fix agent for judgment-day when gentleman-fix primary encounters rate limit.",
+      "hidden": true,
+      "mode": "subagent",
+      "prompt": "You are a fix agent that applies code fixes based on review findings. Do NOT delegate or launch sub-agents. Fix ONLY the confirmed issues provided to you. Return a summary of all changes made.",
+      "tools": {
+        "bash": true,
+        "edit": true,
+        "read": true,
+        "write": true
+      }
+    },
+    "compaction-fallback": {
+      "description": "Fallback agent for session compaction."
+    },
+    "summary-fallback": {
+      "description": "Fallback agent for session summary."
+    }
+  }
+}
