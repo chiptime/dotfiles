@@ -42,7 +42,7 @@ if [[ ! -f "$DB_PATH" ]]; then
   exit 1
 fi
 
-# The 11 core projects from OpenCode Web
+# The 12 core projects from OpenCode Web
 declare -a CORE_PROJECTS=(
   "/home/bruno|.dotfiles"
   "/home/bruno/.dotfiles|.dotfiles"
@@ -52,6 +52,7 @@ declare -a CORE_PROJECTS=(
   "/home/bruno/Code/personal/hungry/compare-prices|compare-prices"
   "/home/bruno/Code/personal/voice-assistant|voice-assistant"
   "/home/bruno/Code/personal/odata-batch|odata-batch"
+  "/home/bruno/Code/personal/agent-tts|agent-tts"
   "/home/bruno/Code/personal/ai-stack|ai-stack"
   "/home/bruno/Code/personal/llm-hub|llm-hub"
   "/home/bruno/Code/personal/vps|vps"

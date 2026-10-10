@@ -116,7 +116,7 @@ journalctl --user -u herdr-tts -f     # ver logs en vivo
 ## Feedback por Voz (Neural TTS)
 
 Vocalización bajo demanda y automática de agentes con **Microsoft Edge Neural TTS + miniaudio + PulseAudio WSLg**. Diseñado para trabajar con múltiples chats en paralelo sin colisiones de voz.
-Desarrollado como plugin independiente en [`~/Code/personal/herdr-tts`](file:///home/bruno/Code/personal/herdr-tts) (instalable vía `herdr plugin install chiptime/herdr-tts` o `herdr plugin link`).
+Desarrollado como plugin dentro del monorepo [`~/Code/personal/agent-tts/hosts/herdr/tts-plugin`](file:///home/bruno/Code/personal/agent-tts/hosts/herdr/tts-plugin) (instalable vía `herdr plugin install chiptime/herdr-tts` o `herdr plugin link`).
 
 * **Consumo de recursos**: 0 VRAM, ~2 MB RAM host.
 * **Seguridad en chats paralelos**: Mutex exclusivo (nunca se pisan las voces). Modo `scope focused` por defecto (solo lee automáticamente el chat que estás mirando).
@@ -214,6 +214,7 @@ ocac    # opencode attach http://localhost:4096 -c (continúa la última sesión
 9. `llm-hub` (`~/Code/personal/llm-hub`)
 10. `vps` (`~/Code/personal/vps`)
 11. `.dotfiles` (`~/.dotfiles`)
+12. `agent-tts` (`~/Code/personal/agent-tts`)
 
 ### 📊 Comparativa de consumo de RAM
 
@@ -221,7 +222,7 @@ ocac    # opencode attach http://localhost:4096 -c (continúa la última sesión
 |---|---|---|---|
 | **Quién paga la RAM visual** | El navegador del cliente (Chrome en PC/Pixel) | Proceso Node/Bun por cada pane en tu PC | Proceso Node/Bun completo por cada pane |
 | **Consumo por proyecto en reposo** | **0 MB** (solo datos en SQLite) | **~300 - 350 MB** (proceso TUI en el pane) | **~1.5 - 3 GB** (duplica modelos, MCPs, runtime) |
-| **11 proyectos simultáneos** | ~1.6 GB (solo el servidor daemon) | ~5.1 GB (servidor daemon + 11 clientes TUI) | ~20+ GB (inviable en la mayoría de PCs) |
+| **12 proyectos simultáneos** | ~1.7 GB (solo el servidor daemon) | ~5.5 GB (servidor daemon + 12 clientes TUI) | ~20+ GB (inviable en la mayoría de PCs) |
 | **Sincronización con Collie / Móvil** | No vinculada con Herdr | **100% en tiempo real con Collie y ntfy** | 100% en tiempo real |
 
 > **Recomendación de uso:**
