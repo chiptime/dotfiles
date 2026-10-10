@@ -25,11 +25,9 @@ next_agent = "ctrl+alt+down"
 move_tab_previous = "alt+shift+left"
 move_tab_next = "alt+shift+right"
 
-# Pane resize without entering resize mode — direct chords
-resize_pane_left = "ctrl+shift+alt+left"
-resize_pane_down = "ctrl+shift+alt+down"
-resize_pane_up = "ctrl+shift+alt+up"
-resize_pane_right = "ctrl+shift+alt+right"
+# Tab navigation
+previous_tab = "alt+p"
+next_tab = "alt+n"
 
 # Quick pane toggle (last focused)
 last_pane = "prefix+`"
@@ -240,6 +238,9 @@ accent = "#8ec07c"
 prompt_new_tab_name = false
 prompt_new_workspace_name = false
 
+# Ask for confirmation before closing a workspace
+confirm_close = true
+
 # ─── Sidebar ────────────────────────────────────────────────
 # Wide enough for workspace names + git info
 sidebar_width = 30
@@ -288,3 +289,8 @@ pane_history = true
 [advanced]
 # 10 MB scrollback per pane (default)
 scrollback_limit_bytes = 10000000
+# Open live reader popup for current playback
+[[keys.command]]
+key = "prefix+R"
+type = "shell"
+command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-reader"
