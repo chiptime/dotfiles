@@ -407,6 +407,7 @@ class CollectionStages:
         }
         processed.stage_fingerprints["emit"] = {"stage": "emit"}
         Processed(state).record(processed)
+        mark_stage(state, video_id, "verify")
         return FakeOutcome("complete")
 
     # -- whisper lifecycle hooks (doubles) ------------------------------
@@ -503,6 +504,7 @@ class CollectionRunTestCase(unittest.TestCase):
         env: dict[str, str] | None = None,
         dry_run: bool = False,
         limit: int | None = None,
+        shared_trace: bool = False,
     ) -> tuple[int, dict[str, Any], FakeApiTransport | None]:
         controller = FakeBrowserController(
             browser_html if browser_html else page_html(3)
@@ -512,6 +514,16 @@ class CollectionRunTestCase(unittest.TestCase):
             if transport_results is not None
             else [FakeApiResponse(sample_synthesis_document()) for _ in range(50)]
         )
+        if shared_trace:
+            original_transport = transport
+
+            def traced_transport(request: Any, *, timeout: float) -> Any:
+                stages.calls.append("synthesis-api")
+                return original_transport(request, timeout=timeout)
+
+            api_transport = traced_transport
+        else:
+            api_transport = transport
         code, report = collection_run.run_collection(
             collection_url=COLLECTION_URL,
             state=self.state,
@@ -521,7 +533,7 @@ class CollectionRunTestCase(unittest.TestCase):
             limit=limit,
             browser_controller=controller,
             browser_profile_base=self.profile_base,
-            api_transport=transport,
+            api_transport=api_transport,
             env=env if env is not None else API_ENV,
             podman_runner=lambda argv, timeout=None: (0, "", ""),
             stages=stages.functions(),
@@ -618,6 +630,7 @@ class TestHappyPath(CollectionRunTestCase):
                 "tanda",
                 "fetch",
                 "prepare",
+                "gpu",
                 "gpu",
                 "synthesis-api",
                 "synthesis-api",
@@ -730,6 +743,72 @@ class TestHappyPath(CollectionRunTestCase):
             report["run_plan"]["stage_states"][fake_id(0)]["fetch"],
             "complete",
         )
+
+
+class TestCollectionPhaseBarriers(CollectionRunTestCase):
+    def test_global_order_across_seven_ids_and_two_resource_windows(self) -> None:
+        stages = CollectionStages(whisper_running=True)
+        consent = RecordingConsent()
+        code, report, transport = self.run_collection(
+            stages, consent, browser_html=page_html(7), shared_trace=True
+        )
+        self.assertEqual(code, 0, report)
+        calls = stages.calls
+        positions = {
+            stage: [i for i, call in enumerate(calls) if call.startswith(stage)]
+            for stage in ("prepare:", "audio:", "vision:", "synthesis-api", "verify:")
+        }
+        for stage, indices in positions.items():
+            self.assertEqual(len(indices), 7, stage)
+        for before, after in zip(list(positions), list(positions)[1:]):
+            self.assertLess(max(positions[before]), min(positions[after]), calls)
+        self.assertEqual(consent.kinds, HUMAN_KINDS)
+        self.assertEqual(stages.whisper_stops, 2)
+        self.assertEqual(stages.whisper_restores, 2)
+        self.assertEqual(len(transport.requests), 7)
+        for batch in report["batches"]:
+            self.assertLessEqual(len(batch["ids"]), 5)
+            self.assertTrue(all(
+                item["stages"]["verify"] == "complete" for item in batch["selected"]
+            ), "selected must be a final state view, not the frozen plan snapshot")
+
+    def test_audio_failure_precedes_vision_and_only_blocks_own_synthesis(self) -> None:
+        class OneAudioFails(CollectionStages):
+            def do_audio(self, video_id: str, state: StateRoot) -> FakeOutcome:
+                if video_id == fake_id(0):
+                    self.calls.append(f"audio:{video_id}")
+                    return FakeOutcome("failed", "fixture audio failure")
+                return super().do_audio(video_id, state)
+
+        stages = OneAudioFails()
+        code, report, transport = self.run_collection(
+            stages, RecordingConsent(), browser_html=page_html(7), shared_trace=True
+        )
+        self.assertEqual(code, 1)
+        self.assertLess(
+            max(i for i, call in enumerate(stages.calls) if call.startswith("audio:")),
+            min(i for i, call in enumerate(stages.calls) if call.startswith("vision:")),
+        )
+        self.assertEqual(len(transport.requests), 6)
+        self.assertNotIn(fake_id(0), report["verification"]["ids"])
+        self.assertEqual(len(Backlog(self.state).entries()), 6)
+
+    def test_restore_failure_blocks_previously_ready_mixed_batch(self) -> None:
+        seed_scan_for_run(self.state, [0, 1])
+        seed_job(
+            self.state, fake_id(0),
+            complete=("fetch", "prepare", "vision", "audio"), evidence=True,
+        )
+        stages = CollectionStages(whisper_running=True, whisper_restore_fails=True)
+        consent = RecordingConsent()
+        code, report, transport = self.run_collection(
+            stages, consent, browser_html=page_html(2)
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("whisper restoration failed", report["hard_stop_reason"])
+        self.assertEqual(transport.requests, [], "no synthesis, including ready ids")
+        self.assertNotIn("verify", consent.kinds)
+        self.assertEqual(Backlog(self.state).entries(), [])
 
 
 # --------------------------------------------------------------------------
@@ -1132,7 +1211,7 @@ class TestAuthorizationWrapper(CollectionRunTestCase):
 
 
 class TestWhisperCoordination(CollectionRunTestCase):
-    def test_stop_before_vision_and_restore_before_audio(self) -> None:
+    def test_audio_before_stop_and_restore_after_vision(self) -> None:
         stages = CollectionStages(whisper_running=True)
         consent = RecordingConsent()
         code, report, _ = self.run_collection(stages, consent)
@@ -1149,9 +1228,9 @@ class TestWhisperCoordination(CollectionRunTestCase):
             "restore happens after the isolated server stops",
         )
         self.assertLess(
-            calls.index("whisper-restore-op"),
             calls.index(f"audio:{fake_id(1)}"),
-            "audio only after restore",
+            calls.index("whisper-stop-op"),
+            "collection audio finishes before any vision stop cycle",
         )
         self.assertLess(
             calls.index(f"vision:{fake_id(1)}"),
@@ -1240,12 +1319,15 @@ class TestWhisperCoordination(CollectionRunTestCase):
         )
         self.assertEqual(code, 1)
         self.assertIn("whisper restoration failed", report["hard_stop_reason"])
-        self.assertEqual(len(report["batches"]), 1, "no further batches after a failed restore")
+        self.assertEqual(len(report["batches"]), 2, "all slices prepared before vision")
         self.assertEqual(
             [c for c in stages.calls if c.startswith("audio:")],
-            [],
-            "audio blocked after failed restore",
+            [f"audio:{fake_id(n)}" for n in range(7)],
+            "all completed audio remains preserved before failed restore",
         )
+        self.assertNotIn(f"vision:{fake_id(5)}", stages.calls)
+        self.assertNotIn(f"vision:{fake_id(6)}", stages.calls)
+        self.assertNotIn("verify", consent.kinds)
         self.assertTrue(
             any("no rollback" in note for note in report["batches"][0]["cleanup_notes"]),
             report["batches"][0]["cleanup_notes"],
@@ -1255,8 +1337,8 @@ class TestWhisperCoordination(CollectionRunTestCase):
         """W-1r: KI inside the whisper stop after the plan grant.
 
         The stop result is UNKNOWN: no restore is attempted (it cannot
-        be verified that the stop was ours/completed), no vision/audio
-        run, the run is interrupted (exit 1), and the generic
+        be verified that the stop was ours/completed), no vision runs,
+        prior audio remains preserved, the run is interrupted (exit 1), and the generic
         "applicable cleanup ran" claim is replaced by the honest
         cleanup-uncertain message.
         """
@@ -1278,11 +1360,18 @@ class TestWhisperCoordination(CollectionRunTestCase):
         self.assertEqual(covered[-1], "whisper-restore")
         # The interrupted stop is never counted as completed...
         self.assertEqual(stages.whisper_stops, 0)
-        # ...and NO restore, vision, audio or Ollama lifecycle ran.
+        # ...and NO restore, vision or Ollama lifecycle ran after prior audio.
         self.assertEqual(stages.whisper_restores, 0)
         self.assertNotIn("whisper-restore-op", stages.calls)
         self.assertEqual(
-            [c for c in stages.calls if c.startswith(("vision:", "audio:"))], []
+            [c for c in stages.calls if c.startswith("vision:")], []
+        )
+        self.assertEqual(
+            [c for c in stages.calls if c.startswith("audio:")],
+            [f"audio:{fake_id(n)}" for n in range(3)],
+        )
+        self.assertLess(
+            stages.calls.index(f"audio:{fake_id(2)}"), stages.calls.index("whisper-stop-op")
         )
         self.assertNotIn("ollama-start", stages.calls)
         self.assertNotIn("ollama-stop", stages.calls)
@@ -1336,9 +1425,11 @@ class TestWhisperCoordination(CollectionRunTestCase):
         self.assertEqual(stages.whisper_stops, 1)
         self.assertEqual(stages.whisper_restores, 1)
         self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")], [],
-            "no audio after an interrupt in the GPU window",
+            [c for c in stages.calls if c.startswith("audio:")],
+            [f"audio:{fake_id(n)}" for n in range(3)],
+            "prior audio survives the interrupt and is never repeated",
         )
+        self.assertLess(stages.calls.index(f"audio:{fake_id(2)}"), stages.calls.index("whisper-stop-op"))
         notes = " ".join(report["batches"][0]["cleanup_notes"])
         self.assertIn("restored and healthy", notes)
 
@@ -1357,15 +1448,23 @@ class TestWhisperCoordination(CollectionRunTestCase):
         self.assertIn("ollama-stop", stages.calls, "Ollama finally cleanup kept")
         self.assertEqual(stages.whisper_restores, 1, "one attempt, no retry")
         self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")], [],
-            "audio blocked when recovery fails after an interrupt",
+            [c for c in stages.calls if c.startswith("audio:")],
+            [f"audio:{fake_id(n)}" for n in range(3)],
+            "audio already completed before failed recovery",
         )
+        self.assertNotIn("verify", consent.kinds)
         notes = " ".join(report["batches"][0]["cleanup_notes"])
         self.assertIn("whisper restore failed", notes)
         self.assertIn("no rollback", notes)
 
     def test_ctrl_c_during_vision_with_health_failure_blocks(self) -> None:
-        stages = CollectionStages(
+        class HealthyUntilRestore(CollectionStages):
+            def do_whisper_health(self) -> tuple[bool, str]:
+                if self.whisper_restores == 0:
+                    return True, "healthy before vision"
+                return super().do_whisper_health()
+
+        stages = HealthyUntilRestore(
             whisper_running=True,
             vision_raises=KeyboardInterrupt(),
             whisper_healthy=False,
@@ -1385,8 +1484,10 @@ class TestWhisperCoordination(CollectionRunTestCase):
         self.assertTrue(report["interrupted"])
         self.assertEqual(stages.whisper_restores, 1)
         self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")] , []
+            [c for c in stages.calls if c.startswith("audio:")],
+            [f"audio:{fake_id(n)}" for n in range(3)],
         )
+        self.assertLess(stages.calls.index(f"audio:{fake_id(2)}"), stages.calls.index("whisper-stop-op"))
         notes = " ".join(report["batches"][0]["cleanup_notes"])
         self.assertIn("NOT healthy", notes)
         self.assertIn("no rollback", notes)
@@ -1405,8 +1506,10 @@ class TestWhisperCoordination(CollectionRunTestCase):
             stages.whisper_restores, 1, "the interrupted restore is never retried"
         )
         self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")] , []
+            [c for c in stages.calls if c.startswith("audio:")],
+            [f"audio:{fake_id(n)}" for n in range(3)],
         )
+        self.assertLess(stages.calls.index(f"audio:{fake_id(2)}"), stages.calls.index("whisper-stop-op"))
         notes = " ".join(report["batches"][0]["cleanup_notes"])
         self.assertIn("UNKNOWN", notes)
         self.assertIn("no rollback", notes)
@@ -1583,7 +1686,7 @@ class TestHardStopBlocksGroupedVerification(CollectionRunTestCase):
         """Validator Check B regression: "ALL further progress is blocked"
         must include the grouped verification phase.
 
-        Batch 1's five ids fully synthesize (ready for verification);
+        One id already has validated synthesis (ready for verification);
         batch 2's whisper restore fails -> the run hard-stops. No grouped
         verification prompt, no verify stage, no backlog write may happen
         afterwards; the ready results stay resumable in a NEW authorized
@@ -1598,18 +1701,31 @@ class TestHardStopBlocksGroupedVerification(CollectionRunTestCase):
                     self.whisper_restore_fails = True
                 return super().do_whisper_restore(info)
 
+        seed_scan_for_run(self.state, list(range(7)))
+        seed_job(
+            self.state, fake_id(0),
+            complete=("fetch", "prepare", "vision", "audio"), evidence=True,
+        )
+        outcome = collection_run.run_synthesis_stage(
+            fake_id(0), state=self.state, document_fn=sample_synthesis_document
+        )
+        self.assertEqual(outcome.outcome, "complete")
         stages = SecondRestoreFails(whisper_running=True)
         consent = RecordingConsent()
-        code, report, _ = self.run_collection(
+        code, report, transport = self.run_collection(
             stages, consent, browser_html=page_html(7)
         )
         self.assertEqual(code, 1)
         self.assertIn("whisper restoration failed", report["hard_stop_reason"])
         self.assertEqual(len(report["batches"]), 2)
         self.assertEqual(stages.whisper_restores, 2, "batch 2 restore failed")
-        # Batch 1's ids DID reach validated synthesis before the hard stop.
+        # Prior synthesis remains ready, but no NEW synthesis crossed the
+        # barrier before the second original vision window's failed restore.
+        self.assertEqual(transport.requests, [])
+        self.assertEqual(transport_ready(report), [])
         self.assertEqual(
-            len(transport_ready(report)), 5, "five ids ready for verification"
+            collection_run.derive_item_stages(self.state, fake_id(0))["synthesis"],
+            "complete",
         )
         # ...and yet NOTHING verifies after the hard stop:
         self.assertNotIn(
@@ -1631,8 +1747,8 @@ class TestHardStopBlocksGroupedVerification(CollectionRunTestCase):
         )
         self.assertEqual(
             sorted(c for c in stages2.calls if c.startswith("audio:")),
-            sorted(f"audio:{fake_id(n)}" for n in (5, 6)),
-            "only the two audio-incomplete ids transcribe",
+            [],
+            "all seven audio results survive and need no retranscription",
         )
         self.assertEqual(
             len([c for c in stages2.calls if c.startswith("verify:")]), 7

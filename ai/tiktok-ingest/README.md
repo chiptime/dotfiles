@@ -293,20 +293,31 @@ construction) → collection-scoped capture through the EXISTING
 declared/observed/end/access recorded separately; DOM change fails
 explicitly; audit HTML persisted) → browser closed and profile removed
 before any media work → ONE whole-current-run plan grant over the
-FROZEN inventory → batches of at most five through the EXISTING
-`guided-run` coordinator (stage windows discharged by the run-plan
-grant) → automatic synthesis → ONE grouped verification authorization
-→ local `pending` backlog entries only.
+FROZEN inventory → collection-wide PHASE-FIRST ordering through the
+EXISTING `guided-run` coordinator (stage windows discharged by the
+run-plan grant): preparation ALL → audio ALL → vision ALL → eligible
+synthesis ALL, each phase crossed in bounded resource windows of at
+most five ids → ONE grouped verification authorization → local
+`pending` backlog entries only.
 
 Key boundaries:
 
-- **Batches**: the inventory is FROZEN once after the capture; batches
-  are fixed slices of at most five, so each frozen id is attempted in
-  exactly ONE batch, a failed id is never reattempted this invocation,
-  the loop is bounded by construction and ids that become eligible
-  later are never absorbed without a new scope decision. Progress
-  reporting is a view derived from the product's stores — never a
-  second ledger.
+- **Phase-first resource windows**: the inventory is FROZEN once after
+  the capture. The whole frozen selection is processed in GLOBAL phase
+  order — preparation ALL → audio ALL → vision ALL → eligible synthesis
+  ALL. Fixed slices of at most five ids are RESOURCE WINDOWS visited
+  ONCE per phase (a preparation window, an audio window, a vision
+  window), never complete-pipeline batches. NO synthesis request is
+  made until every original vision window and its separately consented
+  retry have ended. Audio eligibility is preparation completion, NOT
+  vision completion. A failed vision window stays closed: its remaining
+  same-window ids stay pending EVEN after a successful retry, while
+  later frozen normal windows keep the existing attempt policy. Only a
+  restoration failure, an unknown interrupt, or a global precondition
+  blocks ALL later effects, grouped verification included. The loop is
+  bounded by construction and ids that become eligible later are never
+  absorbed without a new scope decision. Progress reporting is a view
+  derived from the product's stores — never a second ledger.
 - **Whisper coordination** (`src/tiktok_ingest/whisper_lifecycle.py`):
   when the known shared service (`voice-assistant-whisper`) is running,
   collection-run verifies its identity/configuration read-only BEFORE
@@ -326,21 +337,28 @@ Key boundaries:
   UNKNOWN, no restore is attempted (the stop cannot be verified as
   ours/completed) and manual verification of the exact service is
   required. In every restore that does run: SAME container,
-  identity/config verification, health check before audio. A failed
+  identity/config verification, and a bounded read-only health wait
+  before the service is reported restored. A failed
   restore/health — or an interruption leaving the restore incomplete —
   blocks ALL further progress, reports the actual partial state and
   promises no rollback. Standalone `guided-run` keeps its documented
   behavior (whisper operator-managed, blocks with instructions).
+  In the collection flow the shared service must already be RUNNING and
+  healthy for the AUDIO phase, which runs BEFORE any vision stop cycle;
+  each vision resource window then owns its own bounded stop/restore
+  cycle.
 - **Bounded vision swap-retry** (`src/tiktok_ingest/swap_cooldown.py`,
-  Phase 0 addendum): when a batch's vision stage fails ONLY the
-  `swap_delta` gate with verified cleanup (decided from the persisted
-  TYPED gate id, never reason prose), collection-run may offer ONE
+  Phase 0 addendum): when a vision resource window's vision stage
+  fails ONLY the `swap_delta` gate with verified cleanup (decided from
+  the persisted TYPED gate id, never reason prose), collection-run may
+  offer ONE
   extra vision attempt per video per invocation — never covered by the
   run-plan grant: a dedicated `vision-swap-retry` consent window names
   the id, the measured overshoot, the full budget, the whisper
   stop/restore under this new lifecycle authority and the effects of a
-  second failure. Before the prompt, the batch cycle's standing restore
-  is positively verified (SAME service, healthy). After consent, a
+  second failure. Before the prompt, the vision window's standing
+  restore is positively verified (SAME service, healthy). After
+  consent, a
   READ-ONLY cooldown samples the cumulative swap I/O counters every 5 s
   (admission floor 60 s, hard cap 180 s that instability or drift never
   restarts, stability = 3 consecutive intervals ≤ 1 MiB/s; unreadable or
@@ -360,8 +378,11 @@ Key boundaries:
   relabeled as the global service-restoration hard stop. Waiting is not
   a cure: the cooldown measures, it promises nothing (V3 real-GPU
   validation remains a separate authorization).
-- **Automatic synthesis** (`src/tiktok_ingest/synthesis_api.py`): ONE
-  OpenAI-compatible adapter (`POST {base}/chat/completions`) configured
+- **Automatic synthesis** (`src/tiktok_ingest/synthesis_api.py`): runs
+  as its OWN collection phase, only after the vision phase has ended
+  for the whole frozen selection; each id still needs COMPLETE vision
+  and audio evidence. ONE OpenAI-compatible adapter
+  (`POST {base}/chat/completions`) configured
   ONLY through the documented environment variables
   `TIKTOK_INGEST_TEXT_API_BASE_URL`, `TIKTOK_INGEST_TEXT_API_KEY`,
   `TIKTOK_INGEST_TEXT_MODEL` (optional
@@ -384,8 +405,9 @@ Key boundaries:
   authorization) starts the capture under that grant. ONE
   whole-current-run plan grant then covers the FROZEN inventory —
   exact eligible ids and canonical URLs with stage reuse states,
-  batches of at most five (each id in exactly ONE batch, never
-  reattempted this invocation), the whisper stop/restore authority for
+  the collection-wide phase order (preparation ALL → audio ALL →
+  vision ALL → eligible synthesis ALL) crossed in resource windows of
+  at most five ids, the whisper stop/restore authority for
   the exact service identity bound read-only before the plan, the
   synthesis endpoint/model, and the retry policy. Stage windows
   provably inside that scope (tanda, fetch, prepare, gpu,
@@ -394,12 +416,12 @@ Key boundaries:
   never fabricated human yeses; unknown kinds, excess ids, unapproved
   destinations or whisper config drift are forwarded to the human as
   genuinely new scope and never auto-granted. Verification candidate
-  URLs are unknown until synthesis, so the batches defer the verify
-  window and ONE grouped authorization shows every exact validated URL
-  before any retrieval. Denial/EOF/non-TTY/Ctrl-C stop without
+  URLs are unknown until synthesis, so verification is deferred past
+  every phase and ONE grouped authorization shows every exact validated
+  URL before any retrieval. Denial/EOF/non-TTY/Ctrl-C stop without
   assuming consent; there is no global `--yes`; a grant never persists
-  into a later window, batch or invocation. Standalone `guided-run`
-  keeps its own per-window flow unchanged.
+  into a later window, resource slice or invocation. Standalone
+  `guided-run` keeps its own per-window flow unchanged.
 - **Dry run**: `--dry-run` prints preflight + the document-only plan
   with zero browser, zero network, zero containers, zero GPU, zero API
   calls and zero writes.
@@ -528,9 +550,9 @@ python3 -m tiktok_ingest guided-run --collection "<url-or-key>" --dry-run
 python3 -m tiktok_ingest guided-run --collection "<url-or-key>"
 python3 -m tiktok_ingest guided-run --ids <id>[,<id>...] --synthesis <id>=<path>
 
-# 10. Phase 0 one-command journey (browser inventory + batches +
-#     automatic synthesis + pending delivery; see "Phase 0 — One
-#     collection, one command"):
+# 10. Phase 0 one-command journey (browser inventory + phase-first
+#     resource windows + automatic synthesis + pending delivery; see
+#     "Phase 0 — One collection, one command"):
 ./run-collection.sh "<collection-url>"
 python3 -m tiktok_ingest collection-run "<collection-url>" --dry-run
 ```

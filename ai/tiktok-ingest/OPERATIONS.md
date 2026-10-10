@@ -319,7 +319,7 @@ also accept `--share-root`. Verified command set:
 | `backlog-plan --decisions-file F` | Dry run with IDs, changes and expected hashes |
 | `backlog-apply --decisions-file F` | Apply explicit, still-current decisions (verified backups, receipt, idempotent) |
 | `guided-run` | Consent-gated coordination of one tanda through the existing stages (see section 8) |
-| `collection-run <url>` | Phase 0 one-command journey: browser inventory → guided batches → automatic synthesis → pending entries (see section 9) |
+| `collection-run <url>` | Phase 0 one-command journey: browser inventory → phase-first resource windows → automatic synthesis → pending entries (see section 9) |
 
 `verify --force` re-runs verification when fingerprints match; backlog
 appends remain duplicate-guarded (see section 4). `synthesize --force`
@@ -353,10 +353,14 @@ Tested (720 tests in the 2026-09-23 local run, fixture-only, zero
 network/GPU/podman/ollama):
 
 - The Phase 0 application layer with every external boundary doubled:
-  the `collection-run` batch loop (frozen-inventory slices, cap
-  5, exclusion of completed/rejected ids, resume without stage
-  repetition, each frozen id attempted exactly once with no reattempt
-  after failure, second run with zero
+  the `collection-run` PHASE-FIRST driver (global order across more
+  than five ids — all preparation, then all audio, then all vision,
+  then eligible synthesis; resource windows of cap
+  5; preparation-based audio eligibility; a failed vision window staying
+  closed with its remaining same-window ids pending even after a
+  successful retry; fresh whisper stop/restore cycles per vision
+  window; exclusion of completed/rejected ids; resume without stage
+  repetition; second run with zero
   re-processing and zero duplicate entries), the TWO-decision
   authorization contract (browser grant naming the readiness
   checkpoint and the snapshot/audit writes; press-Enter readiness that
@@ -379,7 +383,8 @@ network/GPU/podman/ollama):
   whisper lifecycle (identity verification before consent and before
   any mutation, verified stop, same-service restore with
   config/health checks, fail-closed reporting without rollback
-  promises), the whisper stop→vision→restore→health→audio ordering,
+  promises), the whisper stop→vision→restore→health ordering and the
+  collection audio-before-vision ordering,
   and the launcher (usage, forwarding, exit codes, no secrets, no
   installs).
 
@@ -571,21 +576,39 @@ second state.
     eligible inventory is FROZEN (exact ids, canonical download URLs,
     stage reuse states) and the known whisper service identity is bound
     read-only. ONE window asks you to accept the WHOLE current run:
-    batches of at most five (each frozen id in exactly ONE batch, a
-    failed id never reattempted this invocation), the stage pipeline,
-    the whisper stop/restore authority for the exact bound service, the
-    synthesis endpoint/model, and the deferred grouped verification.
-    Denial stops before any processing. Stage windows provably inside
+    the collection-wide phase order (preparation ALL → audio ALL →
+    vision ALL → eligible synthesis ALL) crossed in resource windows of
+    at most five ids, the stage pipeline, the whisper stop/restore
+    authority for the exact bound service, the synthesis
+    endpoint/model, and the deferred grouped verification. Denial stops
+    before any processing. Stage windows provably inside
     this scope are discharged by the grant and audited as
     `covered_by_run_plan`; unknown kinds, excess ids, unapproved
     destinations or whisper config drift are asked as genuinely new
     scope — never auto-granted.
-4. **Batches**: fixed slices of the frozen inventory, at most five per
-    batch; completed and blocklisted ids were already excluded by the
-    freeze. Each batch is a full `guided-run` invocation (section 8)
-    whose windows are discharged by the plan grant; the loop is bounded
-    by construction and nothing outside the frozen scope is absorbed.
-5. **Automatic synthesis**: configured ONLY via
+4. **Phase-first resource windows**: the frozen inventory is processed
+    in GLOBAL phase order — preparation ALL → audio ALL → vision ALL →
+    eligible synthesis ALL — not one complete pipeline per batch.
+    Fixed slices of at most five ids are RESOURCE WINDOWS visited ONCE
+    per phase (a preparation window, then audio windows, then vision
+    windows). Each window runs through the existing `guided-run` phase
+    machinery (section 8) and its stage windows are discharged by the
+    plan grant; a fresh coordinator is built per window so whisper
+    stop/restore authority can never leak across real stop cycles. No
+    synthesis request is made until every original vision window and
+    its separately consented retry have ended. Audio eligibility is
+    PREPARATION completion, not vision completion. A failed vision
+    window stays closed and its remaining same-window ids stay pending
+    EVEN after a successful retry; later frozen normal windows keep the
+    existing attempt policy. Only a restoration failure, an unknown
+    interrupt, or a global precondition blocks ALL later effects,
+    grouped verification included. Completed and blocklisted ids were
+    already excluded by the freeze, the loop is bounded by construction
+    and nothing outside the frozen scope is absorbed.
+5. **Automatic synthesis**: runs as its OWN collection phase, only
+    after the vision phase has ended for the whole frozen selection;
+    each id still needs complete vision and audio evidence. Configured
+    ONLY via
     `TIKTOK_INGEST_TEXT_API_BASE_URL`, `TIKTOK_INGEST_TEXT_API_KEY`,
     `TIKTOK_INGEST_TEXT_MODEL` (optional
     `TIKTOK_INGEST_TEXT_API_TIMEOUT_SECONDS`, default 120 s). Values
@@ -606,6 +629,14 @@ second state.
     `backlog-apply`.
 
 ### Whisper coordination (collection-run only)
+
+Collection audio runs BEFORE any vision stop cycle: the shared service
+must already be RUNNING and healthy for the audio phase (its own `gpu`
+window states that health must pass before work, with no authority to
+start a missing service). The bounded stop/restore cycles below belong
+to each vision resource window; after a restore the service is left
+ready for the next vision window (which stops it again) and for the
+operator afterwards.
 
 If the known shared service `voice-assistant-whisper` is running when
 vision needs the GPU, collection-run verifies its identity and
@@ -628,8 +659,9 @@ result is UNKNOWN, NO restore is attempted (it cannot be verified that
 the stop was ours/completed) and manual verification/recovery of the
 exact service is required. In every restore that does run, the SAME
 container is started exactly ONCE, identity/configuration are verified,
-and health is validated before any audio work through a BOUNDED
-read-only readiness wait: the first health probe is immediate (an
+and health is validated before the service is reported restored through
+a BOUNDED read-only readiness wait: the first health probe is immediate
+(an
 already-healthy service does not wait), a transiently unreachable
 endpoint is retried at a fixed ~1s interval, the run prints a single
 `waiting for Whisper readiness` line while polling, and a 60s monotonic
@@ -647,14 +679,15 @@ blocks with instructions).
 
 ### Bounded vision swap-retry (collection-run only)
 
-After a batch whose vision stage failed ONLY the `swap_delta` gate with
-positively verified cleanup, collection-run may offer ONE extra vision
+After a vision resource window whose vision stage failed ONLY the
+`swap_delta` gate with positively verified cleanup, collection-run may
+offer ONE extra vision
 attempt for that video THIS invocation. It is never automatic and never
 covered by the run-plan grant.
 
 **What you see, in order.**
 
-1. The batch ends normally: the fired gate closed the GPU window (the
+1. The window ends normally: the fired gate closed the GPU window (the
    remaining same-window ids stay pending — that rule is NOT relaxed),
    the isolated server stopped, and the standing authorization restored
    the SAME whisper service. The retry verifies that restoration
@@ -708,9 +741,9 @@ reported differently from the global service-restoration hard stop.
 
 **Not claimed.** The 5 s / 60 s / 180 s / 3×1 MiB/s values are proposed
 heuristics, not efficacy evidence: the cooldown measures and bounds the
-wait, it never promises that waiting cures swap pressure. Subsequent
-frozen batches reconcile exactly as the pre-existing driver does — the
-retry adds no batch, no window and no model load beyond the one
+wait, it never promises that waiting cures swap pressure. Later frozen
+resource windows reconcile exactly as the pre-existing driver does — the
+retry adds no window and no model load beyond the one
 separately-consented attempt. A real-GPU validation trial (V3) requires
 separate authorization.
 
@@ -732,8 +765,8 @@ vision, and vision is fail-closed on free VRAM:
 
 - **Gate.** Before EVERY Qwen vision load, at least
   `free_vram_gate_mib` (20480 MiB) must be free. Failing it records the
-  vision stage as `blocked`, closes the GPU window for the rest of the
-  batch and never retries.
+  vision stage as `blocked`, closes the GPU window for the rest of that
+  vision window and never retries automatically.
 - **Awake backend always blocks vision.** Loaded, `llm-hub-chat`
   holds about 15,600 MiB (measured on a 24 GiB RTX 4090), so no vision
   load can pass the gate while it is awake.
@@ -741,13 +774,16 @@ vision, and vision is fail-closed on free VRAM:
   `--sleep-idle-seconds 60`: after 60 s without requests it unloads
   the model and holds 0 MiB (measured: stopped and asleep read the
   same VRAM). The next synthesis request wakes it in about 10 s.
-- **Known limitation: back-to-back batches.** If the next batch's
-  vision window opens less than 60 s after the previous batch's last
-  synthesis, the model is still resident and vision blocks. Nothing is
+- **Known limitation: a resident synthesis model blocks the next
+  vision phase.** Within ONE collection-run invocation every vision
+  window precedes synthesis (phase-first order), so this is now mainly
+  a resume/re-run case: when a NEW invocation's first vision window
+  opens less than 60 s after a previous invocation's last synthesis,
+  the model is still resident and vision blocks. Nothing is
   lost: items without an `emit` fingerprint are re-planned as
   `partial_resumable` and their valid completed stages are reused.
-  Wait at least 60 s and re-run the same command. Downloads and CPU
-  preparation between batches normally exceed 60 s, so this is rare.
+  Wait at least 60 s and re-run the same command. The preparation phase
+  at the start of an invocation normally exceeds 60 s, so this is rare.
 - **Other GPU consumers count too.** The gate measures the whole
   device, including the Windows desktop under WSLg and any other
   container. Historical vision sessions that passed started at
