@@ -116,7 +116,7 @@ wezterm.on('gui-startup', function(cmd)
 
       make_2x2(CP, {
         'htop',
-        'cd ~ && agy',
+        'timeout 15 zsh -c "until curl -sf http://localhost:4096 >/dev/null 2>&1; do sleep 0.5; done" 2>/dev/null; herdr',
         'bun run scripts/copilot-backend.ts',
         'gentle-ai',
       }, "AI Tools")
@@ -166,6 +166,9 @@ config.keys = {
   { key = 'x', mods = 'CTRL|SHIFT', action = wezterm.action.ActivateCopyMode },
   { key = 'PageUp', mods = 'CTRL|SHIFT', action = wezterm.action.ScrollToPrompt(-1) },
   { key = 'PageDown', mods = 'CTRL|SHIFT', action = wezterm.action.ScrollToPrompt(1) },
+  -- Navegación de pestañas de Herdr con Alt + PageUp / PageDown (emite Alt+p / Alt+n)
+  { key = 'PageUp', mods = 'ALT', action = wezterm.action.SendString '\x1bp' },
+  { key = 'PageDown', mods = 'ALT', action = wezterm.action.SendString '\x1bn' },
   -- Intercepta Ctrl + Z y no ejecuta ninguna acción
   { key = 'z', mods = 'CTRL', action = wezterm.action.DisableDefaultAssignment },
 }

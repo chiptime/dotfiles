@@ -58,10 +58,35 @@ PATH=~/.console-ninja/.bin:$PATH
 export PATH=/home/bruno/.opencode/bin:$PATH
 
 # Attach TUI al server persistente con el scope del directorio dado (default: pwd)
+# Si OpenCode Web aún está arrancando (p. ej. en cold-boot), espera hasta que responda
 oa() {
-  local dir="${1:-$PWD}"
-  dir="$(cd "$dir" && pwd)" || return 1
-  opencode attach http://localhost:4096 --dir "$dir"
+  local dir="$PWD"
+  local -a extra_args=()
+
+  if [[ $# -gt 0 ]]; then
+    if [[ "$1" != -* && -d "$1" ]]; then
+      dir="$(cd "$1" && pwd)" || return 1
+      shift
+    fi
+    extra_args=("$@")
+  fi
+
+  local url="http://localhost:4096"
+  if ! curl -sf "$url" >/dev/null 2>&1; then
+    printf "\e[33m⏳ Esperando a que OpenCode Web (%s) esté listo...\e[0m\n" "$url"
+    local attempts=0
+    while ! curl -sf "$url" >/dev/null 2>&1; do
+      sleep 0.5
+      ((attempts++))
+      if (( attempts >= 30 )); then
+        printf "\e[31m❌ Timeout: OpenCode Web no respondió tras 15s en %s\e[0m\n" "$url"
+        return 1
+      fi
+    done
+    printf "\e[32m✓ OpenCode Web listo!\e[0m\n"
+  fi
+
+  opencode attach "$url" --dir "$dir" "${extra_args[@]}"
 }
 
 # Configuraciones para un historial más seguro

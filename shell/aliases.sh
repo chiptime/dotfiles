@@ -114,8 +114,9 @@ alias htts='herdr-tts --status'
 alias cxw='CODEX_HOME=~/.codex-work codex'
 
 # OpenCode Services
-alias oca='opencode attach http://localhost:4096'
-alias ocac='opencode attach http://localhost:4096 -c'
+alias oca='oa'
+alias ocac='oa -c'
 alias ocr='systemctl --user restart opencode-web.service mobile-proxy.service && systemctl --user --no-pager status opencode-web.service mobile-proxy.service'
 alias ocs='systemctl --user --no-pager status opencode-web.service mobile-proxy.service'
 alias ocl='journalctl --user -u opencode-web.service -u mobile-proxy.service -f'
+alias opencode-switch='~/.dotfiles/scripts/opencode-switch-profile.sh'
