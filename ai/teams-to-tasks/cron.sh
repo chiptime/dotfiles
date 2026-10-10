@@ -89,6 +89,20 @@ run_agent() {
   fi
 }
 
+run_script_extractor() {
+  if [ -n "${TEAMS_SCRIPT_EXTRACTOR_CMD:-}" ]; then
+    bash -c "$TEAMS_SCRIPT_EXTRACTOR_CMD"
+  elif [ -f "$SCRIPT_DIR/src/script-extractor.ts" ]; then
+    timeout -k 15s 120s bun "$SCRIPT_DIR/src/script-extractor.ts" "$RUN_DIR" "$MODE" "$PREV_LAST_RUN" "$POLL_START_T" > "$RUN_DIR/script-extractor.log" 2>&1 || true
+  fi
+}
+
+run_comparator() {
+  if [ -f "$SCRIPT_DIR/src/compare-extractors.ts" ]; then
+    bun "$SCRIPT_DIR/src/compare-extractors.ts" "$RUN_DIR" >> "$LOG" 2>&1 || true
+  fi
+}
+
 run_writer() {
   local actions_file="$1"
   if [ -n "${TEAMS_WRITER_CMD:-}" ]; then
@@ -134,6 +148,8 @@ For digest: review today's discovered messages up to window_end, summarize topic
 Do not change schema, routing, permissions or browser locks. Close the browser as the last tool call.
 Return only the final JSON completion contract from your instructions, using these exact run/window values."
 
+run_script_extractor
+
 run_agent > "$RUN_DIR/events.jsonl" 2> "$RUN_DIR/agent.stderr"
 AGENT_RC=$?
 printf '%s\n' "$AGENT_RC" > "$RUN_DIR/agent.exit"
@@ -141,6 +157,9 @@ printf '%s\n' "$AGENT_RC" > "$RUN_DIR/agent.exit"
 ACTIONS_FILE="$RUN_DIR/actions.json"
 if [ "$AGENT_RC" = 0 ] && bun "$SCRIPT_DIR/src/completion.ts" "$RUN_DIR/events.jsonl" "$RUN_DIR/agent.stderr" \
   "$RUN_ID" "$MODE" "$PREV_LAST_RUN" "$POLL_START_T" "$ACTIONS_FILE" > "$RUN_DIR/summary.txt" 2> "$RUN_DIR/validation.log"; then
+
+  # Compare shadow script extraction against agent MCP actions
+  run_comparator
 
   WRITER_RC=0
   if [ -f "$ACTIONS_FILE" ] && [ "$(jq 'length' "$ACTIONS_FILE" 2>/dev/null || echo 0)" -gt 0 ]; then
@@ -172,6 +191,11 @@ if [ "$AGENT_RC" = 0 ] && bun "$SCRIPT_DIR/src/completion.ts" "$RUN_DIR/events.j
       exit 0
     fi
   fi
+fi
+
+# Compare extractors if not already run
+if [ ! -f "$RUN_DIR/comparison.json" ]; then
+  run_comparator
 fi
 
 printf '%s [fail] %s incomplete (agent rc=%s); state not advanced; run=%s\n' "$(date '+%F %T')" "$MODE" "$AGENT_RC" "$RUN_ID" >> "$LOG"

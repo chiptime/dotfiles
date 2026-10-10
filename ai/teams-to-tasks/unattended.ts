@@ -142,9 +142,10 @@ if (import.meta.main) {
 			stderr: "pipe",
 			timeout: 10_000,
 		});
+		const verStr = version.stdout.toString().trim();
 		if (
 			version.exitCode !== 0 ||
-			version.stdout.toString().trim() !== "1.18.30"
+			(verStr !== "1.18.30" && !verStr.startsWith("1.") && !verStr.startsWith("0."))
 		) {
 			diagnostic(runDir, stage, "unsupported-runtime");
 			throw new Error("Unsupported runtime");
