@@ -23,6 +23,12 @@ agy-bridge:
   desc: Bridge agy para hosts CLI (opencode 0.6.0 + pi 0.5.0 publicados en npm) — modal in-TUI (/agy-open, Alt+A), engine bundleado en pi (instalable), fix falso auth_captcha, 883 tests verdes
   next: slice 3 sigue bloqueado en evidencia de resume-safety del CLI; pendiente opcional endurecer authentication/forbidden en AUTH_RE (engine y router)
 
+opencode-plugins:
+  scope: personal
+  status: active
+  desc: Plugins locales de OpenCode (symlink a ~/.config/opencode/plugins) — timeline añade "[Finalizado a las HH:MM:SS]" en hora local al cierre de cada bloque de texto; 11 tests verdes
+  next: footer por bloque, no por turno completo — turno exacto bloqueado hasta tener ruta de part.update con transporte in-process; revisión nativa del commit inicial pendiente
+
 herdr-tts:
   scope: personal
   status: archived
