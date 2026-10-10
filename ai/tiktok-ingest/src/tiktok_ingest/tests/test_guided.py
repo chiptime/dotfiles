@@ -1574,6 +1574,88 @@ class TestWhisperRestoreReadinessWait(GuidedTestCase):
         seed_scan(self.state, [1])
         seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
 
+    def test_restore_failure_prevents_synthesis_and_verify_of_ready_peer(self) -> None:
+        class FailedRestore(RestoreLifecycleFakeStages):
+            def _do_restore(self, info: object) -> None:
+                super()._do_restore(info)
+                raise RuntimeError("fixture failed restore")
+
+        seed_scan(self.state, [1, 2])
+        seed_job(
+            self.state, fake_id(1),
+            complete=("fetch", "prepare", "vision", "audio"), evidence=True,
+        )
+        seed_job(self.state, fake_id(2), complete=("fetch", "prepare"))
+        stages = FailedRestore()
+        stages.real_synthesis = False
+        consent = ScriptedConsent(list(MANAGED_GRANT) + [("verify", True)])
+        code, report, _ = self.run_guided_with(
+            stages, consent, ids=[fake_id(1), fake_id(2)],
+            synthesis={fake_id(1): Path(self.tmp.name) / "unused.json"},
+        )
+        self.assertEqual(code, 1)
+        self.assertTrue(report["whisper_restore_failed"])
+        self.assertFalse(any(
+            call.startswith(("synthesize:", "verify:")) for call in stages.calls
+        ), stages.calls)
+        self.assertNotIn("verify", consent.asked_kinds)
+
+    def test_collection_audio_accepts_prepared_ids_without_vision(self) -> None:
+        self._seed_prepared()
+        selection = guided.select_ids(self.state, [fake_id(1)], limit=5)
+        stages = FakeStages()
+        consent = ScriptedConsent([("gpu", True)])
+        runner = guided.GuidedRun(self.state, stages=stages.functions(), consent=consent)
+        report = runner._execute_collection_phase(selection, "audio")
+        self.assertIn(f"audio:{fake_id(1)}", stages.calls)
+        self.assertFalse(any(call.startswith("vision:") for call in stages.calls))
+        self.assertEqual(stages.server_started, 0)
+        window = consent.windows[0]
+        self.assertEqual(window.ids, (fake_id(1),))
+        self.assertIn("unconditional", " ".join(window.operations))
+        self.assertNotIn("CONDITIONALLY", " ".join(window.operations))
+        self.assertEqual(report["selected"][0]["stages"]["audio"], "complete")
+
+    def test_collection_vision_only_restores_each_fresh_runner_once(self) -> None:
+        seed_scan(self.state, [1, 2])
+        stages = RestoreLifecycleFakeStages()
+        for n in (1, 2):
+            seed_job(self.state, fake_id(n), complete=("fetch", "prepare", "audio"))
+            selection = guided.select_ids(self.state, [fake_id(n)], limit=5)
+            consent = ScriptedConsent(list(MANAGED_GRANT)[1:])
+            runner = guided.GuidedRun(
+                self.state, stages=stages.functions(), consent=consent, out=lambda _: None
+            )
+            report = runner._execute_collection_phase(selection, "vision")
+            self.assertFalse(report["whisper_restore_failed"])
+            self.assertFalse(report["interrupted"])
+            self.assertTrue(stages.whisper_running)
+        self.assertEqual(len(stages.stop_calls), 2)
+        self.assertEqual(len(stages.restore_calls), 2)
+        self.assertFalse(any(call.startswith("audio:") for call in stages.calls))
+
+    def test_unexpected_vision_boundary_error_still_restores_once(self) -> None:
+        self._seed_prepared()
+        stages = RestoreLifecycleFakeStages()
+        functions = stages.functions()
+
+        def failed_start() -> object:
+            raise RuntimeError("fixture isolated server start failed")
+
+        functions = dataclasses.replace(functions, ollama_start=failed_start)
+        runner = guided.GuidedRun(
+            self.state, stages=functions,
+            consent=ScriptedConsent(list(MANAGED_GRANT)[1:]),
+            out=lambda _: None,
+        )
+        report = runner._execute_collection_phase(
+            guided.select_ids(self.state, [fake_id(1)], limit=5), "vision"
+        )
+        self.assertEqual(len(stages.stop_calls), 1)
+        self.assertEqual(len(stages.restore_calls), 1)
+        self.assertTrue(stages.whisper_running)
+        self.assertIn("start failed", report["progress_blocked_reason"])
+
     def _run_with_fake_clock(
         self, stages: RestoreLifecycleFakeStages, clock: FakeRestoreClock
     ) -> tuple[int, dict[str, Any], list[str]]:

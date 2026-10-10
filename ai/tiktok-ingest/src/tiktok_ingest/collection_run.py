@@ -102,11 +102,12 @@ from .guided import (
     ConsentProvider,
     ConsentWindow,
     ConsoleConsentProvider,
+    GuidedRun,
     StageFunctions,
     _run_dir_of,
     default_stage_functions,
     derive_item_stages,
-    run_guided,
+    select_ids,
 )
 from .state import Backlog, Processed, StateRoot, atomic_write_bytes
 from .swap_cooldown import (
@@ -495,14 +496,18 @@ def build_run_plan_window(plan: RunPlan) -> ConsentWindow:
                 "(reused as-is, never repeated)"
             )
     operations: tuple[str, ...] = (
-        "process exactly the frozen ids above, in order, through fetch -> "
-        "prepare -> vision -> audio -> synthesis ingestion -> verify, in "
-        f"batches of at most {plan.batch_cap} ({plan.batch_count} batch(es)); "
-        "each id is attempted in exactly ONE batch",
+        "process exactly the frozen ids above through preparation ALL -> "
+        "audio ALL -> vision ALL -> eligible synthesis ALL -> grouped verify; "
+        f"fixed resource slices of at most {plan.batch_cap} "
+        f"({plan.batch_count} slice(s)) are visited once per phase, not "
+        "complete-pipeline batches",
         "gated pinned-extractor download of exactly the frozen canonical "
         "URLs listed above (oEmbed metadata per URL), CPU preparation in "
         "the pinned container, GPU vision (isolated Ollama lifecycle + "
-        "model) and audio through the shared whisper service, per batch",
+        "model) and audio through the shared whisper service; audio requires "
+        "prepared media, not vision completion; NO synthesis request occurs "
+        "until every original vision window and its separately consented "
+        "retry has ended",
         *reuse_lines,
         *(
             (
@@ -540,8 +545,10 @@ def build_run_plan_window(plan: RunPlan) -> ConsentWindow:
         f"{plan.batch_cap}: a failed id is never reattempted this "
         "invocation (safe stop; resumable by re-invoking)",
         "no automatic retry of any operation; a fired resource gate is "
-        "final for its GPU window; unrelated progress never re-opens a "
-        "failed id",
+        "final for its GPU window and its remaining ids stay pending; "
+        "later frozen normal windows retain their existing attempt policy; "
+        "only a NEW dedicated consent can authorize the existing ONE "
+        "eligible vision swap-retry, never reopening its original window",
         "ids that become eligible later are never absorbed into this run "
         "(they need a new scope decision in a new invocation)",
         "this grant covers exactly the named ids/URLs/endpoint/model/"
@@ -2104,6 +2111,46 @@ def _run_swap_retry_flow(
             raise
 
 
+def _phase_selection(
+    state: StateRoot, ids: Sequence[str], canonical_urls: Mapping[str, str], cap: int
+) -> Any:
+    """Refresh state and exclusions without widening the frozen selection/URLs."""
+    return select_ids(
+        state, ids, limit=cap,
+        scan_items={video_id: ("video", canonical_urls.get(video_id)) for video_id in ids},
+    )
+
+
+def _merge_phase_report(batch: dict[str, Any], result: dict[str, Any]) -> None:
+    """Accumulate invocation evidence, never a second persistent stage ledger."""
+    batch["selected"] = result["selected"]
+    for name in ("excluded", "notes", "failures", "cleanup_notes", "consent_log"):
+        for entry in result[name]:
+            if entry not in batch[name]:
+                batch[name].append(entry)
+    for video_id, outcomes in result["stage_outcomes_this_run"].items():
+        batch["stage_outcomes_this_run"].setdefault(video_id, {}).update(outcomes)
+    batch["waiting_for_synthesis"] = result["waiting_for_synthesis"]
+    for name in ("interrupted", "whisper_restore_failed", "gpu_cleanup_failed"):
+        batch[name] = batch.get(name, False) or result[name]
+    if result["failures"] or result["interrupted"]:
+        batch["exit_code"] = 1
+
+
+def _refresh_batch_report(state: StateRoot, batch: dict[str, Any]) -> None:
+    """Final views include retry and grouped verification, not the plan snapshot."""
+    waiting: list[str] = []
+    for item in batch["selected"]:
+        states = derive_item_stages(state, item["id"])
+        item["stages"] = states
+        item["run_dir"] = _run_dir_of(state, item["id"])
+        if states["audio"] == states["vision"] == "complete" and states["synthesis"] != "complete":
+            waiting.append(item["id"])
+        if any(value != "complete" for value in states.values()):
+            batch["exit_code"] = 1
+    batch["waiting_for_synthesis"] = waiting
+
+
 def run_collection(
     *,
     collection_url: str,
@@ -2185,6 +2232,7 @@ def run_collection(
         "browser": None,
         "run_plan": None,
         "batches": [],
+        "phases": [],
         "verification": None,
         "swap_retries": [],
         "run_authorization": {
@@ -2297,105 +2345,104 @@ def run_collection(
         else None
     )
 
-    # Phase 3: batches are FIXED SLICES of the frozen inventory — each
-    # frozen id is attempted in exactly ONE batch (a failed id is never
-    # reattempted this invocation) and the loop is bounded by
-    # construction: the remaining list strictly shrinks, so there is no
-    # re-asking loop and nothing outside the frozen scope is absorbed.
-    remaining = list(frozen_ids)
-    batch_index = 0
-    # Phase 0 addendum: per-invocation swap-retry bookkeeping. ONE ask
-    # per video per invocation (denial included) — enforced here, never
-    # as a lifetime StageRecord.attempts rejection (FR-17).
+    # Fixed resource slices are visited ONCE per phase. The OUTER loop
+    # owns the global barriers, so neither an early slice nor a successful
+    # retry can reach the text API while any normal vision slice remains.
+    batches = [list(frozen_ids[i:i + cap]) for i in range(0, len(frozen_ids), cap)]
+    phase_stages = {
+        "preparation": ("fetch", "prepare"),
+        "audio": ("audio",),
+        "vision": ("vision",),
+        "synthesis": ("synthesis",),
+    }
     swap_retry_offered: set[str] = set()
     if authorization is not None:
         try:
-            while remaining:
-                batch = remaining[:cap]
-                del remaining[: len(batch)]
-                batch_index += 1
-                out(
-                    f"collection batch {batch_index}/{run_plan.batch_count}: "
-                    f"{len(batch)} id(s) ({', '.join(batch)}); "
-                    f"{len(remaining)} frozen item(s) in later batches"
-                )
-                batch_exit, batch_report = run_guided(
-                    state=state,
-                    collection=collection_url,
-                    ids=batch,
-                    limit=cap,
-                    stages=narrated,
-                    consent=authorization,
-                    out=out,
-                    auto_synthesizer=auto_synthesizer,
-                )
-                report["batches"].append(
-                    {
-                        "ids": list(batch),
-                        "exit_code": batch_exit,
-                        "selected": batch_report.get("selected"),
-                        "excluded": batch_report.get("excluded"),
-                        "notes": batch_report.get("notes"),
-                        "failures": batch_report.get("failures"),
-                        "cleanup_notes": batch_report.get("cleanup_notes"),
-                        "consent_log": batch_report.get("consent_log"),
-                        "stage_outcomes_this_run": batch_report.get(
-                            "stage_outcomes_this_run"
-                        ),
-                        "waiting_for_synthesis": batch_report.get(
-                            "waiting_for_synthesis"
-                        ),
-                        "interrupted": batch_report.get("interrupted"),
-                        "whisper_restore_failed": batch_report.get(
-                            "whisper_restore_failed"
-                        ),
+            for phase, required_stages in phase_stages.items():
+                evidence: dict[str, Any] = {
+                    "phase": phase, "state": "running", "windows": [], "pending_ids": [],
+                }
+                report["phases"].append(evidence)
+                for batch_index, batch_ids in enumerate(batches):
+                    out(
+                        f"collection phase {phase}: collection batch "
+                        f"{batch_index + 1}/{len(batches)}: "
+                        f"{len(batch_ids)} frozen id(s) ({', '.join(batch_ids)})"
+                    )
+                    selection = _phase_selection(state, batch_ids, canonical_urls, cap)
+                    # One runner per phase/window: no consumed standing-restore
+                    # flags are shared with a later real stop cycle.
+                    runner = GuidedRun(
+                        state, stages=narrated, consent=authorization, out=out,
+                        auto_synthesizer=auto_synthesizer,
+                    )
+                    result = runner._execute_collection_phase(selection, phase)
+                    if phase == "preparation":
+                        report["batches"].append({
+                            "ids": batch_ids, "exit_code": 0, "selected": [],
+                            "excluded": [], "notes": [], "failures": [],
+                            "cleanup_notes": [], "consent_log": [],
+                            "stage_outcomes_this_run": {}, "waiting_for_synthesis": [],
+                            "interrupted": False, "whisper_restore_failed": False,
+                            "phases": [],
+                        })
+                    batch_report = report["batches"][batch_index]
+                    _merge_phase_report(batch_report, result)
+                    window_evidence = {
+                        "phase": phase, "batch_index": batch_index + 1,
+                        "stage_calls": result["stage_calls"],
+                        "vision_window_closed": result["vision_window_closed"],
                     }
+                    batch_report["phases"].append(window_evidence)
+                    evidence["windows"].append(window_evidence)
+                    if result["interrupted"]:
+                        report["interrupted"] = True
+                        report["hard_stop_reason"] = (
+                            "interrupted: partial evidence preserved; service "
+                            "cleanup may be UNKNOWN; new authorization required"
+                        )
+                    elif result["whisper_restore_failed"]:
+                        report["hard_stop_reason"] = (
+                            "whisper restoration failed: ALL further progress is "
+                            "blocked; verify the service state explicitly; no "
+                            "rollback is performed or implied"
+                        )
+                    elif result["gpu_cleanup_failed"]:
+                        report["hard_stop_reason"] = "isolated GPU cleanup unverified: ALL further progress blocked"
+                    elif result["progress_blocked_reason"] is not None:
+                        report["hard_stop_reason"] = result["progress_blocked_reason"]
+                    if report["hard_stop_reason"] is not None:
+                        break
+                    if phase == "vision":
+                        # Only ORIGINAL attempts made in this window may earn
+                        # a retry. Unattempted same-window ids remain pending,
+                        # even if an older invocation left eligible evidence.
+                        attempted_ids = [
+                            call.split(":", 1)[1] for call in result["stage_calls"]
+                            if call.startswith("vision:")
+                        ]
+                        _run_swap_retry_flow(
+                            state=state, stages=stages_exec, narrated=narrated,
+                            human=consent, human_decisions=human_decisions,
+                            plan=run_plan, batch_ids=attempted_ids,
+                            offered=swap_retry_offered, out=out, report=report,
+                            monotonic=swap_retry_monotonic, sleep=swap_retry_sleep,
+                            vmstat_fn=swap_retry_vmstat_fn,
+                        )
+                        if report["hard_stop_reason"] is not None:
+                            break
+                evidence["pending_ids"] = [
+                    video_id for video_id in frozen_ids
+                    if any(derive_item_stages(state, video_id)[stage] != "complete"
+                           for stage in required_stages)
+                ]
+                evidence["state"] = (
+                    "blocked" if report["hard_stop_reason"] is not None
+                    else "ended_with_pending" if evidence["pending_ids"] else "complete"
                 )
-                if batch_exit != 0:
-                    exit_code = 1
-                if batch_report.get("waiting_for_synthesis"):
-                    # Honest incompleteness: synthesis cannot proceed in
-                    # this invocation (missing config or a resumable
-                    # stop); the journey is not finished.
-                    exit_code = 1
-                if batch_report.get("interrupted"):
-                    report["interrupted"] = True
-                    report["hard_stop_reason"] = (
-                        "interrupted: partial results are preserved by the "
-                        "stages; re-invocation requires new authorization "
-                        "for pending operations"
-                    )
-                    break
-                if batch_report.get("whisper_restore_failed"):
-                    report["hard_stop_reason"] = (
-                        "whisper restoration failed: ALL further progress is "
-                        "blocked; verify the service state explicitly; no "
-                        "rollback is performed or implied"
-                    )
-                    exit_code = 1
-                    break
-
-                # Phase 0 addendum: the bounded swap-retry sub-flow for
-                # this batch's eligible ids. Subsequent frozen batches
-                # reconcile EXACTLY as the pre-existing driver does —
-                # the retry adds no batch, no window and no model load
-                # beyond the ONE separately-consented retry attempt,
-                # and retry exhaustion is video/window-scoped (never a
-                # global hard stop; D-08/OQ-03).
-                _run_swap_retry_flow(
-                    state=state,
-                    stages=stages_exec,
-                    narrated=narrated,
-                    human=consent,
-                    human_decisions=human_decisions,
-                    plan=run_plan,
-                    batch_ids=batch,
-                    offered=swap_retry_offered,
-                    out=out,
-                    report=report,
-                    monotonic=swap_retry_monotonic,
-                    sleep=swap_retry_sleep,
-                    vmstat_fn=swap_retry_vmstat_fn,
+                out(
+                    f"collection phase {phase} ended: {evidence['state']}; "
+                    f"{len(evidence['pending_ids'])} frozen id(s) pending"
                 )
                 if report["hard_stop_reason"] is not None:
                     exit_code = 1
@@ -2425,10 +2472,15 @@ def run_collection(
         except KeyboardInterrupt:
             report["interrupted"] = True
             report["hard_stop_reason"] = (
-                "interrupted between batches: partial results are preserved "
+                "interrupted between phase windows: partial results are preserved "
                 "by the stages; re-invocation requires new authorization "
                 "for pending operations"
             )
+            exit_code = 1
+
+    for batch_report in report["batches"]:
+        _refresh_batch_report(state, batch_report)
+        if batch_report["exit_code"]:
             exit_code = 1
 
     # Aggregate view ONLY (derived from the product's stores now).

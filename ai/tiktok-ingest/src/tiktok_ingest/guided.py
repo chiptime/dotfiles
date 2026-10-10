@@ -652,6 +652,8 @@ class GuidedRun:
         # generic interruption message must then NOT claim that the
         # applicable cleanup ran.
         self._interrupt_cleanup_uncertain = False
+        self._progress_blocked_reason: str | None = None
+        self._vision_window_closed = False
 
     # -- consent ------------------------------------------------------------
 
@@ -1258,6 +1260,7 @@ class GuidedRun:
                     # Stop-on-failure policy: no further GPU load for ANY
                     # id this invocation; the stage's own bounded cleanup
                     # and verified unload already ran inside the stage.
+                    self._vision_window_closed = True
                     self.out(
                         "gpu window ended: no further model load this "
                         "invocation (gate/error is final for the window)"
@@ -1291,11 +1294,11 @@ class GuidedRun:
         ]
 
     def _audio_phase(
-        self, selection: Selection, report_items: dict, vision_complete: list[str]
+        self, selection: Selection, report_items: dict, eligible_ids: list[str]
     ) -> None:
         pending = [
             item for item in selection.items
-            if item.video_id in vision_complete
+            if item.video_id in eligible_ids
             and self._item_stage_state(item, "audio") != "complete"
         ]
         if not pending:
@@ -1328,7 +1331,40 @@ class GuidedRun:
             outcome = self.stages.audio(item.video_id, self.state)
             self._record(report_items, item, "audio", outcome)
 
-    def _gpu_phase(self, selection: Selection, report_items: dict) -> None:
+    def _collection_audio_phase(self, selection: Selection, report_items: dict) -> None:
+        """Audio-only window: preparation, not vision, determines eligibility."""
+        pending = [
+            item for item in selection.items
+            if self._item_stage_state(item, "prepare") == "complete"
+            and self._item_stage_state(item, "audio") != "complete"
+        ]
+        if not pending:
+            return
+        window = ConsentWindow(
+            kind="gpu",
+            title="prepared-audio transcription window (before collection vision)",
+            ids=tuple(item.video_id for item in pending),
+            operations=(
+                "unconditional full-audio transcription of exactly the prepared "
+                "ids above through the shared whisper WS service; no vision "
+                "completion is required",
+                "no isolated Ollama lifecycle or vision model load",
+            ),
+            limits=(
+                f"audio deadline {config.BUDGETS.audio_stage_deadline_seconds}s per id",
+                "completed audio is reused, never re-transcribed; no retry",
+                "health must pass before work; no authority to start a missing service",
+            ),
+            effects=("persists audio evidence and the existing audio stage record",),
+        )
+        if not self._ask(window):
+            selection.notes.append("audio window denied: no transcription ran")
+            return
+        self._audio_phase(selection, report_items, [item.video_id for item in pending])
+
+    def _gpu_phase(
+        self, selection: Selection, report_items: dict, *, vision_only: bool = False
+    ) -> None:
         vision_pending = [
             item for item in selection.items
             if self._item_stage_state(item, "prepare") == "complete"
@@ -1336,7 +1372,8 @@ class GuidedRun:
         ]
         audio_pending = [
             item for item in selection.items
-            if self._item_stage_state(item, "vision") == "complete"
+            if not vision_only
+            and self._item_stage_state(item, "vision") == "complete"
             and self._item_stage_state(item, "audio") != "complete"
         ]
         # The window names every id that COULD reach audio this invocation
@@ -1345,7 +1382,8 @@ class GuidedRun:
         # the ids whose vision was already complete.
         audio_possible = [
             item for item in selection.items
-            if self._item_stage_state(item, "prepare") == "complete"
+            if not vision_only
+            and self._item_stage_state(item, "prepare") == "complete"
             and self._item_stage_state(item, "audio") != "complete"
         ]
         if not vision_pending and not audio_pending:
@@ -1363,7 +1401,7 @@ class GuidedRun:
         ]
         audio_already_complete = [
             item for item in selection.items
-            if self._item_stage_state(item, "audio") == "complete"
+            if not vision_only and self._item_stage_state(item, "audio") == "complete"
         ]
         window_ids: list[str] = [
             item.video_id for item in vision_pending
@@ -1402,7 +1440,8 @@ class GuidedRun:
             )
         window = ConsentWindow(
             kind="gpu",
-            title="local GPU inference window (vision and/or audio)",
+            title=("local vision-only GPU window" if vision_only
+                   else "local GPU inference window (vision and/or audio)"),
             ids=tuple(window_ids),
             operations=(
                 (
@@ -1452,6 +1491,12 @@ class GuidedRun:
         # Whisper precondition (Phase 0 coordination when hooks exist):
         # without it vision below blocks in _vision_phase as before.
         if not self._whisper_pre_vision(selection, report_items):
+            if vision_only:
+                self._progress_blocked_reason = (
+                    "whisper vision precondition failed: service state/authority "
+                    "must be resolved before further collection progress"
+                )
+                return
             selection.notes.append(
                 "vision blocked by the whisper precondition; audio for "
                 "already-vision-complete ids may still proceed (the "
@@ -1485,7 +1530,8 @@ class GuidedRun:
                 return
             if not self._whisper_pre_audio(selection, report_items):
                 return
-            self._audio_phase(selection, report_items, vision_complete)
+            if not vision_only:
+                self._audio_phase(selection, report_items, vision_complete)
         except KeyboardInterrupt:
             # An interrupt never grants anything and never skips recovery.
             # The isolated Ollama server this run started was already
@@ -1512,13 +1558,37 @@ class GuidedRun:
                     # with NO retry, NO new ask and NO duplicate report.
                     self.whisper_restore_failed = True
             raise
+        except Exception as exc:  # unexpected boundary failure, not a stage outcome
+            self._progress_blocked_reason = f"GPU boundary failed: {exc}"
+            self.failures.append({
+                "id": "*", "stage": "gpu", "outcome": "failed",
+                "reason": self._progress_blocked_reason,
+            })
+        finally:
+            # Also recover after an unexpected exception from start/readiness
+            # hooks. Ordinary success and interrupt paths already consumed the
+            # single restore; its bookkeeping makes this check idempotent.
+            if self._whisper_we_stopped is not None and not self._whisper_restore_attempted:
+                self._whisper_restore_now(report_items, context="after GPU boundary exit")
 
     def _synthesis_and_verify_phase(
         self,
         selection: Selection,
         report_items: dict,
         synthesis_docs: Mapping[str, Path],
+        *,
+        verify: bool = True,
     ) -> None:
+        if (
+            self.whisper_restore_failed
+            or self._gpu_cleanup_failed
+            or self._interrupt_cleanup_uncertain
+            or self._progress_blocked_reason is not None
+        ):
+            selection.notes.append(
+                "synthesis and verification blocked: service/GPU recovery is not verified"
+            )
+            return
         waiting: list[dict[str, str]] = []
         for item in selection.items:
             if (
@@ -1566,6 +1636,9 @@ class GuidedRun:
                 f"waiting for synthesis document for {entry['id']}: evidence at "
                 f"{entry['video_md']} and {entry['audio_md']}; {entry['resume']}"
             )
+
+        if not verify:
+            return
 
         # Verify consent happens ONLY after the real candidate URLs are
         # known from the supplied/validated documents.
@@ -1647,6 +1720,63 @@ class GuidedRun:
             self._record(report_items, item, "verify", outcome)
 
     # -- entry points ---------------------------------------------------------
+
+    def _execute_collection_phase(
+        self, selection: Selection, phase: str
+    ) -> dict[str, Any]:
+        """One private resource slice; the collection driver owns all barriers.
+
+        Each call uses a fresh runner so standing restore authority and its
+        consumed start attempt can never leak across actual stop cycles.
+        This does not change the public guided-run selection or phase order.
+        """
+        if phase not in ("preparation", "audio", "vision", "synthesis"):
+            raise GuidedError(f"unknown collection phase: {phase}")
+        if len(selection.ids) > GUIDED_MAX_BATCH:
+            raise GuidedError("collection phase exceeds the resource-window cap")
+        report_items: dict[str, Any] = {}
+        try:
+            if phase == "preparation":
+                window = ConsentWindow(
+                    kind="tanda",
+                    title="confirm this frozen collection resource slice",
+                    ids=tuple(selection.ids),
+                    operations=(
+                        "prepare every frozen slice, then audio for every prepared "
+                        "slice, then vision windows, then eligible synthesis, then "
+                        "ONE separately authorized grouped verification",
+                    ),
+                    limits=(f"resource-window cap {GUIDED_MAX_BATCH}",),
+                )
+                if self._ask(window):
+                    self._fetch_phase(selection, report_items)
+                    self._prepare_phase(selection, report_items)
+                else:
+                    selection.notes.append("resource slice denied: preparation did not run")
+            elif phase == "audio":
+                self._collection_audio_phase(selection, report_items)
+            elif phase == "vision":
+                self._gpu_phase(selection, report_items, vision_only=True)
+            else:
+                self._synthesis_and_verify_phase(selection, report_items, {}, verify=False)
+        except KeyboardInterrupt:
+            self._interrupted = True
+            if self._interrupt_cleanup_uncertain:
+                self.out(
+                    "interrupted: cleanup state is NOT fully known; verify "
+                    "and recover the exact Whisper service manually before progress"
+                )
+            selection.notes.append(
+                "phase interrupted: partial stage evidence preserved; cleanup "
+                "is unknown if the service stop itself was interrupted"
+            )
+        except Exception as exc:
+            self._progress_blocked_reason = f"collection {phase} boundary failed: {exc}"
+            self.failures.append({
+                "id": "*", "stage": phase, "outcome": "failed",
+                "reason": self._progress_blocked_reason,
+            })
+        return self.build_report(selection, report_items, mode="execute")
 
     def execute(
         self,
@@ -1735,6 +1865,9 @@ class GuidedRun:
             "waiting_for_synthesis": waiting,
             "interrupted": self._interrupted,
             "whisper_restore_failed": self.whisper_restore_failed,
+            "gpu_cleanup_failed": self._gpu_cleanup_failed,
+            "progress_blocked_reason": self._progress_blocked_reason,
+            "vision_window_closed": self._vision_window_closed,
             "stage_outcomes_this_run": report_items,
             "complete_is_not_confirmed": (
                 "a stage outcome of 'complete' means the machinery finished "
