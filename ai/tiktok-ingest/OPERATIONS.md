@@ -798,8 +798,11 @@ covered by the run-plan grant.
    the identical configuration at that moment, and probes fresh free
    VRAM after the transition. Final-conditions drift (VRAM no longer
    free, service state changed) restores whisper and resumes sampling
-   inside the SAME 180 s cap — never a fresh budget. Each new attempt
-   takes its immediate baselines only at its own start.
+   inside the SAME 180 s cap — never a fresh budget. A post-stop
+   measurement failure or an interrupt at that boundary restores the
+   SAME service under the retry authority before reporting its terminal
+   state: the shared service is never left stopped behind the window.
+   Each new attempt takes its immediate baselines only at its own start.
 5. The single vision-only re-run reuses valid fetch/prepare results and
    never repeats completed audio, synthesis or verification. The
    original attempt's stage record, gate evidence and partial artifacts
