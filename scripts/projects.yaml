@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator + mobile approvals — Nominatim allowed in CSP connect-src and deployed via Dokploy (81352366); ECI/Hipercor Moonshine markers active; production healthy
-  next: run the single budget-authorized production Hipercor finder end-to-end acceptance check (no production scraper run yet); EAN source decision open; TypeScript 1807-diag backlog handled separately
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) deployed via Dokploy; scraping incident root-caused (ufw blocked the container egress — missing Docker bridge rules) and fixed; ALDI migrated to the new Algolia index; release v1.49.0
+  next: provide the legal data (titular/ciudad/canal legal) to close the ToS; refresh MERCADONA categories (crawl yields 0); EAN source decision open
 
 vps:
   scope: personal
