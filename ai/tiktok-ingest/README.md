@@ -215,8 +215,8 @@ window honored by all writers remains necessary and does not exist
 
 `src/tiktok_ingest/guided.py` adds ONE thin coordinator — not a
 framework, not a scheduler, no agent skill: it sequences the EXISTING
-stage functions for one operator-confirmed tanda behind explicit,
-per-window authorization, and derives all progress from the product's
+stage functions for one operator-confirmed tanda behind ONE upfront
+run-plan authorization, and derives all progress from the product's
 own manifests and fingerprints (no second state authority; the command
 persists nothing of its own).
 
@@ -239,26 +239,31 @@ duplicated or over-cap selections; permanently blocklisted ids and ids
 already complete (emit fingerprint) are excluded with their reason and
 are never re-inferred implicitly.
 
-Consent windows, in order, each showing ids/destinations, operations,
-limits and effects BEFORE anything runs: tanda confirmation → network
-download of exactly the selected URLs → CPU preparation in the pinned
-container → GPU inference window (isolated Ollama lifecycle + gated
-vision, then audio through the shared whisper service) → verification
-retrieval of the EXACT `candidate_urls` recorded in the supplied
-synthesis documents. Denial, EOF, cancellation or a non-interactive
-environment stop without assuming consent; there is no global `--yes`;
-an authorization never persists into a later invocation. The GPU-window
-consent covers starting AND stopping the isolated Ollama server this
-command started (stop runs at window end or on failure); a preexisting
-server answering on the isolated port is never adopted. The KNOWN
-shared whisper service is coordinated automatically when it is running:
-its identity is verified read-only, it is stopped behind explicit
-consent before vision and restored under the standing authorization
-after the GPU window (on success, failure or interruption), so a
-single-video run needs no manual `podman` commands. Each stage narrates
-a start/finish line with elapsed time and the run ends with a readable
-summary table; all of that UI is stderr-only, so the stdout JSON report
-keeps its exact shape.
+Consent asks exactly ONE run-plan window covering the whole tanda: it
+names every frozen id and canonical URL, the full stage sequence, the
+bound KNOWN whisper service identity and its stop/restore, the isolated
+Ollama lifecycle, the batch limits, and the text API endpoint/model when
+automatic synthesis applies. On grant, the covered per-phase windows
+(`tanda`, `prepare`, `fetch`, `gpu`, `whisper-stop`, `whisper-restore`,
+and the configured `synthesis-api`) are discharged automatically (audited
+as covered, never fabricated human yeses). Verification keeps its OWN
+grouped decision: candidate URLs only exist after synthesis, so ONE
+separate verification window names every exact validated URL before any
+retrieval. Denial, EOF, cancellation or a non-interactive environment
+stop without assuming consent; there is no global `--yes`; an
+authorization never persists into a later invocation. Any window whose
+ids/destinations/service fall outside the planned scope is asked as
+genuinely new scope and never auto-granted. The GPU window's grant
+covers starting AND stopping the isolated Ollama server this command
+started (stop runs at window end or on failure); a preexisting server
+answering on the isolated port is never adopted. The KNOWN shared
+whisper service is coordinated automatically when it is running: its
+identity is verified read-only before the run plan, it is stopped before
+vision and restored after the GPU window (on success, failure or
+interruption) under that grant, so a single-video run needs no manual
+`podman` commands. Each stage narrates a start/finish line with elapsed
+time and the run ends with a readable summary table; all of that UI is
+stderr-only, so the stdout JSON report keeps its exact shape.
 
 The synthesis boundary is a hard stop: without `--synthesis ID=PATH`
 the run reports the `video.md`/`audio.md` paths and the exact resume
@@ -348,8 +353,8 @@ Key boundaries:
   blocks ALL further progress, reports the actual partial state and
   promises no rollback. `guided-run` uses the SAME coordination: its CLI
   supplies the whisper lifecycle hooks, so a running known service is
-  stopped before vision and restored after the window under the same
-  standing authorization. Only a programmatic caller that builds its own
+  stopped before vision and restored after the window under its
+  run-plan grant. Only a programmatic caller that builds its own
   `StageFunctions` without those hooks keeps the operator-managed
   behavior (blocks with instructions).
   In the collection flow the shared service must already be RUNNING and
@@ -430,7 +435,10 @@ Key boundaries:
   URL before any retrieval. Denial/EOF/non-TTY/Ctrl-C stop without
   assuming consent; there is no global `--yes`; a grant never persists
   into a later window, resource slice or invocation. Standalone
-  `guided-run` keeps its own per-window flow unchanged.
+  `guided-run` uses the SAME ONE-window run plan over its own selection
+  (there is no browser phase): ONE run-plan grant covers the tanda and
+  the covered phase windows are discharged from it, while verification
+  keeps its separate grouped decision.
 - **Dry run**: `--dry-run` prints preflight + the document-only plan
   with zero browser, zero network, zero containers, zero GPU, zero API
   calls and zero writes.
