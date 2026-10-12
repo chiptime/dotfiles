@@ -266,13 +266,17 @@ time and the run ends with a readable summary table; all of that UI is
 stderr-only, so the stdout JSON report keeps its exact shape.
 
 On an interactive terminal both `guided-run` and `collection-run` render
-a live **curses dashboard** (stdlib only — no third-party dependency):
-per-id stage states, the current phase/activity and an elapsed clock,
-with every consent window shown in place as a full-text modal. The
-consent contract is unchanged — only `y`/`yes` grants, EOF/read-error/
-non-TTY denies, and the whole window text (title, ids, destinations,
-operations, limits, effects) is composed and visible (scrollable on
-small terminals). The TUI draws on the terminal screen only: stdout stays
+a live **curses dashboard** (stdlib only — no third-party dependency): a
+header bar with the run/phase/elapsed, a per-id stage matrix whose state
+cells are colored (complete green, failed red, running yellow, pending
+dim), and a log panel. Every consent window is shown in place as a
+**bordered, titled modal** — a title line, the full window text, and a
+footer stating the exact key hint — that scrolls on small terminals.
+Color is used only when the terminal reports color support; otherwise the
+SAME layout renders monochrome. The consent contract is unchanged — only
+`y`/`yes` grants, EOF/read-error/non-TTY denies, and the whole window text
+(title, ids, destinations, operations, limits, effects) is composed and
+visible. The TUI draws on the terminal screen only: stdout stays
 the parseable JSON report, printed after the curses session ends. When
 curses cannot start or stdin/stdout is not a TTY (CI, a pipe,
 `TERM=dumb`), both commands fall back to the EXACT line-based prompts and

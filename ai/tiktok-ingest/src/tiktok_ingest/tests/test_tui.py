@@ -73,6 +73,23 @@ class FakeWindow:
         return "\n".join(entry[2] for entry in self.drawn)
 
 
+class ColorWindow(FakeWindow):
+    """Window double that also records the curses attribute of each draw.
+
+    The no-color path never passes an attribute (3-arg ``addstr``), which
+    is why :class:`FakeWindow` stays untouched: it exercises the graceful
+    degradation path. This double is the color path.
+    """
+
+    def __init__(self, height: int = 24, width: int = 100) -> None:
+        super().__init__(height=height, width=width)
+        self.attrs: list[tuple[int, int, str, int]] = []
+
+    def addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:
+        self.attrs.append((y, x, text, attr))
+        super().addstr(y, x, text)
+
+
 class _RaisingKeys:
     """Key source that raises OSError, simulating a read error."""
 
@@ -105,10 +122,10 @@ def _window(kind: str = "run-plan") -> ConsentWindow:
     )
 
 
-def _provider(keys, *, height: int = 24, width: int = 100):
+def _provider(keys, *, height: int = 24, width: int = 100, attrs=None):
     window = FakeWindow(height=height, width=width)
     provider = tui.CursesConsentProvider(
-        window=window, keys=iter(keys), now=lambda: 5.0
+        window=window, keys=iter(keys), now=lambda: 5.0, attrs=attrs
     )
     return provider, window
 
@@ -196,6 +213,114 @@ class RendererTests(unittest.TestCase):
         state.note("x" * 500)
         lines = tui.render_lines(state, now=1.0, width=20, height=24)
         self.assertTrue(all(len(line) <= 20 for line in lines))
+
+    def test_render_dashboard_is_structured(self) -> None:
+        # A header bar (phase + elapsed), the per-id stage matrix and a
+        # log panel are the visible structure that makes it a TUI.
+        state = tui.TuiState(started=0.0)
+        state.ensure_id("id-1")
+        state.note("a log line")
+        joined = "\n".join(
+            tui.render_lines(state, now=2.0, width=100, height=24)
+        )
+        self.assertIn("phase:", joined)
+        self.assertIn("elapsed", joined)
+        self.assertIn("fetch", joined)
+        self.assertIn("log", joined)
+        self.assertIn("a log line", joined)
+
+    def test_stage_role_maps_states(self) -> None:
+        state = tui.TuiState(started=0.0)
+        state.ensure_id("id-1")
+        self.assertEqual(tui.stage_role(state, "id-1", "fetch"), "pending")
+        state.stages["id-1"]["fetch"] = "complete"
+        self.assertEqual(tui.stage_role(state, "id-1", "fetch"), "ok")
+        state.stages["id-1"]["prepare"] = "failed"
+        self.assertEqual(tui.stage_role(state, "id-1", "prepare"), "failed")
+        state.running["id-1"] = "vision"
+        self.assertEqual(tui.stage_role(state, "id-1", "vision"), "running")
+
+
+class FrameAndColorTests(unittest.TestCase):
+    def test_init_palette_empty_when_no_colors(self) -> None:
+        with mock.patch.object(tui.curses, "has_colors", return_value=False):
+            self.assertEqual(tui.init_palette(), {})
+
+    def test_init_palette_empty_when_curses_raises(self) -> None:
+        with mock.patch.object(
+            tui.curses, "has_colors", side_effect=Exception("no term")
+        ):
+            self.assertEqual(tui.init_palette(), {})
+
+    @unittest.skipIf(tui.curses is None, "curses not available on this host")
+    def test_init_palette_degradation_when_curses_unavailable(self) -> None:
+        with mock.patch.object(tui, "curses", None):
+            self.assertEqual(tui.init_palette(), {})
+
+    def test_modal_frame_is_boxed_with_title_and_footer(self) -> None:
+        provider, window = _provider([ord("y"), ENTER])
+        provider.ask(_window())
+        lines = window.history
+        drawn = "\n".join(lines)
+        self.assertIn("AUTHORIZATION REQUIRED", drawn)
+        self.assertIn("any other answer denies", drawn)
+        self.assertTrue(any(line.startswith("+") for line in lines))
+        self.assertTrue(any(line.startswith("|") for line in lines))
+
+    def test_modal_frame_keeps_prompt_and_window_text(self) -> None:
+        provider, window = _provider([ord("y"), ENTER])
+        provider.ask(_window())
+        drawn = "\n".join(window.history)
+        self.assertIn("authorize this window? [yes/no]", drawn)
+        self.assertIn("2000000000000000002", drawn)
+        self.assertIn("appends pending backlog entries", drawn)
+
+    def test_modal_frame_shows_scroll_hint_when_tall(self) -> None:
+        provider, window = _provider([ord("y"), ENTER], height=6, width=60)
+        provider.ask(_window())
+        self.assertIn("(up/down)", "\n".join(window.history))
+
+    def test_await_readiness_modal_is_not_an_authorization(self) -> None:
+        provider, window = _provider([ENTER])
+        provider.await_readiness("log in, then press Enter")
+        drawn = "\n".join(window.history)
+        self.assertIn("READINESS CHECKPOINT", drawn)
+        self.assertIn("readiness", drawn)
+
+    def test_no_color_degradation_renders(self) -> None:
+        window = FakeWindow(height=24, width=100)
+        provider = tui.CursesConsentProvider(
+            window=window, keys=iter([]), now=lambda: 5.0
+        )
+        provider.state.ensure_id("id-1")
+        provider._draw()
+        self.assertTrue(window.history)
+        self.assertEqual(provider._attrs, {})
+
+    def test_color_attributes_are_applied_to_cells(self) -> None:
+        window = ColorWindow(height=24, width=100)
+        provider = tui.CursesConsentProvider(
+            window=window,
+            keys=iter([]),
+            now=lambda: 5.0,
+            attrs={"ok": 42, "header": 7, "frame": 9},
+        )
+        provider.state.ensure_id("id-1")
+        provider.state.stages["id-1"]["fetch"] = "complete"
+        provider._draw()
+        self.assertTrue(any(attr == 42 for *_, attr in window.attrs))
+        self.assertTrue(any(attr == 7 for *_, attr in window.attrs))
+
+    def test_color_modal_frame_uses_frame_attribute(self) -> None:
+        window = ColorWindow(height=24, width=100)
+        provider = tui.CursesConsentProvider(
+            window=window,
+            keys=iter([ord("y"), ENTER]),
+            now=lambda: 5.0,
+            attrs={"frame": 9},
+        )
+        provider.ask(_window())
+        self.assertTrue(any(attr == 9 for *_, attr in window.attrs))
 
 
 class ConsentSemanticsTests(unittest.TestCase):

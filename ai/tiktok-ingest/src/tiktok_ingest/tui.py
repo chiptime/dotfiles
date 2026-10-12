@@ -21,6 +21,12 @@ consent rule:
   stdout is not a TTY (CI, pipes, ``TERM=dumb``), the caller keeps the
   EXISTING line-based behavior byte-for-byte by receiving a fallback
   session whose ``consent``/``out`` are ``None`` (defaults unchanged).
+- Presentation is explicitly a TUI: a structured dashboard (header bar
+  with run/phase/elapsed, a per-id stage matrix with state-colored cells,
+  a log panel) and consent windows drawn as a bordered, titled modal with
+  an explicit key-hint footer. Color is used ONLY when
+  ``curses.has_colors()`` reports support; otherwise the SAME layout
+  renders without any attribute (graceful degradation, never a crash).
 
 Nothing here is imported eagerly by non-interactive code paths; the
 fallback is decided before any curses call.
@@ -79,6 +85,58 @@ _RAISED_RE = re.compile(
 
 _MAX_LOG_LINES = 500
 
+# Visual roles. Each maps to an optional curses attribute in the resolved
+# palette; when color is unavailable every role resolves to attribute 0
+# and the SAME layout renders in monochrome. A rendered line is a list of
+# ``(text, role)`` spans so one line can mix roles (e.g. a bordered row).
+ROLE_HEADER = "header"
+ROLE_OK = "ok"
+ROLE_FAILED = "failed"
+ROLE_RUNNING = "running"
+ROLE_PENDING = "pending"
+ROLE_FRAME = "frame"
+ROLE_DIM = "dim"
+ROLE_NORMAL = "normal"
+
+StyledLine = list[tuple[str, str]]
+
+
+def init_palette() -> dict[str, int]:
+    """Resolve color-pair attributes, or ``{}`` when color is unavailable.
+
+    Called after ``initscr``. It NEVER raises: any failure (no terminal,
+    a monochrome ``TERM``, a curses error) degrades to an empty palette so
+    the renderer draws without attributes.
+    """
+    if curses is None:  # pragma: no cover - non-POSIX host
+        return {}
+    try:
+        if not curses.has_colors():
+            return {}
+        curses.start_color()
+        background = -1
+        try:
+            curses.use_default_colors()
+        except Exception:  # noqa: BLE001 - fall back to a plain background
+            background = curses.COLOR_BLACK
+        curses.init_pair(1, curses.COLOR_CYAN, background)
+        curses.init_pair(2, curses.COLOR_GREEN, background)
+        curses.init_pair(3, curses.COLOR_RED, background)
+        curses.init_pair(4, curses.COLOR_YELLOW, background)
+        curses.init_pair(5, curses.COLOR_WHITE, background)
+        curses.init_pair(6, curses.COLOR_BLUE, background)
+    except Exception:  # noqa: BLE001 - any color failure means monochrome
+        return {}
+    return {
+        ROLE_HEADER: curses.color_pair(1) | curses.A_BOLD,
+        ROLE_OK: curses.color_pair(2),
+        ROLE_FAILED: curses.color_pair(3) | curses.A_BOLD,
+        ROLE_RUNNING: curses.color_pair(4) | curses.A_BOLD,
+        ROLE_PENDING: curses.color_pair(5) | curses.A_DIM,
+        ROLE_FRAME: curses.color_pair(6) | curses.A_BOLD,
+        ROLE_DIM: curses.A_DIM,
+    }
+
 
 def _normalize_stage(name: str) -> str:
     # The Phase 0 automatic-synthesis narration is tagged ``synthesis-api``
@@ -88,6 +146,32 @@ def _normalize_stage(name: str) -> str:
 
 def _fit(text: str, width: int) -> str:
     return text if width <= 0 else text[:width]
+
+
+def _border(width: int, label: str = "") -> str:
+    """An ASCII horizontal border, optionally carrying an embedded label."""
+    if width <= 0:
+        return ""
+    if width < 2:
+        return "-" * width
+    core = width - 2
+    if label:
+        text = f"-- {label} "
+        line = text[:core].ljust(core, "-")
+    else:
+        line = "-" * core
+    return "+" + line + "+"
+
+
+def _interior_spans(
+    width: int, text: str, role: str = ROLE_NORMAL
+) -> StyledLine:
+    """One bordered interior row: frame edges + content span."""
+    if width < 4:
+        return [(_fit(text, max(0, width)), role)]
+    core = width - 4
+    body = _fit(text, core).ljust(core)
+    return [("| ", ROLE_FRAME), (body, role), (" |", ROLE_FRAME)]
 
 
 @dataclasses.dataclass
@@ -183,6 +267,18 @@ def apply_line(state: TuiState, line: str) -> bool:
     return False
 
 
+def stage_role(state: TuiState, video_id: str, stage: str) -> str:
+    """Visual role of one stage cell: running/ok/failed/pending."""
+    if state.running.get(video_id) == stage:
+        return ROLE_RUNNING
+    value = state.stages.get(video_id, {}).get(stage, "pending")
+    if value == "pending":
+        return ROLE_PENDING
+    if value == "complete":
+        return ROLE_OK
+    return ROLE_FAILED
+
+
 def _stage_cell(state: TuiState, video_id: str, stage: str, width: int) -> str:
     if state.running.get(video_id) == stage:
         return "RUN".ljust(width)
@@ -194,34 +290,70 @@ def _stage_cell(state: TuiState, video_id: str, stage: str, width: int) -> str:
     return value[:width].ljust(width)
 
 
+def _dashboard_styled(
+    state: TuiState, *, now: float, width: int = 80, height: int = 24
+) -> list[StyledLine]:
+    """The structured dashboard as role-tagged spans (color-agnostic).
+
+    Layout: a header bar (run title + phase + elapsed), the per-id stage
+    matrix with state-colored cells, and a log panel. The plain-text
+    :func:`render_lines` and the curses drawer are both projections of
+    this single renderer, so colors and text can never diverge.
+    """
+    elapsed = state.elapsed(now)
+    left = " TikTok ingest :: live run "
+    right = f" elapsed {elapsed:5.1f}s "
+    gap = max(0, width - len(left) - len(right))
+    lines: list[StyledLine] = [
+        [(left + " " * gap + right, ROLE_HEADER)],
+        [
+            (
+                f" phase: {state.phase}    activity: "
+                f"{state.activity or '(idle)'}",
+                ROLE_NORMAL,
+            )
+        ],
+        [("-" * max(0, width), ROLE_FRAME)],
+    ]
+    id_width = max([len("id")] + [len(video_id) for video_id in state.ids])
+    header: StyledLine = [("id".ljust(id_width) + "  ", ROLE_FRAME)]
+    for name in STAGE_ORDER:
+        header.append((_STAGE_SHORT[name].ljust(6) + " ", ROLE_FRAME))
+    lines.append(header)
+    for video_id in state.ids:
+        spans: StyledLine = [(f"{video_id.ljust(id_width)}  ", ROLE_NORMAL)]
+        for name in STAGE_ORDER:
+            spans.append(
+                (
+                    _stage_cell(state, video_id, name, 6) + " ",
+                    stage_role(state, video_id, name),
+                )
+            )
+        lines.append(spans)
+    lines.append([("", ROLE_NORMAL)])
+    lines.append(
+        [(" log ", ROLE_FRAME), ("-" * max(0, width - 5), ROLE_FRAME)]
+    )
+    remaining = max(0, height - len(lines))
+    for entry in state.log[-remaining:] if remaining else []:
+        lines.append([(entry, ROLE_DIM)])
+    if height > 0:
+        lines = lines[:height]
+    return [
+        [(_fit(text, width), role) for text, role in line] for line in lines
+    ]
+
+
 def render_lines(
     state: TuiState, *, now: float, width: int = 80, height: int = 24
 ) -> list[str]:
-    """Pure dashboard renderer: a list of lines (testable without curses)."""
-    elapsed = state.elapsed(now)
-    lines: list[str] = [
-        f"TikTok ingest — live run    elapsed {elapsed:5.1f}s",
-        f"phase: {state.phase}    activity: {state.activity or '(idle)'}",
-        "",
-    ]
-    id_width = max([len("id")] + [len(video_id) for video_id in state.ids])
-    header = "id".ljust(id_width) + "  " + " ".join(
-        _STAGE_SHORT[name].ljust(6) for name in STAGE_ORDER
-    )
-    lines.append(header)
-    for video_id in state.ids:
-        cells = " ".join(
-            _stage_cell(state, video_id, name, 6) for name in STAGE_ORDER
+    """Plain-text projection of the dashboard (testable without curses)."""
+    return [
+        _fit("".join(text for text, _role in line), width)
+        for line in _dashboard_styled(
+            state, now=now, width=width, height=height
         )
-        lines.append(f"{video_id.ljust(id_width)}  {cells}")
-    lines.append("")
-    lines.append("log:")
-    remaining = max(0, height - len(lines))
-    for entry in state.log[-remaining:] if remaining else []:
-        lines.append(entry)
-    if height > 0:
-        lines = lines[:height]
-    return [_fit(line, width) for line in lines]
+    ]
 
 
 def compose_modal_lines(window: Any) -> list[str]:
@@ -238,11 +370,39 @@ class _ReadDenied(Exception):
     """EOF or a read error while reading a consent/readiness answer."""
 
 
-def _safe_addstr(window: Any, y: int, x: int, text: str) -> None:
+def _safe_addstr(window: Any, y: int, x: int, text: str, attr: int = 0) -> None:
     try:
-        window.addstr(y, x, text)
+        if attr:
+            window.addstr(y, x, text, attr)
+        else:
+            window.addstr(y, x, text)
+    except TypeError:
+        # A window double (or an exotic curses build) without the attr
+        # argument: draw the text monochrome rather than losing it.
+        try:
+            window.addstr(y, x, text)
+        except Exception:  # noqa: BLE001 - drawing must never crash the run
+            pass
     except Exception:  # noqa: BLE001 - drawing must never crash the run
         pass
+
+
+def _draw_styled(
+    window: Any,
+    styled: list[StyledLine],
+    attrs: dict[str, int],
+    height: int,
+    width: int,
+) -> None:
+    """Draw role-tagged spans row by row, applying palette attributes."""
+    for y, spans in enumerate(styled[:height]):
+        x = 0
+        for text, role in spans:
+            if not text or x >= width:
+                continue
+            piece = _fit(text, width - x)
+            _safe_addstr(window, y, x, piece, attrs.get(role, 0))
+            x += len(piece)
 
 
 def _key_to_char(key: Any) -> str | None:
@@ -274,15 +434,21 @@ class CursesConsentProvider(ConsentProvider):
         window: Any,
         keys: Iterator[Any] | None = None,
         now: Callable[[], float] | None = None,
+        attrs: dict[str, int] | None = None,
     ) -> None:
         self._window = window
         self._keys = keys
         self._now = now or time.monotonic
+        # ``attrs`` is injectable for tests; ``start`` passes the resolved
+        # palette. ``None``/``{}`` is the no-color degradation path.
+        self._attrs: dict[str, int] = dict(attrs) if attrs else {}
         self.state = TuiState(started=self._now())
         self._modal_body: list[str] | None = None
         self._modal_prompt = ""
         self._modal_buffer = ""
         self._modal_offset = 0
+        self._modal_title = ""
+        self._modal_footer = ""
         self._draw()
 
     # -- session surface ---------------------------------------------------
@@ -313,7 +479,7 @@ class CursesConsentProvider(ConsentProvider):
         except Exception:  # noqa: BLE001 - ANY failure means fallback
             _safe_endwin()
             return None
-        return cls(window=stdscr, now=now)
+        return cls(window=stdscr, now=now, attrs=init_palette())
 
     def close(self) -> None:
         try:
@@ -345,6 +511,10 @@ class CursesConsentProvider(ConsentProvider):
         self.state.note(f"consent requested: {window.kind}")
         self._modal_body = compose_modal_lines(window)
         self._modal_prompt = "authorize this window? [yes/no] "
+        self._modal_title = "AUTHORIZATION REQUIRED"
+        self._modal_footer = (
+            "type yes and press Enter to grant - any other answer denies"
+        )
         self._modal_buffer = ""
         self._modal_offset = 0
         self._draw()
@@ -384,6 +554,10 @@ class CursesConsentProvider(ConsentProvider):
             "press Enter to signal readiness (not an authorization)",
         ]
         self._modal_prompt = "[enter] "
+        self._modal_title = "READINESS CHECKPOINT"
+        self._modal_footer = (
+            "press Enter to signal readiness - a closed input denies"
+        )
         self._modal_buffer = ""
         self._modal_offset = 0
         self._draw()
@@ -459,14 +633,33 @@ class CursesConsentProvider(ConsentProvider):
         self._modal_prompt = ""
         self._modal_buffer = ""
         self._modal_offset = 0
+        self._modal_title = ""
+        self._modal_footer = ""
+
+    def _modal_scroll_max(self, height: int) -> int:
+        if self._modal_body is None:
+            return 0
+        content = self._modal_content()
+        viewport = max(1, height - 2)
+        if len(content) <= viewport:
+            return 0
+        # One interior row is reserved for the scroll hint.
+        return max(0, len(content) - (viewport - 1))
+
+    def _modal_content(self) -> list[str]:
+        assert self._modal_body is not None  # narrowing
+        return list(self._modal_body) + [
+            "",
+            self._modal_prompt + self._modal_buffer,
+        ]
 
     def _scroll(self, delta: int) -> None:
         if self._modal_body is None:
             return
         height, _width = self._window.getmaxyx()
-        body = self._modal_body + ["", self._modal_prompt + self._modal_buffer]
-        max_offset = max(0, len(body) - max(1, height - 1))
-        self._modal_offset = min(max(0, self._modal_offset + delta), max_offset)
+        self._modal_offset = min(
+            max(0, self._modal_offset + delta), self._modal_scroll_max(height)
+        )
         self._draw()
 
     # -- drawing -----------------------------------------------------------
@@ -482,41 +675,48 @@ class CursesConsentProvider(ConsentProvider):
         except Exception:  # noqa: BLE001
             pass
         if self._modal_body is not None:
-            lines = self._modal_frame(height, width)
+            styled = self._modal_frame_styled(height, width)
         else:
-            lines = render_lines(
+            styled = _dashboard_styled(
                 self.state, now=self._now(), width=width, height=height
             )
-        for y, line in enumerate(lines[:height]):
-            _safe_addstr(window, y, 0, _fit(line, width))
+        _draw_styled(window, styled, self._attrs, height, width)
         try:
             window.refresh()
         except Exception:  # noqa: BLE001
             pass
 
-    def _modal_frame(self, height: int, width: int) -> list[str]:
+    def _modal_frame_styled(self, height: int, width: int) -> list[StyledLine]:
+        """A bordered modal: title bar, full window text, key-hint footer.
+
+        The WHOLE window text stays reachable: on a short terminal the
+        interior scrolls (up/down) and the footer + hint stay fixed. The
+        frame is ASCII so it renders on any terminal encoding.
+        """
         assert self._modal_body is not None  # narrowing
-        body = list(self._modal_body) + [
-            "",
-            self._modal_prompt + self._modal_buffer,
-        ]
-        view = max(1, height - 1)
-        if len(body) <= height:
+        content = self._modal_content()
+        viewport = max(1, height - 2)
+        if len(content) <= viewport:
             self._modal_offset = 0
-            visible = body
+            visible = content
             hint = None
         else:
-            offset = min(self._modal_offset, max(0, len(body) - view))
+            offset = min(self._modal_offset, self._modal_scroll_max(height))
             self._modal_offset = offset
-            visible = body[offset : offset + view]
+            visible = content[offset : offset + max(0, viewport - 1)]
             hint = (
-                f"-- lines {offset + 1}-{offset + len(visible)}/{len(body)} "
-                "(up/down scroll) --"
+                f"lines {offset + 1}-{offset + len(visible)}/{len(content)} "
+                "(up/down)"
             )
-        result = [_fit(line, width) for line in visible]
+        lines: list[StyledLine] = [
+            [(_border(width, self._modal_title), ROLE_FRAME)]
+        ]
+        for line in visible:
+            lines.append(_interior_spans(width, line))
         if hint is not None:
-            result.append(_fit(hint, width))
-        return result
+            lines.append(_interior_spans(width, hint, ROLE_PENDING))
+        lines.append([(_border(width, self._modal_footer), ROLE_FRAME)])
+        return lines
 
 
 class FallbackSession:
@@ -595,7 +795,9 @@ __all__ = [
     "TuiState",
     "apply_line",
     "compose_modal_lines",
+    "init_palette",
     "render_lines",
+    "stage_role",
     "terminal_ui",
     "ui_supported",
 ]
