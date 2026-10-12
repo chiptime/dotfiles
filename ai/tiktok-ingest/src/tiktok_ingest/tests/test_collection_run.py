@@ -26,6 +26,7 @@ from __future__ import annotations
 import dataclasses
 import io
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -1895,6 +1896,55 @@ class TestProgress(CollectionRunTestCase):
         parsed = json.loads(json.dumps(report, default=str))
         self.assertEqual(parsed["mode"], "execute")
         self.assertIn("run_authorization", parsed)
+
+
+# --------------------------------------------------------------------------
+# Report persistence
+# --------------------------------------------------------------------------
+
+
+class TestReportPersistence(CollectionRunTestCase):
+    """A finished collection-run persists its report under the state root."""
+
+    REPORT_NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.json$")
+
+    def report_dir(self) -> Path:
+        return self.state.root / "reports" / REF.collection_key
+
+    def test_finished_run_persists_report_and_narrates_path(self) -> None:
+        seed_scan_for_run(self.state, [1, 2])
+        code, report, _ = self.run_collection(CollectionStages(), RecordingConsent())
+        self.assertEqual(code, 0, report.get("hard_stop_reason"))
+        directory = self.report_dir()
+        self.assertTrue(directory.is_dir(), "reports folder must exist")
+        files = sorted(directory.glob("*.json"))
+        self.assertEqual(len(files), 1, files)
+        saved = files[0]
+        self.assertRegex(saved.name, self.REPORT_NAME_RE.pattern)
+        # The saved file is the atomic JSON of the returned report.
+        on_disk = json.loads(saved.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["collection_key"], REF.collection_key)
+        self.assertEqual(on_disk["mode"], "execute")
+        self.assertEqual(
+            on_disk["batches"][0]["selected"][0]["id"],
+            report["batches"][0]["selected"][0]["id"],
+        )
+        # The saved path is narrated on the out channel (stderr in prod).
+        self.assertTrue(
+            any(str(saved) in message for message in self.messages), self.messages
+        )
+
+    def test_report_is_never_written_into_the_repository(self) -> None:
+        seed_scan_for_run(self.state, [1])
+        self.run_collection(CollectionStages(), RecordingConsent())
+        saved = next(self.report_dir().glob("*.json"))
+        self.assertTrue(str(saved).startswith(str(self.state.root)))
+        self.assertNotIn("/.dotfiles/", str(saved))
+
+    def test_dry_run_writes_no_report(self) -> None:
+        seed_scan_for_run(self.state, [1])
+        self.run_collection(CollectionStages(), RecordingConsent(), dry_run=True)
+        self.assertFalse((self.state.root / "reports").exists())
 
 
 # --------------------------------------------------------------------------

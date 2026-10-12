@@ -21,9 +21,15 @@ restated):
   ``verification.json`` and the emitted backlog entry.
 - A fired gate is final: no automatic retry, no continued GPU load. A
   new invocation is a new authorization window (GateLedger semantics).
-- Whisper is an operator-managed shared service: never started, stopped
-  or restored here. Vision requires it stopped; audio requires it
-  healthy. Both preconditions are surfaced as explicit blocks.
+- Whisper is a shared service this coordinator only manages through
+  the optional lifecycle hooks (identity-verified, bounded stop before
+  vision, verified restore under a standing authorization asked BEFORE
+  the stop). When those hooks are absent the documented standalone
+  behavior holds: the read-only stopped-check passes or vision is
+  blocked with the operator instruction. The ``guided-run`` CLI always
+  supplies the hooks (:func:`whisper_coordinated_stage_functions`), so
+  a running KNOWN service is coordinated automatically; programmatic
+  callers keep the operator-managed default.
 - The guided command never edits ``backlog.jsonl`` statuses and never
   writes the blocklist; ``verify`` appends ``pending`` entries exactly
   as it does today (duplicate-guarded). Review stays with the existing
@@ -59,12 +65,13 @@ from .contracts import JobManifest, ProcessedEntry, utc_now_iso
 from .ollama_runtime import start_server, stop_server, wait_ready
 from .pipeline import fetch_url
 from .prepare import prepare_video
-from .runtime import subprocess_runner
+from .runtime import Runner, subprocess_runner
 from .state import Blocklist, Processed, StateRoot
 from .synthesis import SynthesisDocument, run_synthesis_stage
 from .verify import run_verify_stage
 from .vision import assert_whisper_stopped, query_gpu, run_vision_stage
 from .whisper_client import health_precheck, run_audio_stage
+from .whisper_lifecycle import inspect_whisper, restore_whisper, stop_whisper
 
 # The canonical order this coordinator drives. "emit" is displayed but
 # performed inside the verify stage (duplicate-guarded backlog append).
@@ -128,6 +135,43 @@ class ConsentWindow:
         return dataclasses.asdict(self)
 
 
+# Every label in a rendered consent block is padded to this width so the
+# aligned colon column reads as a single table.
+CONSENT_LABEL_WIDTH = len("destinations")
+
+
+def render_consent_window(window: ConsentWindow) -> str:
+    """The aligned, multi-line consent block shown BEFORE any effect.
+
+    The first line is the window's one-line intent (its ``title``); the
+    existing ids/destinations/operations/limits/effects follow as
+    aligned, indented lists. Display-only: it grants nothing and carries
+    no authority. Keeping it a pure function of the window makes the
+    prompt deterministic and testable independently of the console.
+    """
+
+    def label(name: str) -> str:
+        return name.ljust(CONSENT_LABEL_WIDTH)
+
+    lines = ["== AUTHORIZATION REQUIRED ==", f"{label('intent')}: {window.title}"]
+    if window.ids:
+        lines.append(f"{label('ids')}: " + ", ".join(window.ids))
+
+    def section(name: str, values: Sequence[str]) -> None:
+        lines.append(f"{label(name)}:")
+        lines.extend(f"    - {value}" for value in values)
+
+    if window.destinations:
+        section("destinations", window.destinations)
+    if window.operations:
+        section("operations", window.operations)
+    if window.limits:
+        section("limits", window.limits)
+    if window.effects:
+        section("effects", window.effects)
+    return "\n".join(lines)
+
+
 class ConsentProvider:
     """Authorization source. ``ask`` returns True ONLY on explicit grant.
 
@@ -170,40 +214,38 @@ class ConsoleConsentProvider(ConsentProvider):
         )
 
     def ask(self, window: ConsentWindow) -> bool:
-        lines = [f"== authorization required: {window.title} =="]
-        if window.ids:
-            lines.append("  ids: " + ", ".join(window.ids))
-        if window.destinations:
-            lines.append("  destinations:")
-            lines.extend(f"    - {d}" for d in window.destinations)
-        if window.operations:
-            lines.append("  operations:")
-            lines.extend(f"    - {op}" for op in window.operations)
-        if window.limits:
-            lines.append("  limits:")
-            lines.extend(f"    - {lim}" for lim in window.limits)
-        if window.effects:
-            lines.append("  effects:")
-            lines.extend(f"    - {eff}" for eff in window.effects)
-        self._out("\n".join(lines))
+        self._out(render_consent_window(window))
         stream = self._stdin if self._stdin is not None else sys.stdin
         if self._stdin is None and not stream.isatty():
             self._out(
                 "refused: non-interactive environment; consent is never "
-                "assumed (re-run from a terminal or use --dry-run)"
+                "assumed — nothing ran (re-run from a terminal or use "
+                "--dry-run)"
             )
             return False
         try:
             self._out("authorize this window? [yes/no]", end=" ")
             answer = stream.readline()
         except OSError as exc:
-            self._out(f"refused: could not read authorization ({exc})")
+            self._out(
+                f"refused: could not read authorization ({exc}); nothing "
+                "ran and consent is never assumed"
+            )
             return False
         if not answer:
-            self._out("refused: end of input; consent is never assumed")
+            self._out(
+                'refused: end of input; consent is never assumed — nothing '
+                'ran for "' + window.title + '"'
+            )
             return False
         granted = answer.strip().lower() in ("yes", "y")
-        self._out("granted" if granted else "denied — stopping before this window")
+        if granted:
+            self._out("granted")
+        else:
+            self._out(
+                'denied: nothing ran for "' + window.title + '" — stopping '
+                "before this window"
+            )
         return granted
 
     def await_readiness(self, prompt: str) -> bool:
@@ -372,6 +414,99 @@ def default_stage_functions() -> StageFunctions:
         ollama_stop=lambda handle: stop_server(handle),
         gpu_free_mib=lambda: query_gpu(subprocess_runner).free_mib,
     )
+
+
+def whisper_coordinated_stage_functions(
+    *, runner: Runner = subprocess_runner
+) -> StageFunctions:
+    """Production stages WITH the Phase 0 whisper lifecycle hooks.
+
+    This is what the ``guided-run`` CLI uses so it coordinates the KNOWN
+    shared whisper service exactly like ``collection-run`` already does:
+    when vision needs the GPU and that service is running, its identity
+    is verified read-only, the bounded stop runs only behind its TWO
+    explicit consent windows (``whisper-stop`` plus the STANDING
+    ``whisper-restore`` authorization asked BEFORE the stop), and the
+    same service is restored and health-checked afterwards — on success,
+    failure and interruption alike, with UNKNOWN semantics when the stop
+    or restore itself is interrupted. It adds NO new authority: the
+    hooks are the existing :mod:`tiktok_ingest.whisper_lifecycle`
+    functions and the coordinator keeps its fail-closed rules. The
+    programmatic default (:func:`default_stage_functions`) stays
+    operator-managed for callers that do not opt in.
+    """
+    return dataclasses.replace(
+        default_stage_functions(),
+        whisper_inspect=lambda: inspect_whisper(runner),
+        whisper_stop=lambda info: stop_whisper(info, runner=runner),
+        whisper_restore=lambda info: restore_whisper(info, runner=runner),
+    )
+
+
+# The stages narrated around each real call when ``guided-run`` opts into
+# per-stage progress (start line, finish line with the ACTUAL outcome and
+# measured duration). Synthesis is included: the validated-document
+# ingestion is a real stage call in the standalone guided flow.
+NARRATED_STAGES: tuple[str, ...] = (
+    "fetch",
+    "prepare",
+    "vision",
+    "audio",
+    "synthesize",
+    "verify",
+)
+
+
+def narrate_stages(
+    stages: StageFunctions,
+    out: Callable[[str], None],
+    *,
+    monotonic: Callable[[], float] | None = None,
+    names: tuple[str, ...] = NARRATED_STAGES,
+) -> StageFunctions:
+    """Wrap each stage call with stderr-only start/finish progress.
+
+    A start line before the call and a finish line on return with the
+    ACTUAL outcome, the reuse flag and the measured duration; a raised
+    exception is narrated with its type and re-raised unchanged. Long
+    calls stay silent between their start and finish lines — no heartbeat
+    or percentage is ever fabricated. Only narration is added: the stage
+    semantics, gates, fingerprints and results are untouched. ``names``
+    selects which stages are wrapped, so the Phase 0 application layer
+    can narrate its own stage set (the synthesis boundary narrates
+    itself) while ``guided-run`` narrates every stage.
+    """
+    now = monotonic or time.monotonic
+
+    def wrap(name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
+        def narrated(first: str, state: StateRoot, *rest: Any) -> Any:
+            # fetch receives the canonical URL; its last path segment is
+            # the video id. Every other stage receives the id directly.
+            label = first.rsplit("/", 1)[-1] if name == "fetch" else first
+            out(f"stage {name} start: {label}")
+            started = now()
+            try:
+                outcome = fn(first, state, *rest)
+            except BaseException as exc:
+                out(
+                    f"stage {name} finish: {label} raised "
+                    f"{type(exc).__name__} after {now() - started:.1f}s"
+                )
+                raise
+            value = getattr(outcome, "outcome", outcome)
+            reused = bool(getattr(outcome, "reused", False))
+            out(
+                f"stage {name} finish: {label} {value} "
+                f"(reused={reused}, {now() - started:.1f}s)"
+            )
+            return outcome
+
+        return narrated
+
+    replacements = {
+        name: wrap(name, getattr(stages, name)) for name in names
+    }
+    return dataclasses.replace(stages, **replacements)
 
 
 # --------------------------------------------------------------------------
@@ -2017,8 +2152,11 @@ __all__ = [
     "StageFunctions",
     "default_stage_functions",
     "derive_item_stages",
+    "narrate_stages",
     "parse_synthesis_args",
+    "render_consent_window",
     "run_guided",
     "select_from_plan",
     "select_ids",
+    "whisper_coordinated_stage_functions",
 ]

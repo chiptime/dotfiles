@@ -107,9 +107,16 @@ from .guided import (
     _run_dir_of,
     default_stage_functions,
     derive_item_stages,
+    narrate_stages,
     select_ids,
 )
-from .state import Backlog, Processed, StateRoot, atomic_write_bytes
+from .state import (
+    Backlog,
+    Processed,
+    StateRoot,
+    atomic_write_bytes,
+    atomic_write_json,
+)
 from .swap_cooldown import (
     SwapCooldownMeasurementError,
     SwapQuietWatcher,
@@ -810,6 +817,17 @@ class RunScopedAuthorization(ConsentProvider):
         return granted
 
 
+# The Phase 0 narration stage set: the synthesis boundary narrates itself
+# through the auto-synthesizer, so it is deliberately not wrapped here.
+_PHASE0_NARRATED_STAGES: tuple[str, ...] = (
+    "fetch",
+    "prepare",
+    "vision",
+    "audio",
+    "verify",
+)
+
+
 def _narrated_stages(
     stages: StageFunctions,
     out: Callable[[str], None],
@@ -818,46 +836,11 @@ def _narrated_stages(
 ) -> StageFunctions:
     """Progress narration around each REAL stage call (stderr only).
 
-    A start line before the call and a finish line on return with the
-    ACTUAL outcome, the reuse flag and the measured duration; an
-    exception is narrated with its type and re-raised. Long calls stay
-    silent between their start and finish lines — no heartbeat or
-    percentage is ever fabricated.
+    Thin delegate to :func:`guided.narrate_stages` with the Phase 0 stage
+    set, so the narration contract lives in exactly one place.
     """
-    now = monotonic or time.monotonic
-
-    def wrap(name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
-        def narrated(first: str, state: StateRoot, *rest: Any) -> Any:
-            # fetch receives the canonical URL; its last path segment is
-            # the video id. Every other stage receives the id directly.
-            label = first.rsplit("/", 1)[-1] if name == "fetch" else first
-            out(f"stage {name} start: {label}")
-            started = now()
-            try:
-                outcome = fn(first, state, *rest)
-            except BaseException as exc:
-                out(
-                    f"stage {name} finish: {label} raised "
-                    f"{type(exc).__name__} after {now() - started:.1f}s"
-                )
-                raise
-            value = getattr(outcome, "outcome", outcome)
-            reused = bool(getattr(outcome, "reused", False))
-            out(
-                f"stage {name} finish: {label} {value} "
-                f"(reused={reused}, {now() - started:.1f}s)"
-            )
-            return outcome
-
-        return narrated
-
-    return dataclasses.replace(
-        stages,
-        fetch=wrap("fetch", stages.fetch),
-        prepare=wrap("prepare", stages.prepare),
-        vision=wrap("vision", stages.vision),
-        audio=wrap("audio", stages.audio),
-        verify=wrap("verify", stages.verify),
+    return narrate_stages(
+        stages, out, monotonic=monotonic, names=_PHASE0_NARRATED_STAGES
     )
 
 
@@ -2151,6 +2134,22 @@ def _refresh_batch_report(state: StateRoot, batch: dict[str, Any]) -> None:
     batch["waiting_for_synthesis"] = waiting
 
 
+def _persist_report(state: StateRoot, report: dict[str, Any]) -> Path:
+    """Persist one finished run's report under the state root, atomically.
+
+    Reports land under ``<state_root>/reports/<collection_key>/`` named by a
+    UTC timestamp consistent with the run directories
+    (``2026-10-12T09-55-16Z``). The state root is the ONLY destination, so a
+    report is never written inside the repository. The atomic writer leaves
+    no partial file on failure.
+    """
+    collection_key = str(report["collection_key"])
+    timestamp = utc_now_iso().replace(":", "-")
+    path = state.root / "reports" / collection_key / f"{timestamp}.json"
+    atomic_write_json(path, report)
+    return path
+
+
 def run_collection(
     *,
     collection_url: str,
@@ -2265,9 +2264,11 @@ def run_collection(
     except PlaywrightMissingError as exc:
         report["hard_stop_reason"] = f"preflight: {exc}"
         report["batches"] = []
+        out(f"collection-run report saved: {_persist_report(state, report)}")
         return 1, report
     except BrowserInventoryError as exc:
         report["hard_stop_reason"] = f"browser inventory did not run: {exc}"
+        out(f"collection-run report saved: {_persist_report(state, report)}")
         return 1, report
 
     # Phase 2: freeze the inventory, bind the whisper identity read-only
@@ -2503,6 +2504,7 @@ def run_collection(
         "honestly; claim verdict 'confirmed' can only come from the "
         "verification matrix"
     )
+    out(f"collection-run report saved: {_persist_report(state, report)}")
     return exit_code, report
 
 

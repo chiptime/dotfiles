@@ -46,6 +46,7 @@ class ParserTests(unittest.TestCase):
                 "backlog-apply",
                 "guided-run",
                 "collection-run",
+                "summary",
             },
         )
 
@@ -293,6 +294,99 @@ class CollectionRunDispatchTests(unittest.TestCase):
         self.assertIn("preflight", document)
         # Dry run writes nothing: the state root is never created.
         self.assertFalse(Path(self.state_root).exists())
+
+
+class GuidedRunDispatchTests(unittest.TestCase):
+    """guided-run dispatch: whisper lifecycle wiring and stderr-only UX."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.state_root = Path(self._tmp.name) / "state"
+
+    def _main(self, argv: list[str]) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = main(argv)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_guided_run_wires_whisper_lifecycle_stages(self) -> None:
+        with mock.patch(
+            "tiktok_ingest.cli.run_guided", return_value=(0, {"mode": "execute"})
+        ) as run:
+            code, _, _ = self._main(
+                [
+                    "guided-run",
+                    "--ids",
+                    "2000000000000000001",
+                    "--state-root",
+                    str(self.state_root),
+                ]
+            )
+        self.assertEqual(code, 0)
+        stages = run.call_args.kwargs["stages"]
+        self.assertTrue(stages.whisper_lifecycle_ready())
+        self.assertIsNotNone(stages.whisper_inspect)
+        self.assertIsNotNone(stages.whisper_stop)
+        self.assertIsNotNone(stages.whisper_restore)
+
+    def test_guided_run_keeps_stdout_json_and_summarizes_on_stderr(self) -> None:
+        report = {
+            "mode": "execute",
+            "state_root": str(self.state_root),
+            "selected": [
+                {
+                    "id": "2000000000000000001",
+                    "classification": "new_processable",
+                    "canonical_url": (
+                        "https://www.tiktok.com/@fixture/video/2000000000000000001"
+                    ),
+                    "stages": {
+                        "fetch": "complete",
+                        "prepare": "complete",
+                        "audio": "complete",
+                        "vision": "pending",
+                        "synthesis": "pending",
+                        "verify": "pending",
+                    },
+                    "run_dir": None,
+                }
+            ],
+        }
+        with mock.patch("tiktok_ingest.cli.run_guided", return_value=(0, report)):
+            code, out, err = self._main(
+                [
+                    "guided-run",
+                    "--ids",
+                    "2000000000000000001",
+                    "--state-root",
+                    str(self.state_root),
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["mode"], "execute")
+        # The readable summary is stderr-only: header + derived next step.
+        self.assertIn("next", err)
+        self.assertIn("vision pending (audio saved)", err)
+        self.assertIn("2000000000000000001", err)
+
+    def test_guided_run_dry_run_skips_end_of_run_summary(self) -> None:
+        with mock.patch(
+            "tiktok_ingest.cli.run_guided", return_value=(0, {"mode": "dry-run"})
+        ) as run:
+            code, out, err = self._main(
+                [
+                    "guided-run",
+                    "--ids",
+                    "2000000000000000001",
+                    "--dry-run",
+                    "--state-root",
+                    str(self.state_root),
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue(run.call_args.kwargs["dry_run"])
+        self.assertNotIn("next", err)
 
 
 if __name__ == "__main__":  # pragma: no cover

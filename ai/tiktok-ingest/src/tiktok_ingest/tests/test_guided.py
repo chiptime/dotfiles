@@ -1921,5 +1921,164 @@ class TestCliWiring(GuidedTestCase):
         self.assertIn("expected ID=PATH", err)
 
 
+# --------------------------------------------------------------------------
+# Terminal UX: aligned consent prompts and per-stage narration
+# --------------------------------------------------------------------------
+
+
+class TestConsentPromptFormatting(unittest.TestCase):
+    def _window(self) -> ConsentWindow:
+        return ConsentWindow(
+            kind="fetch",
+            title="network download of the selected TikTok URLs",
+            ids=("1", "2"),
+            destinations=("https://example.test/v/1",),
+            operations=("download exactly the listed URLs",),
+            limits=("30s per clip",),
+            effects=("writes media into the local cache",),
+        )
+
+    def test_intent_line_is_the_one_line_summary(self) -> None:
+        rendered = guided.render_consent_window(self._window())
+        first, second = rendered.splitlines()[:2]
+        self.assertEqual(first, "== AUTHORIZATION REQUIRED ==")
+        self.assertEqual(
+            second,
+            "intent      : network download of the selected TikTok URLs",
+        )
+
+    def test_every_label_colon_lands_on_one_aligned_column(self) -> None:
+        rendered = guided.render_consent_window(self._window())
+        label_lines = [
+            line
+            for line in rendered.splitlines()
+            if line and not line.startswith((" ", "="))
+        ]
+        self.assertTrue(label_lines)
+        for line in label_lines:
+            self.assertEqual(line.index(":"), guided.CONSENT_LABEL_WIDTH)
+
+    def test_all_existing_sections_are_still_shown(self) -> None:
+        rendered = guided.render_consent_window(self._window())
+        for section in ("intent", "ids", "destinations", "operations", "limits", "effects"):
+            self.assertIn(f"{section.ljust(guided.CONSENT_LABEL_WIDTH)}:", rendered)
+        self.assertIn("    - https://example.test/v/1", rendered)
+        self.assertIn("    - 30s per clip", rendered)
+        self.assertIn("ids         : 1, 2", rendered)
+
+    def test_denial_message_is_clear_and_names_the_window(self) -> None:
+        lines: list[str] = []
+        provider = ConsoleConsentProvider(
+            stdin=io.StringIO("no\n"), out=lambda *a, **k: lines.append(a[0])
+        )
+        self.assertFalse(provider.ask(self._window()))
+        denial = lines[-1]
+        self.assertIn("denied", denial)
+        self.assertIn("nothing ran", denial)
+        self.assertIn("network download of the selected TikTok URLs", denial)
+
+    def test_non_interactive_message_says_nothing_ran(self) -> None:
+        class NonTTY:
+            def isatty(self) -> bool:
+                return False
+
+            def readline(self) -> str:  # pragma: no cover - never reached
+                return "yes\n"
+
+        import sys as _sys
+
+        original = _sys.stdin
+        _sys.stdin = NonTTY()
+        try:
+            lines: list[str] = []
+            provider = ConsoleConsentProvider(out=lambda *a, **k: lines.append(a[0]))
+            self.assertFalse(provider.ask(self._window()))
+        finally:
+            _sys.stdin = original
+        self.assertTrue(any("non-interactive" in line for line in lines))
+        self.assertTrue(any("consent is never assumed" in line for line in lines))
+
+
+class TestStageNarration(unittest.TestCase):
+    def _narrated(self, fn, out, clock) -> guided.StageFunctions:
+        base = FakeStages().functions()
+        stages = dataclasses.replace(
+            base,
+            fetch=fn,
+            prepare=fn,
+            vision=fn,
+            audio=fn,
+            synthesize=fn,
+            verify=fn,
+        )
+        return guided.narrate_stages(stages, out, monotonic=clock)
+
+    def test_start_and_finish_lines_carry_outcome_and_elapsed(self) -> None:
+        def fetch(first, state, *rest):
+            return FakeOutcome("complete", "ok", reused=True)
+
+        ticks = iter([100.0, 101.5, 200.0, 200.25])
+        lines: list[str] = []
+        narrated = self._narrated(fetch, lines.append, lambda: next(ticks))
+        narrated.fetch("https://www.tiktok.com/@a/video/999", None)
+        narrated.synthesize("999", None, None)
+        self.assertEqual(lines[0], "stage fetch start: 999")
+        self.assertEqual(
+            lines[1], "stage fetch finish: 999 complete (reused=True, 1.5s)"
+        )
+        self.assertEqual(lines[2], "stage synthesize start: 999")
+        self.assertEqual(
+            lines[3], "stage synthesize finish: 999 complete (reused=True, 0.2s)"
+        )
+
+    def test_exception_finish_line_is_narrated_and_reraised(self) -> None:
+        def boom(first, state, *rest):
+            raise RuntimeError("no network")
+
+        ticks = iter([5.0, 5.5])
+        lines: list[str] = []
+        narrated = self._narrated(boom, lines.append, lambda: next(ticks))
+        with self.assertRaises(RuntimeError):
+            narrated.fetch("https://www.tiktok.com/@a/video/123", None)
+        self.assertEqual(lines[0], "stage fetch start: 123")
+        self.assertEqual(
+            lines[1], "stage fetch finish: 123 raised RuntimeError after 0.5s"
+        )
+
+    def test_narration_preserves_the_returned_outcome(self) -> None:
+        sentinel = FakeOutcome("complete", "ok", reused=False)
+
+        def fetch(first, state, *rest):
+            return sentinel
+
+        lines: list[str] = []
+        narrated = self._narrated(fetch, lines.append, lambda: 0.0)
+        self.assertIs(narrated.fetch("https://www.tiktok.com/@a/video/1", None), sentinel)
+
+
+class TestWhisperCoordinatedStageFunctions(unittest.TestCase):
+    def test_hooks_are_all_present_and_lifecycle_ready(self) -> None:
+        stages = guided.whisper_coordinated_stage_functions(
+            runner=lambda args: (0, "", "")
+        )
+        self.assertTrue(stages.whisper_lifecycle_ready())
+
+    def test_standalone_default_has_no_hooks(self) -> None:
+        self.assertFalse(guided.default_stage_functions().whisper_lifecycle_ready())
+
+    def test_inspect_delegates_to_the_injected_runner(self) -> None:
+        calls: list[list[str]] = []
+
+        def runner(args):
+            calls.append(args)
+            return 1, "", "no such container"
+
+        stages = guided.whisper_coordinated_stage_functions(runner=runner)
+        self.assertIsNone(stages.whisper_inspect())
+        self.assertEqual(
+            calls, [["podman", "inspect", "voice-assistant-whisper"]]
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
