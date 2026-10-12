@@ -207,6 +207,28 @@ class ConsentSemanticsTests(unittest.TestCase):
         provider, _ = _provider([ord("Y"), ord("E"), ord("S"), ENTER])
         self.assertTrue(provider.ask(_window()))
 
+    def test_ask_ignores_a_resize_event(self) -> None:
+        # A terminal resize (curses KEY_RESIZE, e.g. attaching the tmux
+        # client) must never be folded into the answer: chr(KEY_RESIZE) is
+        # printable ("ƚ") and would corrupt a valid "yes" into a denial.
+        keys = [tui.curses.KEY_RESIZE, ord("y"), ord("e"), ord("s"), ENTER]
+        provider, _ = _provider(keys)
+        self.assertTrue(provider.ask(_window()))
+
+    def test_ask_grants_with_resize_between_every_key(self) -> None:
+        keys = [
+            tui.curses.KEY_RESIZE,
+            ord("y"),
+            tui.curses.KEY_RESIZE,
+            ord("e"),
+            tui.curses.KEY_RESIZE,
+            ord("s"),
+            tui.curses.KEY_RESIZE,
+            ENTER,
+        ]
+        provider, _ = _provider(keys)
+        self.assertTrue(provider.ask(_window()))
+
     def test_ask_denies_on_no(self) -> None:
         provider, _ = _provider([ord("n"), ord("o"), ENTER])
         self.assertFalse(provider.ask(_window()))
