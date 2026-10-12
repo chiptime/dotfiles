@@ -1516,6 +1516,136 @@ class TestWhisperCoordination(CollectionRunTestCase):
         self.assertIn("no rollback", notes)
 
 
+def _retry_journey_stages(clock: Any, **kw: Any) -> Any:
+    """A retry-journey double whose whisper stop consumes real (fake) time.
+
+    Advancing the injected clock inside the stop makes the post-stop
+    transition sample take a genuine reading, so a scripted counter
+    failure lands exactly where the re-admission left the shared service
+    stopped.
+    """
+    from tiktok_ingest.tests.test_swap_retry import RetryCollectionStages
+
+    class ClockAdvancingStop(RetryCollectionStages):
+        def do_whisper_stop(self, info: WhisperServiceInfo) -> WhisperServiceInfo:
+            clock.sleep(1.0)
+            return super().do_whisper_stop(info)
+
+    return ClockAdvancingStop(**kw)
+
+
+class TestRetryWindowWhisperRestore(CollectionRunTestCase):
+    """A retry-window end after the re-admission stop must restore Whisper.
+
+    The re-admission stops the SAME known service under the retry
+    authority. When the window then ends for ANY reason — here an
+    unreadable/implausible swap counter at the post-stop transition
+    sample — the service must be restored under that same authority
+    before the failure is reported: never left stopped behind a normal
+    window end, and never a spurious hard stop in a later window.
+    """
+
+    def _run_journey(
+        self,
+        stages: Any,
+        vmstat: Any,
+        clock: Any,
+        *,
+        video_ns: list[int] | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        seed_scan_for_run(self.state, list(video_ns or [1, 2]))
+        count = len(video_ns or [1, 2])
+        controller = FakeBrowserController(page_html(count))
+        transport = FakeApiTransport(
+            [FakeApiResponse(sample_synthesis_document()) for _ in range(50)]
+        )
+        consent = RecordingConsent()
+        code, report = collection_run.run_collection(
+            collection_url=COLLECTION_URL,
+            state=self.state,
+            consent=consent,
+            out=self.messages.append,
+            browser_controller=controller,
+            browser_profile_base=self.profile_base,
+            api_transport=transport,
+            env=dict(API_ENV),
+            podman_runner=lambda argv, timeout=None: (0, "", ""),
+            stages=stages.functions(),
+            swap_retry_monotonic=clock,
+            swap_retry_sleep=clock.sleep,
+            swap_retry_vmstat_fn=vmstat,
+        )
+        return code, report
+
+    def _run_handled_measurement_error(self) -> tuple[Any, int, dict[str, Any]]:
+        from tiktok_ingest.tests.test_swap_retry import (
+            FakeClock, ScriptedVmstat,
+        )
+
+        mib = 1024 * 1024
+        clock = FakeClock()
+        stages = _retry_journey_stages(
+            clock, whisper_running=True, vision_outcomes=["failed"]
+        )
+        # 12 quiet cooldown intervals admit the retry; the post-stop
+        # transition reading then reports a DECREASING cumulative counter
+        # (a handled measurement failure, distinct from expiry).
+        vmstat = ScriptedVmstat(deltas=[0.4 * mib] * 13 + [-5 * mib])
+        code, report = self._run_journey(stages, vmstat, clock)
+        return stages, code, report
+
+    def test_retry_window_handled_measurement_error_restores_whisper(self) -> None:
+        stages, code, report = self._run_handled_measurement_error()
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            report["swap_retries"][0]["state"], "measurement_unavailable"
+        )
+        # The re-admission stopped the service; the handled measurement
+        # failure must NOT leave it stopped: it is restored under the
+        # retry authority (vision-window restore + retry-window restore).
+        self.assertEqual(stages.whisper_stops, 2)
+        self.assertEqual(stages.whisper_restores, 2)
+        self.assertTrue(stages.whisper_running)
+        # No spurious hard stop: the service is back, so later windows run.
+        self.assertIsNone(report["hard_stop_reason"])
+
+    def test_retry_window_handled_error_does_not_spuriously_hard_stop(self) -> None:
+        # Regression: the run that left the service stopped would make a
+        # later window's pre-retry whisper verification hard-stop with
+        # "the known whisper service is not running after the batch
+        # cycle". With the restore running, that spurious hard stop never
+        # appears.
+        stages, _code, report = self._run_handled_measurement_error()
+        self.assertIsNone(
+            report["hard_stop_reason"],
+            "a restored service must never produce the "
+            "'not running after the batch cycle' hard stop",
+        )
+        self.assertTrue(stages.whisper_running)
+
+    def test_retry_window_interrupt_after_stop_restores_whisper(self) -> None:
+        from tiktok_ingest.tests.test_swap_retry import FakeClock, ScriptedVmstat
+
+        class InterruptTransition(ScriptedVmstat):
+            def __call__(self) -> Any:
+                if self.calls == 13:  # the post-stop transition reading
+                    raise KeyboardInterrupt()
+                return super().__call__()
+
+        mib = 1024 * 1024
+        clock = FakeClock()
+        stages = _retry_journey_stages(
+            clock, whisper_running=True, vision_outcomes=["failed"]
+        )
+        vmstat = InterruptTransition(deltas=[0.4 * mib] * 13)
+        _code, report = self._run_journey(stages, vmstat, clock)
+        self.assertTrue(report["interrupted"])
+        # The verified stop is restored under the retry authority even
+        # though the run is interrupted.
+        self.assertEqual(stages.whisper_restores, 2)
+        self.assertTrue(stages.whisper_running)
+
+
 # --------------------------------------------------------------------------
 # Synthesis API coordination
 # --------------------------------------------------------------------------

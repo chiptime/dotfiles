@@ -1468,7 +1468,20 @@ def _swap_retry_readmission(
     # mutation drift (the pre-stop stable windows never guaranteed
     # post-change conditions), resetting the stability count inside the
     # SAME cap.
-    transition_sample = watcher.sample_transition("post_stop")
+    try:
+        transition_sample = watcher.sample_transition("post_stop")
+    except (SwapCooldownMeasurementError, KeyboardInterrupt):
+        # The stop above is VERIFIED, so the shared service is in a KNOWN
+        # stopped state. A handled post-stop measurement failure or an
+        # interrupt here must never leave it stopped behind a normal
+        # window end: restore the SAME service under the retry authority
+        # first (no replay of the start attempt), then let the original
+        # failure propagate with its honest terminal state.
+        _restore_whisper_after_drift(
+            stages, current, now=now, do_sleep=do_sleep,
+            context="a post-stop swap measurement failure at re-admission",
+        )
+        raise
     samples.append(transition_sample.to_dict())
     if (
         transition_sample.rate_bytes_per_s is not None
