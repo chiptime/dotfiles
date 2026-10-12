@@ -480,8 +480,15 @@ class RunPlan:
     whisper_info: Any = None
 
 
-def build_run_plan_window(plan: RunPlan) -> ConsentWindow:
-    """Human decision 2: accept the WHOLE current run exactly as named."""
+def build_run_plan_window(
+    plan: RunPlan, *, sequence: str | None = None
+) -> ConsentWindow:
+    """Human decision 2: accept the WHOLE current run exactly as named.
+
+    ``sequence`` lets a caller name its own honest stage order (guided-run
+    processes one id at a time) instead of the Phase 0 phase-first text;
+    the default keeps collection-run's wording unchanged.
+    """
     destinations: list[str] = [
         plan.canonical_urls.get(video_id, f"(no canonical URL recorded for {video_id})")
         for video_id in plan.frozen_ids
@@ -503,11 +510,14 @@ def build_run_plan_window(plan: RunPlan) -> ConsentWindow:
                 "(reused as-is, never repeated)"
             )
     operations: tuple[str, ...] = (
-        "process exactly the frozen ids above through preparation ALL -> "
-        "audio ALL -> vision ALL -> eligible synthesis ALL -> grouped verify; "
-        f"fixed resource slices of at most {plan.batch_cap} "
-        f"({plan.batch_count} slice(s)) are visited once per phase, not "
-        "complete-pipeline batches",
+        sequence
+        or (
+            "process exactly the frozen ids above through preparation ALL -> "
+            "audio ALL -> vision ALL -> eligible synthesis ALL -> grouped verify; "
+            f"fixed resource slices of at most {plan.batch_cap} "
+            f"({plan.batch_count} slice(s)) are visited once per phase, not "
+            "complete-pipeline batches"
+        ),
         "gated pinned-extractor download of exactly the frozen canonical "
         "URLs listed above (oEmbed metadata per URL), CPU preparation in "
         "the pinned container, GPU vision (isolated Ollama lifecycle + "

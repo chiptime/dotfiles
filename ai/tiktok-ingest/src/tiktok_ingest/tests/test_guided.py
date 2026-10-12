@@ -22,9 +22,11 @@ from typing import Any
 from tiktok_ingest import config, guided
 from tiktok_ingest.collection import (
     CollectionScanStore,
+    build_collection_plan,
     extract_page_items,
     merge_observation,
     parse_collection_url,
+    resolve_collection,
     sync_inventory_from_scan,
 )
 from tiktok_ingest.contracts import (
@@ -387,18 +389,64 @@ class GuidedTestCase(unittest.TestCase):
         limit: int | None = None,
     ) -> tuple[int, dict[str, Any], list[str]]:
         messages: list[str] = []
-        exit_code, report = run_guided(
-            state=self.state,
-            collection=collection,
-            ids=ids,
-            limit=limit,
-            synthesis=synthesis,
-            dry_run=dry_run,
+        if dry_run:
+            exit_code, report = run_guided(
+                state=self.state,
+                collection=collection,
+                ids=ids,
+                limit=limit,
+                synthesis=synthesis,
+                dry_run=True,
+                stages=stages.functions(),
+                consent=consent,
+                out=messages.append,
+            )
+            return exit_code, report, messages
+        # Non-dry-run coordination is exercised at the GuidedRun engine
+        # seam directly, so every per-window script below keeps testing the
+        # contract it always did. The production run-plan single-consent
+        # wrapper that run_guided now adds on top is covered separately by
+        # TestGuidedRunSingleConsent.
+        selection = self._engine_selection(collection, ids, limit)
+        runner = guided.GuidedRun(
+            self.state,
             stages=stages.functions(),
             consent=consent,
             out=messages.append,
         )
+        report = runner.execute(selection, synthesis_docs=dict(synthesis or {}))
+        exit_code = 1 if (report["failures"] or report["interrupted"]) else 0
         return exit_code, report, messages
+
+    def _engine_selection(
+        self, collection: str | None, ids: list[str] | None, limit: int | None
+    ) -> guided.Selection:
+        effective_limit = limit if limit is not None else GUIDED_MAX_BATCH
+        if collection is not None:
+            _ref, scan = resolve_collection(self.state, collection)
+            assert scan is not None
+            scan_items = {
+                item.stable_id: (item.kind, item.canonical_url)
+                for item in scan.items
+            }
+            if ids:
+                return guided.select_ids(
+                    self.state,
+                    ids,
+                    scan_items=scan_items,
+                    inventory_urls=guided._inventory_urls(self.state),
+                    limit=effective_limit,
+                )
+            plan = build_collection_plan(self.state, scan)
+            return guided.select_from_plan(
+                self.state, plan, limit=effective_limit
+            )
+        return guided.select_ids(
+            self.state,
+            ids or (),
+            inventory_urls=guided._inventory_urls(self.state),
+            limit=effective_limit,
+        )
 
 
 # --------------------------------------------------------------------------
@@ -1786,6 +1834,232 @@ class TestWhisperRestoreReadinessWait(GuidedTestCase):
 
 
 # --------------------------------------------------------------------------
+# Single upfront consent: one run-plan window for the whole tanda
+# --------------------------------------------------------------------------
+
+
+class TestGuidedRunSingleConsent(GuidedTestCase):
+    """guided-run asks exactly ONE run-plan window for the whole tanda.
+
+    The per-phase windows (tanda/prepare/fetch/gpu/whisper-stop/
+    whisper-restore and the configured synthesis API) are discharged
+    programmatically when covered by the plan; verification keeps its own
+    grouped human decision; denial/EOF fail closed; anything outside the
+    planned scope is asked as genuinely new scope.
+    """
+
+    def _plan_run(
+        self,
+        stages: FakeStages,
+        consent: Any,
+        *,
+        ids: list[str] | None = None,
+        synthesis: dict[str, Path] | None = None,
+        auto_synthesizer: Any = None,
+        limit: int | None = None,
+    ) -> tuple[int, dict[str, Any], list[str]]:
+        messages: list[str] = []
+        exit_code, report = run_guided(
+            state=self.state,
+            collection=COLLECTION_URL,
+            ids=ids,
+            limit=limit,
+            synthesis=synthesis,
+            stages=stages.functions(),
+            consent=consent,
+            out=messages.append,
+            auto_synthesizer=auto_synthesizer,
+        )
+        return exit_code, report, messages
+
+    def test_one_window_then_covered_windows_discharged(self) -> None:
+        seed_scan(self.state, [1, 2])
+        seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
+        seed_job(self.state, fake_id(2), complete=("fetch", "prepare"))
+        stages = FakeStages()
+        consent = ScriptedConsent([("run-plan", True)])
+        code, report, _ = self._plan_run(
+            stages, consent, ids=[fake_id(1), fake_id(2)]
+        )
+        self.assertEqual(code, 0)
+        # Exactly ONE human window for the whole tanda.
+        self.assertEqual(consent.asked_kinds, ["run-plan"])
+        # The covered phase windows ran as programmatic discharges.
+        covered = [
+            entry
+            for entry in report["consent_log"]
+            if entry["window"] in ("tanda", "gpu")
+        ]
+        self.assertTrue(covered, report["consent_log"])
+        self.assertTrue(all(entry["granted"] for entry in covered))
+        # And the work actually ran under that single grant.
+        self.assertIn(f"vision:{fake_id(1)}", stages.calls)
+        self.assertIn(f"vision:{fake_id(2)}", stages.calls)
+
+    def test_run_plan_window_names_ids_urls_service_and_limits(self) -> None:
+        seed_scan(self.state, [1])
+        seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
+        stages = RestoreLifecycleFakeStages()
+        consent = ScriptedConsent([("run-plan", True)])
+        code, _, _ = self._plan_run(stages, consent, ids=[fake_id(1)])
+        self.assertEqual(code, 0)
+        window = consent.windows[0]
+        self.assertEqual(window.kind, "run-plan")
+        self.assertEqual(window.ids, (fake_id(1),))
+        self.assertIn(
+            f"https://www.tiktok.com/@fixture_author/video/{fake_id(1)}",
+            window.destinations,
+        )
+        self.assertIn(stages._info().describe(), window.destinations)
+        self.assertTrue(window.limits)
+        self.assertTrue(
+            any(
+                "whisper coordination for exactly" in op
+                for op in window.operations
+            ),
+            window.operations,
+        )
+
+    def test_run_plan_window_names_text_api_endpoint_and_model(self) -> None:
+        import os
+
+        seed_scan(self.state, [1])
+        seed_job(
+            self.state,
+            fake_id(1),
+            complete=("fetch", "prepare", "vision", "audio"),
+            evidence=True,
+        )
+        doc = Path(self.tmp.name) / "doc.json"
+        doc.write_text(
+            json.dumps(sample_synthesis_document()), encoding="utf-8"
+        )
+
+        def dummy_synth(video_id: str, state: StateRoot, ask: Any) -> Any:
+            return FakeOutcome("complete", "fixture auto synthesis")
+
+        env = {
+            "TIKTOK_INGEST_TEXT_API_BASE_URL": "https://api.example.test/v1",
+            "TIKTOK_INGEST_TEXT_API_KEY": "fixture-key",
+            "TIKTOK_INGEST_TEXT_MODEL": "fixture-model",
+        }
+        consent = ScriptedConsent([("run-plan", True), ("verify", False)])
+        with mock.patch.dict(os.environ, env, clear=False):
+            code, _, _ = self._plan_run(
+                FakeStages(verify_emits_pending=True),
+                consent,
+                ids=[fake_id(1)],
+                synthesis={fake_id(1): doc},
+                auto_synthesizer=dummy_synth,
+            )
+        self.assertEqual(code, 0)
+        window = consent.windows[0]
+        self.assertIn("https://api.example.test/v1", window.destinations)
+        self.assertTrue(
+            any("fixture-model" in op for op in window.operations),
+            window.operations,
+        )
+
+    def test_run_plan_denial_runs_nothing(self) -> None:
+        seed_scan(self.state, [1])
+        stages = FakeStages()
+        consent = ScriptedConsent([("run-plan", False)])
+        code, report, _ = self._plan_run(stages, consent)
+        self.assertEqual(code, 0)
+        self.assertEqual(stages.calls, [])
+        self.assertEqual(report["stage_calls"], [])
+        self.assertFalse(report["run_plan"]["granted"])
+        self.assertTrue(
+            any("run-plan confirmation denied" in n for n in report["notes"])
+        )
+
+    def test_run_plan_eof_fails_closed(self) -> None:
+        seed_scan(self.state, [1])
+        stages = FakeStages()
+        provider = ConsoleConsentProvider(
+            stdin=io.StringIO(""), out=lambda *a, **k: None
+        )
+        _, report, _ = self._plan_run(stages, provider)
+        self.assertEqual(stages.calls, [])
+        self.assertEqual(report["stage_calls"], [])
+        self.assertFalse(report["run_plan"]["granted"])
+
+    def test_verify_keeps_its_own_grouped_human_decision(self) -> None:
+        seed_scan(self.state, [1])
+        seed_job(
+            self.state,
+            fake_id(1),
+            complete=("fetch", "prepare", "vision", "audio"),
+            evidence=True,
+        )
+        doc = Path(self.tmp.name) / "doc.json"
+        doc.write_text(
+            json.dumps(sample_synthesis_document()), encoding="utf-8"
+        )
+        stages = FakeStages(verify_emits_pending=True)
+        consent = ScriptedConsent([("run-plan", True), ("verify", True)])
+        code, _, _ = self._plan_run(
+            stages, consent, ids=[fake_id(1)], synthesis={fake_id(1): doc}
+        )
+        self.assertEqual(code, 0)
+        # The run-plan window plus the SEPARATE grouped verification decision.
+        self.assertEqual(consent.asked_kinds, ["run-plan", "verify"])
+        self.assertIn(f"verify:{fake_id(1)}", stages.calls)
+
+    def test_out_of_plan_window_is_asked_as_new_scope(self) -> None:
+        from tiktok_ingest.collection_run import (
+            RunPlan,
+            RunScopedAuthorization,
+        )
+
+        plan = RunPlan(
+            collection_url="",
+            frozen_ids=("1",),
+            canonical_urls={"1": "https://fixture.example/video/1"},
+            stage_states={"1": {}},
+            batch_cap=5,
+            batch_count=1,
+            plan_counts={},
+            whisper_bound=None,
+            whisper_note="n/a",
+            text_api_origin=None,
+            text_api_model=None,
+        )
+        human = ScriptedConsent(
+            [("tanda", True), ("fetch", True), ("verify", True)]
+        )
+        authorization = RunScopedAuthorization(human=human, plan=plan)
+        scoped = guided._GuidedRunScopedConsent(
+            human=human, authorization=authorization
+        )
+        # In-scope ids are covered with no human prompt at all.
+        self.assertTrue(
+            scoped.ask(ConsentWindow(kind="tanda", title="t", ids=("1",)))
+        )
+        self.assertEqual(human.windows, [])
+        # A drifted id is asked as genuinely new scope, never auto-granted.
+        self.assertTrue(
+            scoped.ask(ConsentWindow(kind="tanda", title="t", ids=("2",)))
+        )
+        # A drifted fetch destination is likewise new scope.
+        self.assertTrue(
+            scoped.ask(
+                ConsentWindow(
+                    kind="fetch",
+                    title="t",
+                    ids=("1",),
+                    destinations=("https://evil.example/video/1",),
+                )
+            )
+        )
+        # Verification is always a fresh grouped human decision.
+        self.assertTrue(
+            scoped.ask(ConsentWindow(kind="verify", title="t", ids=("1",)))
+        )
+        self.assertEqual(human.asked_kinds, ["tanda", "fetch", "verify"])
+
+
+# --------------------------------------------------------------------------
 # CLI wiring
 # --------------------------------------------------------------------------
 
@@ -1883,22 +2157,26 @@ class TestCliWiring(GuidedTestCase):
         original = sys.stdin
         sys.stdin = NonTTY()
         try:
-            code, out, _ = self._run_cli(
-                [
-                    "guided-run",
-                    "--state-root",
-                    str(self.state.root),
-                    "--collection",
-                    COLLECTION_URL,
-                ]
-            )
+            with mock.patch(
+                "tiktok_ingest.collection_run._bind_whisper_identity",
+                return_value=(None, "fixture: read-only binding stubbed"),
+            ):
+                code, out, _ = self._run_cli(
+                    [
+                        "guided-run",
+                        "--state-root",
+                        str(self.state.root),
+                        "--collection",
+                        COLLECTION_URL,
+                    ]
+                )
         finally:
             sys.stdin = original
         self.assertEqual(code, 0)
         report = json.loads(out)
         self.assertEqual(report["stage_calls"], [])
         self.assertTrue(
-            any("tanda confirmation denied" in n for n in report["notes"])
+            any("run-plan confirmation denied" in n for n in report["notes"])
         )
         # No fetch ran and no processed entry appeared.
         self.assertIsNone(Processed(self.state).get(fake_id(1)))

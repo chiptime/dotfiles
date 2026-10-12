@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -276,6 +277,35 @@ class ConsoleConsentProvider(ConsentProvider):
             return False
         self._out("readiness signaled")
         return True
+
+
+class _GuidedRunScopedConsent(ConsentProvider):
+    """Consent over the ONE granted run plan for a guided-run invocation.
+
+    Every phase window is discharged by the underlying
+    ``RunScopedAuthorization`` when it is covered by the exact scope named
+    in the single run-plan window (``tanda``/``prepare``/``fetch``/``gpu``/
+    ``whisper-stop``/``whisper-restore`` and, when the text API endpoint and
+    model are named, ``synthesis-api``). Anything outside that scope is
+    forwarded to the human as genuinely new scope — it is never
+    auto-granted.
+
+    ``verify`` is deliberately NOT part of the run plan: candidate URLs only
+    exist after synthesis, so the grouped verification window always reaches
+    the human as its own decision, exactly as before.
+    """
+
+    def __init__(self, *, human: ConsentProvider, authorization: Any) -> None:
+        self.human = human
+        self.authorization = authorization
+
+    def ask(self, window: ConsentWindow) -> bool:
+        if window.kind == "verify":
+            return self.human.ask(window)
+        return self.authorization.ask(window)
+
+    def await_readiness(self, prompt: str) -> bool:
+        return self.human.await_readiness(prompt)
 
 
 # --------------------------------------------------------------------------
@@ -2121,11 +2151,14 @@ def run_guided(
                 f"--synthesis id {video_id} is not part of the selected tanda"
             )
 
-    runner = GuidedRun(
-        state, stages=stages, consent=consent, out=out,
-        auto_synthesizer=auto_synthesizer,
+    out_fn = out if out is not None else (
+        lambda text: print(text, file=sys.stderr)
     )
     if dry_run:
+        runner = GuidedRun(
+            state, stages=stages, consent=consent, out=out,
+            auto_synthesizer=auto_synthesizer,
+        )
         report = runner.build_report(selection, {}, mode="dry-run")
         report.pop("consent_log")
         report.pop("stage_outcomes_this_run")
@@ -2134,7 +2167,122 @@ def run_guided(
         )
         return 0, report
 
+    human = consent if consent is not None else ConsoleConsentProvider()
+    effective_stages = stages if stages is not None else default_stage_functions()
+    frozen_ids = tuple(selection.ids)
+
+    # The run plan is the ONE upfront authorization for the whole tanda:
+    # it freezes the exact ids/URLs/service/endpoint so the single window
+    # names them honestly, and the covered per-phase windows are then
+    # discharged programmatically instead of prompted one by one. Without
+    # any eligible id there is nothing to authorize or run.
+    if frozen_ids:
+        from .collection_run import (
+            RunPlan,
+            RunScopedAuthorization,
+            _bind_whisper_identity,
+            build_run_plan_window,
+        )
+
+        bound_info, whisper_note = _bind_whisper_identity(
+            effective_stages, out_fn
+        )
+        text_api_origin: str | None = None
+        text_api_model: str | None = None
+        if auto_synthesizer is not None:
+            from .synthesis_api import load_text_api_config
+
+            api_config, _missing = load_text_api_config(os.environ)
+            if api_config is not None:
+                text_api_origin = api_config.origin()
+                text_api_model = api_config.model
+        plan_counts: dict[str, int] = {}
+        for item in selection.items:
+            plan_counts[item.classification] = (
+                plan_counts.get(item.classification, 0) + 1
+            )
+        run_plan = RunPlan(
+            collection_url=collection or "",
+            frozen_ids=frozen_ids,
+            canonical_urls={
+                item.video_id: item.canonical_url
+                for item in selection.items
+                if item.canonical_url
+            },
+            stage_states={
+                item.video_id: derive_item_stages(state, item.video_id)
+                for item in selection.items
+            },
+            batch_cap=effective_limit,
+            batch_count=(len(frozen_ids) + effective_limit - 1)
+            // effective_limit,
+            plan_counts=plan_counts,
+            whisper_bound=(
+                bound_info.describe() if bound_info is not None else None
+            ),
+            whisper_note=whisper_note,
+            text_api_origin=text_api_origin,
+            text_api_model=text_api_model,
+            whisper_info=bound_info,
+        )
+        plan_window = build_run_plan_window(
+            run_plan,
+            sequence=(
+                "process exactly the selected ids through fetch -> prepare "
+                "-> vision -> audio -> synthesis ingestion -> verify, one id "
+                "at a time, under ONE authorization for the whole tanda; "
+                "each id is attempted in exactly ONE tanda"
+            ),
+        )
+        if not human.ask(plan_window):
+            report = GuidedRun(
+                state, stages=effective_stages, consent=human, out=out_fn
+            ).build_report(selection, {}, mode="execute")
+            report["notes"].append(
+                "run-plan confirmation denied: no stage ran and nothing was "
+                "written; re-invoke to be asked again"
+            )
+            report["run_plan"] = {
+                "granted": False,
+                "window": plan_window.to_dict(),
+            }
+            return 0, report
+
+        authorization = RunScopedAuthorization(
+            human=human, plan=run_plan, out=out_fn
+        )
+        runner_consent: ConsentProvider = _GuidedRunScopedConsent(
+            human=human, authorization=authorization
+        )
+    else:
+        authorization = None
+        runner_consent = human
+
+    runner = GuidedRun(
+        state, stages=effective_stages, consent=runner_consent, out=out_fn,
+        auto_synthesizer=auto_synthesizer,
+    )
     report = runner.execute(selection, synthesis_docs=synthesis_docs)
+    if authorization is not None:
+        report["run_plan"] = {
+            "granted": True,
+            "frozen_ids": list(frozen_ids),
+            "canonical_urls": {
+                item.video_id: item.canonical_url
+                for item in selection.items
+                if item.canonical_url
+            },
+            "whisper": {
+                "bound": run_plan.whisper_bound,
+                "note": run_plan.whisper_note,
+            },
+            "text_api": (
+                {"origin": text_api_origin, "model": text_api_model}
+                if text_api_origin
+                else None
+            ),
+            "stage_windows": authorization.authorization_log,
+        }
     exit_code = 1 if (report["failures"] or report["interrupted"]) else 0
     return exit_code, report
 

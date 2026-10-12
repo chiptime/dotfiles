@@ -463,39 +463,50 @@ report it prints is a summary, never a second ledger.
   current blocklist/processed stores: a plan printed earlier is a
   document, not authority over state that has since changed.
 
-### Authorization windows (in order; each shows ids, destinations,
-operations, limits and effects before anything runs)
+### Authorization (ONE run-plan window, then covered discharges)
 
-1. **Tanda confirmation** — the exact id list; nothing runs without it.
-2. **Network download** — the selected canonical URLs, through the
-   gated pinned extractor; gate failures are final (`blocked`).
-3. **CPU preparation** — the pinned container, per-clip budgets.
-4. **GPU window** — isolated Ollama lifecycle + gated vision for all
-   pending ids, then audio through the shared whisper service. The
-   audio line in the consent states what can ACTUALLY run: ids whose
-   vision was already complete are named for transcription outright,
-   while ids that reach audio only when their vision completes inside
-   this window are named CONDITIONALLY — audio is possible, never
-   guaranteed, and a vision failure, a fired gate or a denial means
-   that id's audio does not run. Ids whose audio is already complete
-   are named as reused (never re-transcribed) and no audio runs that
-   was not named in the window. The consent explicitly covers STARTING
-   and STOPPING the isolated server
-   this run started (stop runs at window end or on failure, so an
-   authorized window never leaves a loaded server waiting on another
-   answer). A server already answering on the isolated port is NEVER
-   adopted (identity/scope cannot be verified from outside) — stop it
-   explicitly and re-invoke. Gates are the existing ones, unweakened:
-   ≥20 GiB free VRAM before every Qwen load, ≤512 MiB swap delta per
-   phase, zero CPU offload, a fired gate is FINAL for the window.
-5. **Verification retrieval** — asked ONLY after the real
-   `candidate_urls` of the supplied synthesis documents are known; the
-   window lists exactly those URLs.
+`guided-run` builds a run plan from its selection and asks exactly ONE
+`run-plan` authorization window before anything runs. The window names
+every frozen id and canonical URL, the full stage sequence, the batch
+limit, the KNOWN shared whisper service identity bound read-only before
+the plan (with its bounded stop and standing restore), the isolated
+Ollama lifecycle, and — when automatic synthesis applies — the text API
+endpoint/model. On grant, the covered per-phase windows are discharged
+automatically and audited (never fabricated human yeses):
+
+- `tanda`, `prepare`, `gpu` — every id inside the frozen inventory;
+- `fetch` — every destination an exact frozen canonical URL;
+- `whisper-stop`, `whisper-restore` — the exact service identity bound
+  read-only before the plan;
+- `synthesis-api` — the endpoint and EXACT model named in the plan.
+
+Anything outside that scope — a new id, an unapproved URL, a drifted
+whisper configuration or endpoint/model — is asked as genuinely new
+scope and is NEVER auto-granted.
+
+**Verification keeps its own grouped decision**: candidate URLs only
+exist after synthesis, so ONE separate `verify` window lists every exact
+validated URL before any retrieval.
+
+The covered `gpu` window keeps its existing semantics: isolated Ollama
+lifecycle + gated vision for all pending ids, then audio through the
+shared whisper service. Ids whose vision was already complete are named
+for transcription outright; ids that reach audio only when their vision
+completes inside the window are CONDITIONAL (a vision failure, a fired
+gate or a denial means that id's audio does not run); ids whose audio is
+already complete are reused, never re-transcribed. The grant covers
+STARTING and STOPPING the isolated server this run started (stop runs at
+window end or on failure); a server already answering on the isolated
+port is NEVER adopted (identity/scope cannot be verified from outside) —
+stop it explicitly and re-invoke. Gates are the existing ones,
+unweakened: ≥20 GiB free VRAM before every Qwen load, ≤512 MiB swap
+delta per phase, zero CPU offload, a fired gate is FINAL for the window.
 
 Denial, EOF, Ctrl-C or a non-interactive environment stop without
 assuming consent (only a literal `yes` grants a window; there is no
-global `--yes`). An authorization NEVER persists: every invocation and
-every window asks again.
+global `--yes`). An authorization NEVER persists: every invocation asks
+the run-plan window again (and, when it applies, the separate grouped
+verification window).
 
 ### Consent prompts, progress and the end-of-run summary
 
@@ -517,19 +528,20 @@ Vision requires the whisper service STOPPED and audio requires it
 healthy. `guided-run` coordinates the KNOWN shared service through the
 same bounded, identity-checked lifecycle `collection-run` uses (see the
 whisper coordination section below): when it is running, its identity is
-verified read-only BEFORE any consent, the `whisper-stop` window
-(bounded `podman stop
---timeout 30`, positively verified) and the STANDING `whisper-restore`
-authorization are asked BEFORE any mutation, and the SAME service is
-restored and health-checked once the GPU window ends — normally, on
-failure, or after an interruption (a Ctrl-C never grants a window and
-never triggers a new prompt). Denial of either window blocks BEFORE any
-mutation; if the stopped-check passes (nothing running) nothing is
-touched. Non-interactive stdin and EOF still fail closed. Audio's health
-precheck is unchanged: after visions complete (each vision stage
-verifies its own unload — empty residency plus observed GPU release —
-before the next phase), a health precheck runs; if unhealthy, every
-pending audio id is `blocked` with the resume instruction.
+verified read-only BEFORE the run-plan window and bound into the plan,
+so the `whisper-stop` (bounded `podman stop --timeout 30`, positively
+verified) and the standing `whisper-restore` windows are discharged by
+that grant before any mutation, and the SAME service is restored and
+health-checked once the GPU window ends — normally, on failure, or after
+an interruption (a Ctrl-C never grants a window and never triggers a new
+prompt). A drifted service/configuration falls outside the plan and is
+asked as new scope (fail-closed on denial); if the stopped-check passes
+(nothing running) nothing is touched. Non-interactive stdin and EOF still
+fail closed. Audio's health precheck is unchanged: after visions complete
+(each vision stage verifies its own unload — empty residency plus
+observed GPU release — before the next phase), a health precheck runs; if
+unhealthy, every pending audio id is `blocked` with the resume
+instruction.
 
 ### Synthesis boundary (hard stop)
 
