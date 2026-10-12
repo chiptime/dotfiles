@@ -389,5 +389,106 @@ class GuidedRunDispatchTests(unittest.TestCase):
         self.assertNotIn("next", err)
 
 
+class TuiWiringTests(unittest.TestCase):
+    """guided-run/collection-run: TUI when active, fallback otherwise."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.state_root = Path(self._tmp.name) / "state"
+
+    def _main(self, argv: list[str]) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = main(argv)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_guided_run_falls_back_without_tty(self) -> None:
+        with mock.patch(
+            "tiktok_ingest.cli.run_guided", return_value=(0, {"mode": "execute"})
+        ) as run:
+            self._main(
+                [
+                    "guided-run",
+                    "--ids",
+                    "2000000000000000001",
+                    "--state-root",
+                    str(self.state_root),
+                ]
+            )
+        self.assertIsNone(run.call_args.kwargs["consent"])
+        self.assertTrue(callable(run.call_args.kwargs["out"]))
+
+    def test_guided_run_uses_tui_when_active(self) -> None:
+        sentinel = mock.Mock()
+
+        class _Session:
+            active = True
+            consent = sentinel
+            out = mock.Mock()
+
+        @contextlib.contextmanager
+        def fake_ui(*_args, **_kwargs):
+            yield _Session()
+
+        with mock.patch(
+            "tiktok_ingest.cli.run_guided", return_value=(0, {"mode": "execute"})
+        ) as run, mock.patch("tiktok_ingest.tui.terminal_ui", fake_ui):
+            self._main(
+                [
+                    "guided-run",
+                    "--ids",
+                    "2000000000000000001",
+                    "--state-root",
+                    str(self.state_root),
+                ]
+            )
+        self.assertIs(run.call_args.kwargs["consent"], sentinel)
+        self.assertIs(run.call_args.kwargs["out"], _Session.out)
+
+    def test_collection_run_uses_tui_when_active(self) -> None:
+        sentinel = mock.Mock()
+
+        class _Session:
+            active = True
+            consent = sentinel
+            out = mock.Mock()
+
+        @contextlib.contextmanager
+        def fake_ui(*_args, **_kwargs):
+            yield _Session()
+
+        with mock.patch(
+            "tiktok_ingest.collection_run.run_collection",
+            return_value=(0, {"mode": "execute"}),
+        ) as run, mock.patch("tiktok_ingest.tui.terminal_ui", fake_ui):
+            self._main(
+                [
+                    "collection-run",
+                    "https://www.tiktok.com/@user/collection/slug-1",
+                    "--state-root",
+                    str(self.state_root),
+                ]
+            )
+        self.assertIs(run.call_args.kwargs["consent"], sentinel)
+        self.assertIs(run.call_args.kwargs["out"], _Session.out)
+
+    def test_collection_run_falls_back_without_tty(self) -> None:
+        with mock.patch(
+            "tiktok_ingest.collection_run.run_collection",
+            return_value=(0, {"mode": "execute"}),
+        ) as run:
+            self._main(
+                [
+                    "collection-run",
+                    "https://www.tiktok.com/@user/collection/slug-1",
+                    "--state-root",
+                    str(self.state_root),
+                ]
+            )
+        self.assertIsNone(run.call_args.kwargs["consent"])
+        self.assertIsNone(run.call_args.kwargs["out"])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -265,6 +265,20 @@ interruption) under that grant, so a single-video run needs no manual
 time and the run ends with a readable summary table; all of that UI is
 stderr-only, so the stdout JSON report keeps its exact shape.
 
+On an interactive terminal both `guided-run` and `collection-run` render
+a live **curses dashboard** (stdlib only — no third-party dependency):
+per-id stage states, the current phase/activity and an elapsed clock,
+with every consent window shown in place as a full-text modal. The
+consent contract is unchanged — only `y`/`yes` grants, EOF/read-error/
+non-TTY denies, and the whole window text (title, ids, destinations,
+operations, limits, effects) is composed and visible (scrollable on
+small terminals). The TUI draws on the terminal screen only: stdout stays
+the parseable JSON report, printed after the curses session ends. When
+curses cannot start or stdin/stdout is not a TTY (CI, a pipe,
+`TERM=dumb`), both commands fall back to the EXACT line-based prompts and
+stderr narration above; `--dry-run` and every non-TTY path are byte-
+identical to before.
+
 The synthesis boundary is a hard stop: without `--synthesis ID=PATH`
 the run reports the `video.md`/`audio.md` paths and the exact resume
 command, and NEVER generates, edits or auto-fills a document
