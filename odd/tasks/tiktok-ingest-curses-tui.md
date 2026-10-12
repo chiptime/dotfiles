@@ -52,6 +52,18 @@ elapsed) and lets the operator answer a window in place.
 - [x] **TI-TUI-03** Tests + docs; verify the full offline suite and a
   non-TTY smoke run. Evidence: full discover suite `Ran 909 tests ... OK`
   (baseline 871 + 38 new); non-TTY smoke below; README + OPERATIONS updated.
+- [x] **TI-TUI-04** Bounded visual-polish pass (2026-10-12 operator
+  feedback: the consent modal "se ve igual" to the old line-based prompt).
+  Presentation only: `init_palette` color with graceful degradation
+  (empty palette off a color-less terminal), a bordered/titled consent
+  modal with a key-hint footer, and a visibly structured dashboard
+  (header bar with run/phase/elapsed, colored stage matrix, log panel).
+  Consent semantics, the WHOLE-window-text contract, KEY_RESIZE handling,
+  ASCII-only input and the byte-identical fallback are unchanged;
+  `compose_modal_lines` still equals `render_consent_window`. Evidence:
+  RED 27 errors → GREEN `test_tui` 48 OK; full discover `Ran 923 tests ...
+  OK` (+12 `test_tui`, 36→48); the modal frame and dashboard rendered
+  through a capturing window with no real TTY (samples in Progress).
 
 ## Acceptance criteria
 
@@ -112,10 +124,48 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=ai/tiktok-ingest/src python3 -m unittes
 Baseline: 871 tests OK (+38 new: 34 `test_tui` + 4 `test_cli` wiring). Real
 interactive validation is manual (TTY) and requires operator authorization.
 
+TI-TUI-04 polish baseline: `test_tui` 36 → 48 (+12: palette degradation,
+framed/titled/footer modal composition, structured dashboard, colored
+cells). Full discover 911 → 923 (+12). No real TTY required.
+
 RDD: off (clone-local). Delivery: ask-on-risk; commits only if asked.
 
 ## Progress and next step
 
 - Decision fixed: curses, stdlib only, with a mandatory line-based fallback.
-- TI-TUI-01..03 complete. Next: operator TTY validation (manual, needs
+- TI-TUI-01..04 complete. Next: operator TTY validation (manual, needs
   authorization); no further code change required for acceptance.
+- TI-TUI-04 rendered evidence (no TTY, through a capturing window double):
+
+```
++-- AUTHORIZATION REQUIRED ------------------------------------------------------------------------+
+| == AUTHORIZATION REQUIRED ==                                                                     |
+| intent      : accept this WHOLE current run                                                      |
+| ids         : 2000000000000000001, 2000000000000000002                                           |
+| destinations:                                                                                    |
+|     - https://www.tiktok.com/@a/video/2000000000000000001                                        |
+| operations  :                                                                                    |
+|     - fetch -> prepare -> vision -> audio                                                        |
+| limits      :                                                                                    |
+|     - batch cap 5                                                                                |
+| effects     :                                                                                    |
+|     - appends pending backlog entries                                                            |
+|                                                                                                  |
+| authorize this window? [yes/no]                                                                  |
++-- type yes and press Enter to grant - any other answer denies -----------------------------------+
+```
+
+Dashboard (header bar + colored matrix + log panel; monochrome in text):
+
+```
+ TikTok ingest :: live run                                        elapsed  12.3s
+ phase: vision    activity: audio 2000000000000000002 failed
+--------------------------------------------------------------------------------
+id                   fetch  prep   vision audio  synth  verify
+2000000000000000001  ok     ok     RUN    .      .      .
+2000000000000000002  .      .      .      failed .      .
+ log ---------------------------------------------------------------------------
+```
+
+`init_palette()` off a real TTY returns `{}`, so the identical layout draws
+monochrome and never crashes.
