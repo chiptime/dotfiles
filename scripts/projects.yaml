@@ -92,7 +92,7 @@ ssff-mcp:
   scope: personal
   status: active
   desc: MCP local SSFF OData v2 — Fase 2 implementada y subida hasta 20a233e; OAuth, cursor, XML, allowlist y batch; 188 tests y lote PROD de 180 GET verificados
-  next: obtener evidencia read-only de roles SAP; completar revisiones nativas en runtime compatible; brainstorming de mejoras en otro chat
+  next: subir dependencia odata-batch 2.1.0 -> 3.0.0 (BREAKING: validación de media types y parseo Content-ID-first) y adaptar; luego obtener evidencia read-only de roles SAP y completar revisiones nativas
 
 llm-hub:
   scope: personal
@@ -299,3 +299,13 @@ zam_etm_app_capacitor:
   scope: work
   status: cold
   desc: GAM/ZAM — wrapper capacitor, sin commits locales
+
+gentle-ai:
+  scope: personal
+  status: cold
+  desc: Tercero (Gentleman-Programming/gentle-ai) — harness/binario externo, no es proyecto propio
+
+opencode:
+  scope: personal
+  status: cold
+  desc: Tercero (OpenCode, fork chiptime/opencode) — host/binario externo, no es proyecto propio
