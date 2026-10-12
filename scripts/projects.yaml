@@ -85,8 +85,8 @@ busqueda-vacaciones:
 odata-batch:
   scope: personal
   status: active
-  desc: Librería npm OData V2 batch — v3.0.0 publicada (media types con parámetros, Content-ID MIME, sendGrouped, lotes mixtos); 403 tests y mutation 91.86%
-  next: ampliar el corpus golden (tests/fixtures/sap) con capturas reales de SAP y un test que las recorra
+  desc: Librería npm OData V2 batch — security hardening completado (CSPRNG, colisiones, CRLF, RFC 9110, parser resiliente); 475 tests, 100% cobertura, mutación 97.19%
+  next: npm audit manual (M-01), peer review (M-02) y publicación minor 3.1.0
 
 ssff-mcp:
   scope: personal
