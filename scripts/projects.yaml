@@ -44,8 +44,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — F4 STT core + HT-03 radio mode + AT-11 M2 instalable (2.2-2.5) + F5 botones ntfy approval fusionados a main; suites integradas en verde (plugin 140p, brain 1498p, harness 137 OK)
-  next: F2 validación física en Android (sesión guiada) y re-slice 9a/9b/9c de AT-11 tarea 2.1 (Decisión 12, rebasando M2)
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — HT-05 recordatorios escalados, AT-07 digest de audio (--digest + CHAP), AT-06 ducking (M1 local + transporte winhost) y fix de carrera de shutdown del daemon, fusionados a main; suites engine 1432p + plugin 197p verdes
+  next: Pruebas manuales — F2 física en Android + UAT V3 de AT-11; validar AT-06 M-01 (WASAPI en host Windows) y AT-07 en 2 apps móviles; siguiente implementable: HT-08 briefing matinal
 
 compare-prices:
   scope: personal
@@ -213,14 +213,14 @@ recruiting-frontend:
   group: sis
   status: active
   desc: Frontend Clece (Angular) · modal adjuntos verification UX
-  next: desplegar los cambios del modal adjuntos (working tree)
+  next: commitear en rama propia el modal de progreso al enviar (T8, working tree sobre deploy-develop) y desplegarlo
 
 recruiting-backend:
   scope: work
   group: sis
   status: active
-  desc: Backend Clece (SAP CAP) · adjuntos SC verify+heal-on-read
-  next: implantar flag ATTACHMENT_DISPATCH_MODE (diseño en Engram) + limpiar duplicado 846387/846389 clecesaT2
+  desc: Backend Clece (SAP CAP) · adjuntos SC: persistencia explícita de enlaces + guard de tipologías
+  next: commitear los tests de T10; decidir commit del frontend T8; probar el 400 en vivo; revisar DARDE cross-routed
 
 # Products
 HyperMonitor:
