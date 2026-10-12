@@ -248,9 +248,13 @@ def _safe_addstr(window: Any, y: int, x: int, text: str) -> None:
 def _key_to_char(key: Any) -> str | None:
     if isinstance(key, str):
         return key if key.isprintable() else None
-    if isinstance(key, int) and 0 <= key < 0x110000:
-        char = chr(key)
-        return char if char.isprintable() else None
+    # A real window returns printable ASCII for typed input and curses
+    # KEY_* constants (>= 256, e.g. KEY_RESIZE=410) for special events.
+    # ``chr(KEY_RESIZE)`` IS printable ("ƚ"), so folding any int would let a
+    # terminal resize corrupt the answer; only printable ASCII is accepted.
+    # Consent answers are always ASCII ("yes"/"y").
+    if isinstance(key, int) and 32 <= key <= 126:
+        return chr(key)
     return None
 
 
@@ -419,6 +423,11 @@ class CursesConsentProvider(ConsentProvider):
                 raise _ReadDenied("end of input")
             if key == _CTRL_C:
                 raise KeyboardInterrupt
+            if curses is not None and key == curses.KEY_RESIZE:
+                # A terminal resize (e.g. attaching the tmux client) is not
+                # input: redraw at the new size and keep reading.
+                self._draw()
+                continue
             if key in _ENTER:
                 return "".join(buffer)
             if key in _BACKSPACE:
