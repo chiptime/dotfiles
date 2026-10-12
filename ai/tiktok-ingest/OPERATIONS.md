@@ -320,10 +320,21 @@ also accept `--share-root`. Verified command set:
 | `backlog-apply --decisions-file F` | Apply explicit, still-current decisions (verified backups, receipt, idempotent) |
 | `guided-run` | Consent-gated coordination of one tanda through the existing stages (see section 8) |
 | `collection-run <url>` | Phase 0 one-command journey: browser inventory → phase-first resource windows → automatic synthesis → pending entries (see section 9) |
+| `summary [--collection U] [--json] [--report latest\|PATH]` | Read-only per-video stage table + derived next step, from live state or a saved report (see section 9.6) |
 
 `verify --force` re-runs verification when fingerprints match; backlog
 appends remain duplicate-guarded (see section 4). `synthesize --force`
 re-runs past a matching synthesis fingerprint.
+
+### Saved run reports
+
+Every finished (non-dry-run) `collection-run` persists its report JSON
+atomically to `<state-root>/reports/<collection-key>/<UTC-timestamp>.json`
+(timestamp shape `2026-10-12T09-55-16Z`, the same as run directories) and
+narrates the saved path to stderr; stdout stays the unchanged report
+JSON. Reports are machine-local and are never written inside the
+repository. `summary --report latest` reads the newest report of a named
+collection; `summary --report <path>` reads an explicit file.
 
 ## 6. Gate cleanup and operational validation limits
 
@@ -400,7 +411,12 @@ network/GPU/podman/ollama):
   blocked after a failed server stop), the synthesis boundary (missing,
   malformed and valid documents; exact candidate-URL consent), pending
   entries left untouched, resume reusing complete stages without
-  repetition, and CLI wiring/exit codes.
+  repetition, and CLI wiring/exit codes. The CLI wiring test proves the
+  `guided-run` command supplies the whisper lifecycle hooks (so a
+  running KNOWN service is coordinated) and narrates the summary on
+  stderr; prompt formatting and per-stage narration are asserted
+  directly, and the end-of-run summary reuses the `summary` row/next
+  derivation.
 
 - The full verdict matrix including the rules-v2 identity separation
   (identified-without-URLs → `unverifiable`/`no_candidate_urls`;
@@ -481,16 +497,39 @@ assuming consent (only a literal `yes` grants a window; there is no
 global `--yes`). An authorization NEVER persists: every invocation and
 every window asks again.
 
-### Whisper (operator-managed, unchanged)
+### Consent prompts, progress and the end-of-run summary
 
-Vision requires the whisper service STOPPED: if it is running, the GPU
-window reports the requirement and stops BEFORE any model load. Audio
-requires it healthy: after visions complete (each vision stage verifies
-its own unload — empty residency plus observed GPU release — before
-the next phase), a whisper health precheck runs; if unhealthy, every
-pending audio id is `blocked` with the resume instruction (start the
-service explicitly, then re-invoke; completed visions are reused with
-zero re-inference). guided-run never starts, stops or restores whisper.
+Each consent window prints an aligned block whose first line is its
+one-line intent, followed by the existing ids/destinations, operations,
+limits and effects sections, then the `authorize this window? [yes/no]`
+prompt. A denial names the window and states that nothing ran; EOF and a
+non-interactive stdin report that consent is never assumed. Stages
+narrate a `stage <name> start`/`stage <name> finish ... (reused=..., Ns)`
+pair on stderr with the real outcome and measured duration (no fabricated
+heartbeat or percentage), and the run ends with a readable summary table
+(one row per selected id: per-stage states, author and the derived next
+step). All of this UI is stderr-only: the stdout JSON report keeps its
+exact shape.
+
+### Whisper (coordinated automatically when the known service is running)
+
+Vision requires the whisper service STOPPED and audio requires it
+healthy. `guided-run` coordinates the KNOWN shared service through the
+same bounded, identity-checked lifecycle `collection-run` uses (see the
+whisper coordination section below): when it is running, its identity is
+verified read-only BEFORE any consent, the `whisper-stop` window
+(bounded `podman stop
+--timeout 30`, positively verified) and the STANDING `whisper-restore`
+authorization are asked BEFORE any mutation, and the SAME service is
+restored and health-checked once the GPU window ends — normally, on
+failure, or after an interruption (a Ctrl-C never grants a window and
+never triggers a new prompt). Denial of either window blocks BEFORE any
+mutation; if the stopped-check passes (nothing running) nothing is
+touched. Non-interactive stdin and EOF still fail closed. Audio's health
+precheck is unchanged: after visions complete (each vision stage
+verifies its own unload — empty residency plus observed GPU release —
+before the next phase), a health precheck runs; if unhealthy, every
+pending audio id is `blocked` with the resume instruction.
 
 ### Synthesis boundary (hard stop)
 
@@ -628,7 +667,7 @@ second state.
     `backlog-show` → `backlog-decide` → `backlog-plan` →
     `backlog-apply`.
 
-### Whisper coordination (collection-run only)
+### Whisper coordination (collection-run and guided-run)
 
 Collection audio runs BEFORE any vision stop cycle: the shared service
 must already be RUNNING and healthy for the audio phase (its own `gpu`
@@ -673,9 +712,12 @@ repeated and the wait itself implies no new consent. A failed restore
 or deadline-exceeded health wait — or an interruption that leaves the
 restore or its health check incomplete — blocks
 ALL further progress, reports the actual partial service state with
-recovery instructions and promises no rollback. Standalone
-`guided-run` keeps its documented behavior (whisper operator-managed;
-blocks with instructions).
+recovery instructions and promises no rollback. `guided-run` drives this
+same lifecycle: its CLI supplies the identity-bound hooks, so a
+single-tanda run stops the known service before its vision window and
+restores it afterwards under this same standing authorization. Only a
+programmatic caller that builds `StageFunctions` without the hooks keeps
+the operator-managed behavior (blocks with instructions).
 
 ### Bounded vision swap-retry (collection-run only)
 
@@ -799,3 +841,26 @@ errors (invalid/missing URL is rejected before any effect).
 
 `--dry-run` prints preflight plus the document-only plan with zero
 browser, network, container, GPU, API or write activity.
+
+### 9.6 Reading a run later (`summary`)
+
+The raw report JSON is large; `summary` renders the durable per-video
+stage state as one row per item (`fetch prepare audio vision synthesis
+verify`), the backlog status, the author handle (derived from the
+canonical URL) and a derived `next` line — e.g. `vision pending (audio
+saved)` when audio completed but vision stopped, `synthesis pending`, or
+`complete`. The human table is the default; `--json` emits a structured
+object for scripting.
+
+```bash
+python3 -m tiktok_ingest summary                       # all processed items
+python3 -m tiktok_ingest summary --collection "<key>"  # one collection's plan items
+python3 -m tiktok_ingest summary --collection "<key>" --json
+python3 -m tiktok_ingest summary --collection "<key>" --report latest
+```
+
+`summary` reuses the SAME stage derivation as the run commands and is
+READ-ONLY: it imports no write path and touches no browser, network,
+GPU, container or model. With `--report latest`/`PATH` it reads a saved
+report instead of live state; a saved report records stage snapshots but
+not per-item backlog status, so those rows show `backlog: n/a`.

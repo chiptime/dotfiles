@@ -60,7 +60,12 @@ Subcommands:
                          authorization window before each effectful
                          phase, a hard stop at the synthesis boundary
                          when no document was supplied, and no writes of
-                         its own. Never starts anything without its
+                         its own. It coordinates the KNOWN shared
+                         whisper service automatically (verified stop
+                         before vision, standing restore after, under
+                         explicit consent) and narrates per-stage
+                         progress plus a readable end-of-run summary on
+                         stderr. Never starts anything without its
                          window; ``--dry-run`` only prints the plan.
 - ``collection-run``    Phase 0 one-command journey for ONE collection
                          URL: headed run-scoped browser inventory
@@ -69,9 +74,15 @@ Subcommands:
                          the guided coordinator, automatic synthesis via
                          ONE OpenAI-compatible adapter (env-configured),
                          bounded whisper stop/restore coordination, and
-                         local PENDING backlog entries only. Invalid or
-                         missing URLs are rejected before any effect;
-                         ``--dry-run`` prints preflight + plan only.
+                          local PENDING backlog entries only. Invalid or
+                          missing URLs are rejected before any effect;
+                          ``--dry-run`` prints preflight + plan only.
+- ``summary``            read-only human/JSON view of the durable
+                          per-video stage state (one row per item with
+                          per-stage states, backlog status, author and a
+                          derived next step). Reads live state by default
+                          or a saved ``collection-run`` report via
+                          ``--report latest|PATH``; zero writes.
 Every state-touching command accepts ``--state-root`` (default
 ``~/.local/state/tiktok-ingest/``) so tests and dry inspection can point
 at a scratch location. No subcommand stops services, browsers, downloads
@@ -100,7 +111,13 @@ from .collection import (
 )
 from .contracts import BACKLOG_STATUSES, utc_now_iso
 from .extractor import ExtractorError
-from .guided import GuidedError, parse_synthesis_args, run_guided
+from .guided import (
+    GuidedError,
+    narrate_stages,
+    parse_synthesis_args,
+    run_guided,
+    whisper_coordinated_stage_functions,
+)
 from .ollama_runtime import (
     OllamaRuntimeError,
     import_model,
@@ -606,10 +623,13 @@ def build_parser() -> argparse.ArgumentParser:
             "and writes nothing of its own. The synthesis boundary is a "
             "hard stop: without --synthesis ID=PATH it reports the "
             "video.md/audio.md paths and how to resume; it NEVER "
-            "generates content. Whisper stays operator-managed (vision "
-            "needs it stopped, audio needs it healthy); the isolated "
-            "Ollama server is started only inside the consented GPU "
-            "window and stopped at window end or failure. Backlog "
+            "generates content. The KNOWN shared whisper service is "
+            "coordinated automatically when it is running: identity is "
+            "verified, it is stopped behind explicit consent before "
+            "vision and restored under the standing authorization after "
+            "the GPU window (on success, failure or interruption). The "
+            "isolated Ollama server is started only inside the consented "
+            "GPU window and stopped at window end or failure. Backlog "
             "entries are appended as pending by verify only; review "
             "stays with backlog-list/show/decide/plan/apply."
         ),
@@ -721,6 +741,44 @@ def build_parser() -> argparse.ArgumentParser:
         "writes",
     )
     add_state_root(collection_run)
+
+    summary_parser = subparsers.add_parser(
+        "summary",
+        help="read-only human/JSON view of durable per-video stage state",
+        description=(
+            "Read-only summary of the durable per-video stage state derived "
+            "from the product's own manifests: one row per item with its "
+            "fetch/prepare/audio/vision/synthesis/verify states, backlog "
+            "status, author handle (from the canonical URL) and a derived "
+            "next step. Default output is a human table; --json emits a "
+            "structured object. Without --collection it summarizes every "
+            "processed item; with --collection (URL or 16-hex key) it limits "
+            "to that collection's plan items and shows its counts. --report "
+            "latest|PATH reads a saved collection-run report instead of live "
+            "state. This command writes NOTHING and touches no browser, "
+            "network, GPU, container or model."
+        ),
+    )
+    summary_parser.add_argument(
+        "--collection",
+        default=None,
+        metavar="URL_OR_KEY",
+        help="collection URL or 16-hex key; limits the summary to its plan items",
+    )
+    summary_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="emit a structured JSON object instead of the human table",
+    )
+    summary_parser.add_argument(
+        "--report",
+        default=None,
+        metavar="latest|PATH",
+        help="read a saved collection-run report: 'latest' (needs "
+        "--collection) or an explicit report JSON path",
+    )
+    add_state_root(summary_parser)
 
     return parser
 
@@ -958,6 +1016,13 @@ def main(argv: list[str] | None = None) -> int:
                 else None
             )
             synthesis = parse_synthesis_args(args.synthesis or [])
+
+            def _ux(text: str) -> None:
+                print(text, file=sys.stderr, flush=True)
+
+            stages = narrate_stages(
+                whisper_coordinated_stage_functions(), out=_ux
+            )
             exit_code, report = run_guided(
                 state=state,
                 collection=args.collection,
@@ -965,8 +1030,14 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
                 synthesis=synthesis,
                 dry_run=args.dry_run,
+                stages=stages,
+                out=_ux,
             )
             print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+            if not args.dry_run:
+                from .summary import guided_report_summary, render_table
+
+                _ux(render_table(guided_report_summary(report)))
             return exit_code
 
         if args.command == "collection-run":
@@ -986,6 +1057,22 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
             return exit_code
+
+        if args.command == "summary":
+            from .summary import SummaryError, build_summary, render_table
+
+            try:
+                data = build_summary(
+                    state, collection=args.collection, report=args.report
+                )
+            except (SummaryError, CollectionError) as exc:
+                print(f"summary: {exc}", file=sys.stderr)
+                return 2
+            if args.as_json:
+                print(json.dumps(data, indent=2, ensure_ascii=False))
+            else:
+                print(render_table(data))
+            return 0
 
     except ReviewError as exc:
         print(f"review error: {exc}", file=sys.stderr)

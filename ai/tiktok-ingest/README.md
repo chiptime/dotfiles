@@ -250,10 +250,15 @@ environment stop without assuming consent; there is no global `--yes`;
 an authorization never persists into a later invocation. The GPU-window
 consent covers starting AND stopping the isolated Ollama server this
 command started (stop runs at window end or on failure); a preexisting
-server answering on the isolated port is never adopted, and whisper is
-never started, stopped or restored by this code (vision requires it
-stopped, audio requires it healthy — both preconditions surface as
-explicit blocks with resume instructions).
+server answering on the isolated port is never adopted. The KNOWN
+shared whisper service is coordinated automatically when it is running:
+its identity is verified read-only, it is stopped behind explicit
+consent before vision and restored under the standing authorization
+after the GPU window (on success, failure or interruption), so a
+single-video run needs no manual `podman` commands. Each stage narrates
+a start/finish line with elapsed time and the run ends with a readable
+summary table; all of that UI is stderr-only, so the stdout JSON report
+keeps its exact shape.
 
 The synthesis boundary is a hard stop: without `--synthesis ID=PATH`
 the run reports the `video.md`/`audio.md` paths and the exact resume
@@ -341,8 +346,12 @@ Key boundaries:
   before the service is reported restored. A failed
   restore/health — or an interruption leaving the restore incomplete —
   blocks ALL further progress, reports the actual partial state and
-  promises no rollback. Standalone `guided-run` keeps its documented
-  behavior (whisper operator-managed, blocks with instructions).
+  promises no rollback. `guided-run` uses the SAME coordination: its CLI
+  supplies the whisper lifecycle hooks, so a running known service is
+  stopped before vision and restored after the window under the same
+  standing authorization. Only a programmatic caller that builds its own
+  `StageFunctions` without those hooks keeps the operator-managed
+  behavior (blocks with instructions).
   In the collection flow the shared service must already be RUNNING and
   healthy for the AUDIO phase, which runs BEFORE any vision stop cycle;
   each vision resource window then owns its own bounded stop/restore
@@ -425,9 +434,44 @@ Key boundaries:
 - **Dry run**: `--dry-run` prints preflight + the document-only plan
   with zero browser, zero network, zero containers, zero GPU, zero API
   calls and zero writes.
+- **Report persistence**: every finished (non-dry-run) invocation saves
+  its report JSON atomically under
+  `<state-root>/reports/<collection-key>/<UTC-timestamp>.json`
+  (`2026-10-12T09-55-16Z`, the same shape as the run directories) and
+  narrates the saved path to stderr. stdout stays the unchanged,
+  parseable report JSON. Reports are NEVER written inside the repository.
 
 Exit codes: 0 success; 1 failures/interruption/hard blocks; 2 usage
 errors (invalid or missing URL rejected BEFORE any effect).
+
+## Reading a run later (`summary`)
+
+`summary` is a READ-ONLY view of the durable per-video stage state. It
+prints one row per item with its `fetch prepare audio vision synthesis
+verify` states, backlog status, author handle (from the canonical URL)
+and a derived `next` step — so a run whose audio completed but whose
+vision failed is obvious at a glance (`vision pending (audio saved)`).
+
+```bash
+# Human table over LIVE durable state (all processed items):
+python3 -m tiktok_ingest summary
+
+# One collection's plan items, with counts:
+python3 -m tiktok_ingest summary --collection "<collection-url-or-key>"
+
+# Structured JSON for scripting:
+python3 -m tiktok_ingest summary --collection "<key>" --json
+
+# Read a SAVED report instead of live state (browse a past run):
+python3 -m tiktok_ingest summary --collection "<key>" --report latest
+python3 -m tiktok_ingest summary --report ~/.local/state/tiktok-ingest/reports/<key>/2026-10-12T09-55-16Z.json
+```
+
+`summary` reuses the SAME stage derivation as `guided-run`/`collection-run`
+(no second ledger) and writes NOTHING: no state, manifest or backlog
+writes, and no browser, network, GPU, container or model is touched. A
+saved report records stage snapshots but not per-item backlog status, so
+`--report` shows `backlog: n/a`.
 
 ## Collection inventory (offline core)
 
