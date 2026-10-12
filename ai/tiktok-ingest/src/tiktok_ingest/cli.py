@@ -97,7 +97,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, config
+from . import __version__, config, tui
 from .bootstrap import BootstrapError, install_extractor, verify_installation
 from .collection import (
     CollectionError,
@@ -1024,19 +1024,40 @@ def main(argv: list[str] | None = None) -> int:
             def _ux(text: str) -> None:
                 print(text, file=sys.stderr, flush=True)
 
-            stages = narrate_stages(
-                whisper_coordinated_stage_functions(), out=_ux
-            )
-            exit_code, report = run_guided(
-                state=state,
-                collection=args.collection,
-                ids=ids,
-                limit=args.limit,
-                synthesis=synthesis,
-                dry_run=args.dry_run,
-                stages=stages,
-                out=_ux,
-            )
+            if args.dry_run:
+                stages = narrate_stages(
+                    whisper_coordinated_stage_functions(), out=_ux
+                )
+                exit_code, report = run_guided(
+                    state=state,
+                    collection=args.collection,
+                    ids=ids,
+                    limit=args.limit,
+                    synthesis=synthesis,
+                    dry_run=True,
+                    stages=stages,
+                    out=_ux,
+                )
+            else:
+                # Interactive TUI when a TTY is available; otherwise the
+                # mandatory fallback runs the EXACT existing line-based
+                # path (session.consent/out are None => defaults).
+                with tui.terminal_ui() as session:
+                    out_fn = session.out if session.out is not None else _ux
+                    stages = narrate_stages(
+                        whisper_coordinated_stage_functions(), out=out_fn
+                    )
+                    exit_code, report = run_guided(
+                        state=state,
+                        collection=args.collection,
+                        ids=ids,
+                        limit=args.limit,
+                        synthesis=synthesis,
+                        dry_run=False,
+                        stages=stages,
+                        consent=session.consent,
+                        out=out_fn,
+                    )
             print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
             if not args.dry_run:
                 from .summary import guided_report_summary, render_table
@@ -1047,18 +1068,35 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "collection-run":
             from .collection_run import CollectionRunError, run_collection
 
-            try:
-                exit_code, report = run_collection(
-                    collection_url=args.collection_url,
-                    state=state,
-                    dry_run=args.dry_run,
-                    limit=args.limit,
-                    declared_count=args.declared_count,
-                    end_evidence=args.end_evidence,
-                )
-            except CollectionRunError as exc:
-                print(f"collection-run: {exc}", file=sys.stderr)
-                return 2
+            if args.dry_run:
+                try:
+                    exit_code, report = run_collection(
+                        collection_url=args.collection_url,
+                        state=state,
+                        dry_run=True,
+                        limit=args.limit,
+                        declared_count=args.declared_count,
+                        end_evidence=args.end_evidence,
+                    )
+                except CollectionRunError as exc:
+                    print(f"collection-run: {exc}", file=sys.stderr)
+                    return 2
+            else:
+                with tui.terminal_ui() as session:
+                    try:
+                        exit_code, report = run_collection(
+                            collection_url=args.collection_url,
+                            state=state,
+                            dry_run=False,
+                            limit=args.limit,
+                            declared_count=args.declared_count,
+                            end_evidence=args.end_evidence,
+                            consent=session.consent,
+                            out=session.out,
+                        )
+                    except CollectionRunError as exc:
+                        print(f"collection-run: {exc}", file=sys.stderr)
+                        return 2
             print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
             return exit_code
 

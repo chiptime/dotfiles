@@ -522,6 +522,28 @@ heartbeat or percentage), and the run ends with a readable summary table
 step). All of this UI is stderr-only: the stdout JSON report keeps its
 exact shape.
 
+#### Interactive terminal UI (curses) and mandatory fallback
+
+On a TTY, `guided-run` and `collection-run` render a live curses
+dashboard (per-id stage states, the current phase/activity and an elapsed
+clock) and show each consent window as an in-place, full-text modal that
+scrolls on small terminals. The consent contract is UNCHANGED: only the
+literal `y`/`yes` grants; EOF, a read error and a non-interactive stdin
+deny; the whole window text (title, ids, destinations, operations,
+limits, effects) is composed and shown. The TUI draws on the terminal
+screen only and NEVER writes to stdout — the JSON report prints only
+after the curses session ends, so stdout stays parseable.
+
+| Situation | Behavior |
+|-----------|----------|
+| TTY + usable `TERM` | curses dashboard + in-place consent modals |
+| Non-TTY, pipe, CI, `TERM=dumb` | EXACT line-based prompts and stderr narration (unchanged) |
+| `curses` cannot start | same line-based fallback as non-TTY |
+| `--dry-run` | zero prompts, zero writes; no TUI is ever started |
+
+The fallback is the SAME `ConsoleConsentProvider` + stderr narration used
+before this change, so behavior on any non-TTY path is byte-identical.
+
 ### Whisper (coordinated automatically when the known service is running)
 
 Vision requires the whisper service STOPPED and audio requires it
