@@ -84,9 +84,9 @@ busqueda-vacaciones:
 
 odata-batch:
   scope: personal
-  status: closed
-  desc: Librería npm OData V2 batch — v2.1.0 publicada con retrieve GET-only sin changesets; 170 tests verificados
-  next: retomar revisión independiente pendiente del modo retrieve en sesión enraizada en odata-batch
+  status: active
+  desc: Librería npm OData V2 batch — v3.0.0 publicada (media types con parámetros, Content-ID MIME, sendGrouped, lotes mixtos); 403 tests y mutation 91.86%
+  next: ampliar el corpus golden (tests/fixtures/sap) con capturas reales de SAP y un test que las recorra
 
 ssff-mcp:
   scope: personal
