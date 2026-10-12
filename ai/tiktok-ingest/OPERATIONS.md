@@ -808,9 +808,12 @@ covered by the run-plan grant.
    original attempt's stage record, gate evidence and partial artifacts
    are archived unmodified first (`vision-attempt-N/` inside the run
    dir, plus the additive `swap_retry` provenance in `meta.json`); the
-   retry is additional evidence, never a replacement. The final stdout
-   JSON keeps its shape and gains an additive per-video retry object
-   (`swap_retries`).
+   retry is additional evidence, never a replacement. That archive runs
+   under the retry authority's restore guarantee: a failing archive step
+   restores the SAME service before it is reported as the terminal
+   `blocked_global` state — the shared service is never left stopped.
+   The final stdout JSON keeps its shape and gains an additive per-video
+   retry object (`swap_retries`).
 
 **Terminal states (distinct, honest).** `retry_declined_pending`,
 `blocked_global` (restoration/lifecycle failure), `cooldown_expired`
