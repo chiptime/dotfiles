@@ -1637,21 +1637,54 @@ def _execute_swap_retry(
     owns: the evidence archive, the isolated-Ollama lifecycle (never
     adopting a preexisting server), the single narrated vision call,
     the server stop, and the whisper restore + bounded health wait on
-    EVERY exit path (success, failure, interrupt). Terminal state and
-    the attempt record land in ``record``.
+    EVERY exit path (success, failure, interrupt). A failing evidence
+    archive also restores the SAME service under the retry authority
+    before its failure is reported. Terminal state and the attempt
+    record land in ``record``.
     """
     started_iso = utc_now_iso()
     started = now()
-    archive = _archive_original_vision_attempt(state, video_id, elig, window)
-    if archive is None:
-        # Never reached in practice (eligibility read the manifest);
-        # honest fail-closed rather than an ungated attempt.
-        raise _SwapRetryBlocked(
-            "the durable manifest disappeared before the retry attempt; "
-            "the retry is not executed and progress is blocked"
-        )
     stopped_info = plan.whisper_info
     assert stopped_info is not None  # narrowing: readmission verified it
+    # The evidence archive runs BEFORE the retry can overwrite the live
+    # paths, but re-admission has ALREADY stopped whisper under the retry
+    # authority. A failing archive here (a raise, or a manifest that
+    # unexpectedly vanished) must therefore restore the SAME service under
+    # that authority before it is reported — the shared service is never
+    # left stopped behind the retry window.
+    try:
+        archive = _archive_original_vision_attempt(
+            state, video_id, elig, window
+        )
+        if archive is None:
+            # Never reached in practice (eligibility read the manifest);
+            # honest fail-closed rather than an ungated attempt.
+            raise _SwapRetryBlocked(
+                "the durable manifest disappeared before the retry "
+                "attempt; the retry is not executed and progress is blocked"
+            )
+    except _SwapRetryBlocked:
+        _restore_whisper_after_drift(
+            stages, stopped_info, now=now, do_sleep=do_sleep,
+            context="a vanished manifest at the retry archive",
+        )
+        raise
+    except KeyboardInterrupt:
+        _restore_whisper_after_drift(
+            stages, stopped_info, now=now, do_sleep=do_sleep,
+            context="an interrupted original-evidence archive at re-admission",
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
+        _restore_whisper_after_drift(
+            stages, stopped_info, now=now, do_sleep=do_sleep,
+            context="a failed original-evidence archive at re-admission",
+        )
+        raise _SwapRetryBlocked(
+            f"the original-failure evidence archive failed ({exc}); the "
+            "retry is not executed and progress is blocked; the SAME "
+            "whisper service is restored healthy under the retry authority"
+        ) from exc
     handle: Any = None
     restore_ok = False
     outcome: Any = None

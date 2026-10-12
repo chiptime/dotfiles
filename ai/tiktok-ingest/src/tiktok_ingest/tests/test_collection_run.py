@@ -1645,6 +1645,82 @@ class TestRetryWindowWhisperRestore(CollectionRunTestCase):
         self.assertEqual(stages.whisper_restores, 2)
         self.assertTrue(stages.whisper_running)
 
+    def _run_archive_failure(
+        self, *, raise_error: bool
+    ) -> tuple[Any, int, dict[str, Any]]:
+        """Drive the retry journey with the ORIGINAL-evidence archive failing.
+
+        The re-admission stops the SAME known service under the retry
+        authority; the archive step then runs BEFORE the retry can
+        overwrite live paths. A failing archive (a raise, or the
+        manifest vanishing so it returns ``None`` unexpectedly) must not
+        leave that stopped service behind.
+        """
+        from unittest import mock
+
+        from tiktok_ingest.tests.test_swap_retry import (
+            FakeClock,
+            ScriptedVmstat,
+        )
+
+        mib = 1024 * 1024
+        clock = FakeClock()
+        stages = _retry_journey_stages(
+            clock, whisper_running=True, vision_outcomes=["failed"]
+        )
+        # Quiet swap the whole way: the re-admission succeeds, so the
+        # archive step is reached with whisper already stopped.
+        vmstat = ScriptedVmstat(deltas=[0.4 * mib] * 20)
+        if raise_error:
+            patcher = mock.patch.object(
+                collection_run,
+                "_archive_original_vision_attempt",
+                side_effect=OSError("fixture: archive copy failed"),
+            )
+        else:
+            patcher = mock.patch.object(
+                collection_run,
+                "_archive_original_vision_attempt",
+                return_value=None,
+            )
+        with patcher:
+            code, report = self._run_journey(stages, vmstat, clock)
+        return stages, code, report
+
+    def test_retry_archive_returning_none_after_stop_restores_whisper(self) -> None:
+        # The archive "returns unexpectedly" (the durable manifest
+        # vanished) after re-admission stopped whisper: the service must
+        # still be restored under the retry authority.
+        stages, code, report = self._run_archive_failure(raise_error=False)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["swap_retries"][0]["state"], "blocked_global")
+        self.assertEqual(stages.whisper_stops, 2)
+        self.assertEqual(stages.whisper_restores, 2)
+        self.assertTrue(stages.whisper_running)
+        # The honest stop is the archive failure, never the stranded-
+        # service "not running after the batch cycle" hard stop.
+        self.assertIsNotNone(report["hard_stop_reason"])
+        self.assertNotIn(
+            "not running after the batch cycle", report["hard_stop_reason"]
+        )
+
+    def test_retry_archive_raising_after_stop_restores_whisper(self) -> None:
+        # The archive step RAISES after re-admission stopped whisper: the
+        # service must be restored under the retry authority before the
+        # failure is reported, and the run must not crash on the raw
+        # error (it reports the honest global block instead).
+        stages, code, report = self._run_archive_failure(raise_error=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["swap_retries"][0]["state"], "blocked_global")
+        self.assertEqual(stages.whisper_stops, 2)
+        self.assertEqual(stages.whisper_restores, 2)
+        self.assertTrue(stages.whisper_running)
+        self.assertIsNotNone(report["hard_stop_reason"])
+        self.assertIn("archive", report["hard_stop_reason"])
+        self.assertNotIn(
+            "not running after the batch cycle", report["hard_stop_reason"]
+        )
+
 
 # --------------------------------------------------------------------------
 # Synthesis API coordination
