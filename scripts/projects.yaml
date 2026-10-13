@@ -44,8 +44,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — HT-05 recordatorios escalados, AT-07 digest de audio (--digest + CHAP), AT-06 ducking (M1 local + transporte winhost) y fix de carrera de shutdown del daemon, fusionados a main; suites engine 1432p + plugin 197p verdes
-  next: Pruebas manuales — F2 física en Android + UAT V3 de AT-11; validar AT-06 M-01 (WASAPI en host Windows) y AT-07 en 2 apps móviles; siguiente implementable: HT-08 briefing matinal
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — HT-05/AT-07/AT-06 + fix de shutdown del daemon en main; sesión 13/10 diagnosticó la mala calidad de audio: TTS_PLAYBACK auto caía en silencio a winhost y, al no estar el receptor, al fallback wsl-ps (PowerShell SoundPlayer); resuelto con TTS_PLAYBACK=local (WSLg PulseAudio); suites engine 1432p + plugin 197p verdes
+  next: Audio — valorar resampler de alta calidad en el decode (miniaudio fuerza 44.1k/2ch sobre fuente 24k, ~26 dB SNR) y revisar los 429 intermitentes de edge-tts en api.msedgeservices.com; para la vía nativa WASAPI hay que desplegar el engine en el host Windows (allí solo hay un 0.1.0 roto, el paquete no está en PyPI). Pendiente: pruebas manuales F2 Android + UAT V3 AT-11, validar AT-06 M-01 (WASAPI) y AT-07 en 2 apps; siguiente implementable: HT-08 briefing matinal
 
 compare-prices:
   scope: personal
