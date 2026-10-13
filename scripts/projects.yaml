@@ -14,8 +14,8 @@
 dotfiles:
   scope: personal
   status: active
-  desc: Infra personal — skills OpenCode/agy-cli (projects-tracker migrado), config centralizada de modelos de agentes, notificaciones ntfy, teams-to-tasks + task-resolver, tools
-  next: commitear refactor de quota-balancer a tools/ai-quotas/plugin y router limpio; trackear opencode.json tras scrub de secrets; prueba real de task-resolver sobre Inbox
+  desc: Infra personal — skills OpenCode/agy-cli, tiktok-ingest (resume idempotente y reintentos intra-fase con barreras de memoria), config modelos, notificaciones ntfy, tools
+  next: commitear tiktok-ingest (resume, reintentos intra-fase y nuevo CLI ingest) tras validación del usuario; refactor quota-balancer a tools/ai-quotas/plugin
 
 agy-bridge:
   scope: personal
@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) deployed via Dokploy; scraping incident root-caused (ufw blocked the container egress — missing Docker bridge rules) and fixed; ALDI migrated to the new Algolia index; release v1.49.0
-  next: provide the legal data (titular/ciudad/canal legal) to close the ToS; refresh MERCADONA categories (crawl yields 0); EAN source decision open
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) deployed via Dokploy; 19/19 supermarket finders verificados y sanos en producción (Carrefour y ECI resueltos con proxy residencial ES y Playwright Stealth a 0€ coste extra); playbook anti-bot documentado
+  next: Re-sincronizar market_categories de ECI/Hipercor y Carrefour en DB de producción; validación periódica con scraper-sentinel
 
 vps:
   scope: personal
