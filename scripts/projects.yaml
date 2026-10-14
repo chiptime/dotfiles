@@ -91,8 +91,8 @@ odata-batch:
 ssff-mcp:
   scope: personal
   status: active
-  desc: MCP local SSFF OData v2 — Fase 2 implementada y subida hasta 20a233e; OAuth, cursor, XML, allowlist y batch; 188 tests y lote PROD de 180 GET verificados
-  next: subir dependencia odata-batch 2.1.0 -> 3.0.0 (BREAKING: validación de media types y parseo Content-ID-first) y adaptar; luego obtener evidencia read-only de roles SAP y completar revisiones nativas
+  desc: MCP local SSFF OData v2 — read-only; get_metadata retirado (0.3.0 publicado) + custom MDF completo en main (c3f81cd): descubrimiento zero-network de cust_, tool inspect_custom_mdf, recurso sf://env/mdf/custom, guia i18n defaultLocale y tope de respuesta 256 KiB; 317 tests. odata-query-fidelity sigue SIN mergear (11 commits en feat/odata-query-fidelity)
+  next: chore: release 0.4.0 con custom MDF; decidir la entrega de feat/odata-query-fidelity (1625 lineas, sin mergear) y subir odata-batch 2.1.0 -> 3.0.0 (BREAKING); confirmar en el PRD la lectura de DS-MDF-05 (<5KB = contenido anadido) y emitir el hint fromDate/toDate cuando aterrice query-fidelity
 
 llm-hub:
   scope: personal
@@ -212,15 +212,15 @@ recruiting-frontend:
   scope: work
   group: sis
   status: active
-  desc: Frontend Clece (Angular) · modal adjuntos verification UX
-  next: commitear en rama propia el modal de progreso al enviar (T8, working tree sobre deploy-develop) y desplegarlo
+  desc: Frontend Clece (Angular) · adjuntos SC: gating del modal de progreso simplificado + tests D9 (rama feature/retry-hr-attachments-form-wizard, validada)
+  next: pushear la rama del modal y decidir PR · decidir commit del PRD
 
 recruiting-backend:
   scope: work
   group: sis
   status: active
-  desc: Backend Clece (SAP CAP) · adjuntos SC: persistencia explícita de enlaces + guard de tipologías
-  next: commitear los tests de T10; decidir commit del frontend T8; probar el 400 en vivo; revisar DARDE cross-routed
+  desc: Backend Clece (SAP CAP) · adjuntos SC: envio idempotente del dispatch (claim atomico + limitador global + sweep) validado en HEAD
+  next: reconciliar en el pack el recuento de G-09 (413 real, no 553) y su cwd · OQ-3 detectar SCs historicas sin IPT/vulnerabilidad
 
 # Products
 HyperMonitor:
