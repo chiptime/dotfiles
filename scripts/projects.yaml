@@ -91,8 +91,8 @@ odata-batch:
 ssff-mcp:
   scope: personal
   status: active
-  desc: MCP local SSFF OData v2 — read-only; get_metadata retirado (0.3.0 publicado) + custom MDF completo en main (c3f81cd): descubrimiento zero-network de cust_, tool inspect_custom_mdf, recurso sf://env/mdf/custom, guia i18n defaultLocale y tope de respuesta 256 KiB; 317 tests. odata-query-fidelity sigue SIN mergear (11 commits en feat/odata-query-fidelity)
-  next: chore: release 0.4.0 con custom MDF; decidir la entrega de feat/odata-query-fidelity (1625 lineas, sin mergear) y subir odata-batch 2.1.0 -> 3.0.0 (BREAKING); confirmar en el PRD la lectura de DS-MDF-05 (<5KB = contenido anadido) y emitir el hint fromDate/toDate cuando aterrice query-fidelity
+  desc: MCP local SSFF OData v2 — read-only; get_metadata retirado (0.3.0 publicado) + custom MDF (tool inspect_custom_mdf, recurso sf://env/mdf/custom, guia i18n defaultLocale, tope de respuesta configurable por SF_MAX_RESPONSE_BYTES) y odata-query-fidelity (encoding %20 crudo, literales tipados en key predicates, effective-dating bare) ya integrados en main (1e8ee3a) y pusheados; 415 tests
+  next: chore: release 0.4.0 cubriendo custom MDF y odata-query-fidelity (coordinar: la otra sesion tambien apunta a ese release); subir odata-batch 2.1.0 -> 3.0.0 (BREAKING)
 
 llm-hub:
   scope: personal
