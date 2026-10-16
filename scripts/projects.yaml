@@ -44,14 +44,14 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — HT-05/AT-07/AT-06 + fix de shutdown del daemon en main; sesión 13/10 diagnosticó la mala calidad de audio: TTS_PLAYBACK auto caía en silencio a winhost y, al no estar el receptor, al fallback wsl-ps (PowerShell SoundPlayer); resuelto con TTS_PLAYBACK=local (WSLg PulseAudio); suites engine 1432p + plugin 197p verdes
-  next: Audio — valorar resampler de alta calidad en el decode (miniaudio fuerza 44.1k/2ch sobre fuente 24k, ~26 dB SNR) y revisar los 429 intermitentes de edge-tts en api.msedgeservices.com; para la vía nativa WASAPI hay que desplegar el engine en el host Windows (allí solo hay un 0.1.0 roto, el paquete no está en PyPI). Pendiente: pruebas manuales F2 Android + UAT V3 AT-11, validar AT-06 M-01 (WASAPI) y AT-07 en 2 apps; siguiente implementable: HT-08 briefing matinal
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 15/10: el cockpit del PWA herdr-brain pasó a tabs (pantalla / vista del agente) con la terminal llenando el panel en vez de una franja fija de 110px; verificado por capas (1789 unit + 155 browser + 391 js + 32 e2e verdes); sigue abierta la vía de audio (TTS_PLAYBACK=local resolvió la mala calidad; pendiente resampler en el decode y los 429 de edge-tts)
+  next: Commitear el cockpit con tabs (hosts/herdr/brain — 4 modificados + 2 nuevos, todavía sin commit); pruebas manuales F2 Android + UAT V3 AT-11; validar AT-06 M-01 (WASAPI) y AT-07 en 2 apps; siguiente implementable HT-08 briefing matinal
 
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) deployed via Dokploy; 19/19 supermarket finders verificados y sanos en producción (Carrefour y ECI resueltos con proxy residencial ES y Playwright Stealth a 0€ coste extra); playbook anti-bot documentado
-  next: Re-sincronizar market_categories de ECI/Hipercor y Carrefour en DB de producción; validación periódica con scraper-sentinel
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) deployed via Dokploy; programa de auditoría top-5 completado — DIA/Eroski/Carrefour/Masymas auditados y remediados, Mercadona en curso por sesión paralela; canary dia-canary.ts de guardia en el cron; anti-bot mapeado (Carrefour=Cloudflare-hard, DIA=Akamai-fingerprint, Eroski/Masymas abiertos)
+  next: VPS — backfill-dia-category-code --apply (tabla scraped_market_products) y verificar CANARY PASS del cron; coordinar proxy-surface de Carrefour al aterrizar la sesión proxy; graduación strict de Eroski tras medir rejection rate en VPS
 
 vps:
   scope: personal
@@ -91,8 +91,8 @@ odata-batch:
 ssff-mcp:
   scope: personal
   status: active
-  desc: MCP local SSFF OData v2 — read-only; get_metadata retirado (0.3.0 publicado) + custom MDF (tool inspect_custom_mdf, recurso sf://env/mdf/custom, guia i18n defaultLocale, tope de respuesta configurable por SF_MAX_RESPONSE_BYTES) y odata-query-fidelity (encoding %20 crudo, literales tipados en key predicates, effective-dating bare) ya integrados en main (1e8ee3a) y pusheados; 415 tests
-  next: chore: release 0.4.0 cubriendo custom MDF y odata-query-fidelity (coordinar: la otra sesion tambien apunta a ese release); subir odata-batch 2.1.0 -> 3.0.0 (BREAKING)
+  desc: MCP local SSFF OData v2 read-only; 4 tools (list_environments, inspect_entity, query_entity, batch_get); custom MDF, odata-query-fidelity, inspect_entity, cache invalidate y maxResponseBytes en main; docs reestructurados (README hub + docs/ configuration/tools/security/troubleshooting/faq/development) con la tabla de tools GENERADA desde src/tool-catalog.ts (pnpm docs:gen + test de sync) y banner/demo SVG; PRDs ejecutados archivados; 417 tests; npm 0.3.0 publicado; 19 commits LOCALES sin push
+  next: git push (19 commits) y publicar 0.4.0 (custom MDF, odata-query-fidelity, inspect_entity, cache invalidate, maxResponseBytes); decidir si se publica assets/ en el paquete
 
 llm-hub:
   scope: personal
@@ -219,8 +219,8 @@ recruiting-backend:
   scope: work
   group: sis
   status: active
-  desc: Backend Clece (SAP CAP) · adjuntos SC: envio idempotente del dispatch (claim atomico + limitador global + sweep) validado en HEAD
-  next: reconciliar en el pack el recuento de G-09 (413 real, no 553) y su cwd · OQ-3 detectar SCs historicas sin IPT/vulnerabilidad
+  desc: Backend Clece (SAP CAP) · adjuntos SC: dispatch idempotente; fix HANA Cannot bind parameter(3) (Date en where tagged-template -> toISOString) validado en envio real
+  next: commitear el fix toISOString (7 sitios) junto/aparte del WIP del limiter · arreglar 4 tests del limiter (self-heal en un statement) y passportCancelled · reconciliar G-09 (413 real) · OQ-3
 
 # Products
 HyperMonitor:
