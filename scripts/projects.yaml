@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) deployed via Dokploy; programa de auditoría top-5 completado — DIA/Eroski/Carrefour/Masymas auditados y remediados, Mercadona en curso por sesión paralela; canary dia-canary.ts de guardia en el cron; anti-bot mapeado (Carrefour=Cloudflare-hard, DIA=Akamai-fingerprint, Eroski/Masymas abiertos)
-  next: VPS — backfill-dia-category-code --apply (tabla scraped_market_products) y verificar CANARY PASS del cron; coordinar proxy-surface de Carrefour al aterrizar la sesión proxy; graduación strict de Eroski tras medir rejection rate en VPS
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) deployed via Dokploy; programa de auditoría top-5 completado — DIA/Eroski/Carrefour/Masymas auditados y remediados, Mercadona en curso por sesión paralela; canary dia-canary.ts de guardia en el cron; anti-bot mapeado (Carrefour=Cloudflare-hard, DIA=Akamai-fingerprint, Eroski/Masymas abiertos); golden set v2 de matching curado a mano (200 entradas con evidencia, familia, dificultad y baseline propio) sin tocar el motor
+  next: VPS — backfill-dia-category-code --apply (tabla scraped_market_products) y verificar CANARY PASS del cron; coordinar proxy-surface de Carrefour al aterrizar la sesión proxy; graduación strict de Eroski tras medir rejection rate en VPS; matching — decidir backfill/regeneración de embeddings (50 de 137 masters esperados son alcanzables) antes de fiarse del recall del bench, y resolver los 9 matches a producto equivocado del último run
 
 vps:
   scope: personal
