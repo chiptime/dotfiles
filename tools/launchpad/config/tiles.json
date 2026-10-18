@@ -1,0 +1,396 @@
+{
+  "tiles": [
+    {
+      "id": "ai-quotas",
+      "name": "AI Quotas",
+      "icon": "📊",
+      "url": "http://127.0.0.1:47623",
+      "description": "Cuotas IA locales",
+      "health_url": "http://127.0.0.1:47623/api/health"
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode Server",
+      "icon": "⌨️",
+      "url": "http://127.0.0.1:4096",
+      "description": "Servidor OpenCode"
+    },
+    {
+      "id": "collie",
+      "name": "Collie",
+      "icon": "🐕",
+      "url": "http://127.0.0.1:8787",
+      "description": "Collie service"
+    },
+    {
+      "id": "herdr-brain",
+      "name": "Herdr Brain",
+      "icon": "🧠",
+      "url": "http://127.0.0.1:8741",
+      "description": "Voice PWA backend"
+    },
+    {
+      "id": "pi-web",
+      "name": "PI Web",
+      "icon": "🥧",
+      "url": "http://127.0.0.1:8504",
+      "description": "PI WEB"
+    },
+    {
+      "id": "projects-dashboard",
+      "name": "Projects Dashboard",
+      "icon": "📁",
+      "url": "http://127.0.0.1:47624",
+      "description": "Dashboard de proyectos"
+    },
+    {
+      "id": "comparaprecio",
+      "name": "ComparaPrecio",
+      "icon": "🛒",
+      "url": "http://127.0.0.1:4200",
+      "description": "Comparador de supermercados"
+    },
+    {
+      "id": "install-opencode-settings-v2",
+      "name": "Install Opencode Settings V2",
+      "kind": "script",
+      "description": "Instalador v2 de ajustes y modelos de opencode (v1 intacto como rollback).",
+      "command": "~/.dotfiles/scripts/install-opencode-settings-v2.sh",
+      "location": "~/.dotfiles/scripts/install-opencode-settings-v2.sh"
+    },
+    {
+      "id": "install-opencode-settings",
+      "name": "Install Opencode Settings",
+      "kind": "script",
+      "description": "Instalador idempotente de ajustes top-level de opencode.",
+      "command": "~/.dotfiles/scripts/install-opencode-settings.sh",
+      "location": "~/.dotfiles/scripts/install-opencode-settings.sh"
+    },
+    {
+      "id": "install-task-resolver",
+      "name": "Install Task Resolver",
+      "kind": "script",
+      "description": "Instalador idempotente del task-resolver (detector HITL): skill symlink + estado + cronta…",
+      "command": "~/.dotfiles/scripts/install-task-resolver.sh",
+      "location": "~/.dotfiles/scripts/install-task-resolver.sh"
+    },
+    {
+      "id": "install-teams-to-tasks",
+      "name": "Install Teams To Tasks",
+      "kind": "script",
+      "description": "Instalador idempotente de teams-to-tasks: mapea dotfiles -> mundo real.",
+      "command": "~/.dotfiles/scripts/install-teams-to-tasks.sh",
+      "location": "~/.dotfiles/scripts/install-teams-to-tasks.sh"
+    },
+    {
+      "id": "opencode-switch-profile",
+      "name": "Opencode Switch Profile",
+      "kind": "script",
+      "description": "Selector de perfiles de modelos para OpenCode",
+      "command": "opencode-switch",
+      "location": "~/.dotfiles/scripts/opencode-switch-profile.sh"
+    },
+    {
+      "id": "pdf-compress",
+      "name": "Pdf Compress",
+      "kind": "script",
+      "description": "pdf-compress — compress a PDF down to a target maximum size",
+      "command": "~/.dotfiles/scripts/pdf-compress.sh",
+      "location": "~/.dotfiles/scripts/pdf-compress.sh"
+    },
+    {
+      "id": "run-smoke-tests",
+      "name": "Run Smoke Tests",
+      "kind": "script",
+      "description": "Runs every automated suite of the projects subsystem. Zero side effects:",
+      "command": "~/.dotfiles/scripts/run-smoke-tests.sh",
+      "location": "~/.dotfiles/scripts/run-smoke-tests.sh"
+    },
+    {
+      "id": "time-ledger",
+      "name": "Time Ledger",
+      "kind": "script",
+      "description": "time-ledger — work-hours ledger per task/project",
+      "command": "~/.dotfiles/scripts/time-ledger.sh",
+      "location": "~/.dotfiles/scripts/time-ledger.sh"
+    },
+    {
+      "id": "opencode-router",
+      "name": "Opencode Router",
+      "kind": "script",
+      "description": "Complete source of truth for the sdd-explore router — the LOCAL opencode-ecosystem",
+      "docs": "~/.dotfiles/ai/opencode-router/README.md",
+      "location": "~/.dotfiles/ai/opencode-router"
+    },
+    {
+      "id": "projects",
+      "name": "Projects",
+      "kind": "script",
+      "description": "Weekly summary of the global project tracker to the phone via ntfy + standalone web dashb…",
+      "docs": "~/.dotfiles/ai/projects/README.md",
+      "location": "~/.dotfiles/ai/projects"
+    },
+    {
+      "id": "teams-to-tasks",
+      "name": "Teams To Tasks",
+      "kind": "script",
+      "description": "Lee Microsoft Teams web mediante un Chromium con perfil persistente (MCP `playwright_team…",
+      "docs": "~/.dotfiles/ai/teams-to-tasks/README.md",
+      "location": "~/.dotfiles/ai/teams-to-tasks"
+    },
+    {
+      "id": "tiktok-ingest",
+      "name": "Tiktok Ingest",
+      "kind": "script",
+      "description": "network access, zero podman calls, zero GPU work, no installs, no",
+      "docs": "~/.dotfiles/ai/tiktok-ingest/README.md",
+      "location": "~/.dotfiles/ai/tiktok-ingest"
+    },
+    {
+      "id": "port-4097",
+      "name": "OpenCode",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:4097"
+    },
+    {
+      "id": "port-47625",
+      "name": "Launchpad",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:47625"
+    },
+    {
+      "id": "agent-tts",
+      "name": "Agent Tts",
+      "kind": "script",
+      "description": "TTS para salidas de agentes (ANSI/spinners → voz), hosts como herdr-brain",
+      "docs": "~/Code/personal/agent-tts/README.md",
+      "location": "~/Code/personal/agent-tts"
+    },
+    {
+      "id": "agy-bridge",
+      "name": "Agy Bridge",
+      "kind": "script",
+      "description": "[![npm version](https://img.shields.io/npm/v/agy-bridge-opencode.svg)](https://www.npmjs.…",
+      "docs": "~/Code/personal/agy-bridge/README.md",
+      "location": "~/Code/personal/agy-bridge"
+    },
+    {
+      "id": "ai-stack",
+      "name": "Ai Stack",
+      "kind": "script",
+      "description": "Personal **AI agent stack** and infrastructure. Currently holds the OpenCode Web",
+      "docs": "~/Code/personal/ai-stack/README.md",
+      "location": "~/Code/personal/ai-stack"
+    },
+    {
+      "id": "ai_workshop_dist_20251124-161644",
+      "name": "Ai Workshop Dist 20251124 161644",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/ai_workshop_dist_20251124-161644"
+    },
+    {
+      "id": "amore",
+      "name": "Amore",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/amore"
+    },
+    {
+      "id": "antigravity-awesome-skills",
+      "name": "Antigravity Awesome Skills",
+      "kind": "script",
+      "description": "[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource…",
+      "docs": "~/Code/personal/antigravity-awesome-skills/README.md",
+      "location": "~/Code/personal/antigravity-awesome-skills"
+    },
+    {
+      "id": "busqueda-vacaciones",
+      "name": "Busqueda Vacaciones",
+      "kind": "script",
+      "description": "A CLI tool for searching vacation rentals on Booking.com with complex multi-person, multi…",
+      "docs": "~/Code/personal/busqueda-vacaciones/README.md",
+      "location": "~/Code/personal/busqueda-vacaciones"
+    },
+    {
+      "id": "engram-sync",
+      "name": "Engram Sync",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/engram-sync"
+    },
+    {
+      "id": "evaluaciones",
+      "name": "Evaluaciones",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/evaluaciones"
+    },
+    {
+      "id": "gentle-ai",
+      "name": "Gentle Ai",
+      "kind": "script",
+      "description": "---",
+      "docs": "~/Code/personal/gentle-ai/README.md",
+      "location": "~/Code/personal/gentle-ai"
+    },
+    {
+      "id": "hermes-gertru-backups",
+      "name": "Hermes Gertru Backups",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/hermes-gertru-backups"
+    },
+    {
+      "id": "homelab",
+      "name": "Homelab",
+      "kind": "script",
+      "description": "Servidor multimedia casero sobre **Raspberry Pi 4**: reproducción con Plex en",
+      "docs": "~/Code/personal/homelab/README.md",
+      "location": "~/Code/personal/homelab"
+    },
+    {
+      "id": "hungry",
+      "name": "Hungry",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/hungry"
+    },
+    {
+      "id": "lambda-test",
+      "name": "Lambda Test",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/lambda-test"
+    },
+    {
+      "id": "llm-hub",
+      "name": "Llm Hub",
+      "kind": "script",
+      "description": "Hub centralizado de LLMs: llama-chat GPU (gemma), embeddings nomic-embed-text, API OpenAI-compatible :4000",
+      "docs": "~/Code/personal/llm-hub/README.md",
+      "location": "~/Code/personal/llm-hub"
+    },
+    {
+      "id": "lucia",
+      "name": "Lucia",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/lucia"
+    },
+    {
+      "id": "modular-saas",
+      "name": "Modular Saas",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/modular-saas"
+    },
+    {
+      "id": "odata-batch",
+      "name": "Odata Batch",
+      "kind": "script",
+      "description": "Build and parse **OData V2 `$batch`** requests in TypeScript/JavaScript: turn an",
+      "docs": "~/Code/personal/odata-batch/README.md",
+      "location": "~/Code/personal/odata-batch"
+    },
+    {
+      "id": "opencode-infra",
+      "name": "Opencode Infra",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/opencode-infra"
+    },
+    {
+      "id": "opencode-plugins",
+      "name": "Opencode Plugins",
+      "kind": "script",
+      "description": "A Bun workspace for small OpenCode plugins.",
+      "docs": "~/Code/personal/opencode-plugins/README.md",
+      "location": "~/Code/personal/opencode-plugins"
+    },
+    {
+      "id": "organize-ideas",
+      "name": "Organize Ideas",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/organize-ideas"
+    },
+    {
+      "id": "portfolio",
+      "name": "Portfolio",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/portfolio"
+    },
+    {
+      "id": "ssff-mcp",
+      "name": "Ssff Mcp",
+      "kind": "script",
+      "description": "[![npm version](https://img.shields.io/npm/v/ssff-mcp.svg)](https://www.npmjs.com/package…",
+      "docs": "~/Code/personal/ssff-mcp/README.md",
+      "location": "~/Code/personal/ssff-mcp"
+    },
+    {
+      "id": "tanny",
+      "name": "Tanny",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/tanny"
+    },
+    {
+      "id": "ts-sap-cap-ddd-example",
+      "name": "Ts Sap Cap Ddd Example",
+      "kind": "script",
+      "description": null,
+      "docs": "~/Code/personal/ts-sap-cap-ddd-example/README.md",
+      "location": "~/Code/personal/ts-sap-cap-ddd-example"
+    },
+    {
+      "id": "voice-assistant",
+      "name": "Voice Assistant",
+      "kind": "script",
+      "description": "Asistente de voz de ultra-baja latencia usando `faster-whisper` con GPU (RTX 4090).",
+      "docs": "~/Code/personal/voice-assistant/README.md",
+      "location": "~/Code/personal/voice-assistant"
+    },
+    {
+      "id": "vps",
+      "name": "Vps",
+      "kind": "script",
+      "description": "```",
+      "docs": "~/Code/personal/vps/README.md",
+      "location": "~/Code/personal/vps"
+    },
+    {
+      "id": "whisper-notes",
+      "name": "Whisper Notes",
+      "kind": "script",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/whisper-notes"
+    },
+    {
+      "id": "wsl-notify-send",
+      "name": "Wsl Notify Send",
+      "kind": "script",
+      "description": "`wsl-notify-send` provides a Windows executable that is intended to be a replacement for …",
+      "docs": "~/Code/personal/wsl-notify-send/README.md",
+      "location": "~/Code/personal/wsl-notify-send"
+    }
+  ]
+}
