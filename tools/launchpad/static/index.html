@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launchpad</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --up: #3fb950; --down: #f85149; --unknown: #8b949e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 20px 24px 8px; }
+  h1 { font-size: 18px; margin: 0; }
+  header .count { color: var(--muted); font-size: 12px; }
+  main { flex: 1; padding: 12px 24px; }
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 18px 0 8px; font-weight: 600;
+  }
+  .grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+  .tile {
+    display: flex; flex-direction: column; gap: 8px; text-decoration: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; color: var(--text); transition: border-color .15s;
+    font: inherit; text-align: left; width: 100%;
+  }
+  a.tile:hover, div.tile:hover { border-color: var(--up); }
+  div.tile { cursor: pointer; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 8px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; background: var(--bg); border: 1px solid var(--border);
+  }
+  .avatar.letter { font-weight: 600; color: var(--muted); font-size: 15px; }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .host { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .desc { color: var(--muted); font-size: 12px; min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); flex: none; }
+  .dot.up { background: var(--up); }
+  .dot.down { background: var(--down); }
+  .cmd {
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 8px; color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .copied { color: var(--up); font-size: 12px; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  footer { color: var(--muted); font-size: 12px; padding: 14px 24px; border-top: 1px solid var(--border); }
+  footer code { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Launchpad</h1>
+  <span class="count" id="count"></span>
+</header>
+<main>
+  <div id="services">
+    <h2>Servicios</h2>
+    <div class="grid" id="grid-web"></div>
+  </div>
+  <div id="scripts">
+    <h2>Scripts &amp; herramientas</h2>
+    <div class="grid" id="grid-script"></div>
+  </div>
+  <div class="empty" id="empty" hidden>
+    Sin tiles — añade servicios en <code>~/.config/launchpad/tiles.json</code>
+    o corre <code>scripts/discover.py --merge</code>
+  </div>
+</main>
+<footer>Launchpad · local only · scripts se copian al portapapeles, nunca se ejecutan desde aquí</footer>
+<script>
+let TILES = [];
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function avatarHtml(t) {
+  return t.icon
+    ? `<div class="avatar">${esc(t.icon)}</div>`
+    : `<div class="avatar letter">${esc((t.name || '?').trim().charAt(0).toUpperCase() || '?')}</div>`;
+}
+
+function webTileHtml(t) {
+  const h = t.health || {};
+  const dot = h.state === 'up' || h.state === 'down' ? ' ' + h.state : '';
+  const label = h.state === 'up' ? (h.latency_ms != null ? h.latency_ms + ' ms' : 'up')
+    : h.state === 'down' ? 'down' : '…';
+  return `<a class="tile" href="${esc(t.url)}" target="_blank" rel="noopener">
+    <div class="row">${avatarHtml(t)}
+      <div style="min-width:0">
+        <div class="name">${esc(t.name)}</div>
+        <div class="host">${esc(t.host)}</div>
+      </div>
+    </div>
+    <div class="desc">${esc(t.description || '')}</div>
+    <div class="status"><span class="dot${dot}"></span>${esc(label)}
+      ${h.state === 'down' && h.error ? '<span title="' + esc(h.error) + '">ⓘ</span>' : ''}
+    </div>
+  </a>`;
+}
+
+function scriptTileHtml(t) {
+  const meta = t.location || t.docs || '';
+  return `<div class="tile" data-copy="${esc(t.command || '')}" role="button" tabindex="0">
+    <div class="row">${avatarHtml(t)}
+      <div style="min-width:0">
+        <div class="name">${esc(t.name)}</div>
+        <div class="host">${esc(meta)}</div>
+      </div>
+    </div>
+    <div class="desc">${esc(t.description || '')}</div>
+    ${t.command ? `<div class="cmd">$ ${esc(t.command)}</div>` : ''}
+    <div class="status copy-hint">click para copiar</div>
+  </div>`;
+}
+
+// Clipboard with execCommand fallback: LAN origins are not secure contexts,
+// so navigator.clipboard can be unavailable there.
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    ok ? resolve() : reject(new Error('copy failed'));
+  });
+}
+
+function wireScriptTiles() {
+  document.querySelectorAll('div.tile[data-copy]').forEach(el => {
+    const command = el.getAttribute('data-copy');
+    const feedback = el.querySelector('.copy-hint');
+    const flashCopied = () => {
+      if (!feedback) return;
+      feedback.textContent = 'copiado ✓';
+      feedback.classList.add('copied');
+      setTimeout(() => {
+        feedback.textContent = 'click para copiar';
+        feedback.classList.remove('copied');
+      }, 1500);
+    };
+    el.addEventListener('click', () => {
+      if (!command) return;
+      copyText(command).then(flashCopied).catch(() => {});
+    });
+    el.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      if (command) copyText(command).then(flashCopied).catch(() => {});
+    });
+  });
+}
+
+function render() {
+  const web = TILES.filter(t => t.kind !== 'script');
+  const scripts = TILES.filter(t => t.kind === 'script');
+  document.getElementById('grid-web').innerHTML = web.map(webTileHtml).join('');
+  document.getElementById('grid-script').innerHTML = scripts.map(scriptTileHtml).join('');
+  document.getElementById('services').hidden = web.length === 0;
+  document.getElementById('scripts').hidden = scripts.length === 0;
+  document.getElementById('empty').hidden = TILES.length > 0;
+  document.getElementById('count').textContent =
+    TILES.length ? `${web.length} servicios · ${scripts.length} scripts` : '';
+  wireScriptTiles();
+}
+
+async function load() {
+  try {
+    const resp = await fetch('/api/tiles');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    TILES = data.tiles || [];
+    render();
+  } catch (e) {
+    document.getElementById('count').textContent = 'error: ' + e.message;
+  }
+}
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

@@ -10,4 +10,5 @@ ai/teams-to-tasks/node_modules/
 .agy-attachments/
 .agy-diagnostics/
 __pycache__/
-*.pyc
+*.pyc# Launchpad build artifacts
+tools/launchpad/target/
