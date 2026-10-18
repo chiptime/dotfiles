@@ -46,12 +46,10 @@ fn run_serve(rest: Vec<String>) -> i32 {
         }
     };
     let manager = Arc::new(crate::providers::PullManager::from_env());
-    let pull: server::PullFn = Arc::new(move |force| {
-        if force {
-            manager.fetch_force()
-        } else {
-            manager.fetch_cached()
-        }
+    let pull: server::PullFn = Arc::new(move |mode| match mode {
+        server::PullMode::Force => manager.fetch_force(),
+        server::PullMode::Cached => manager.fetch_cached(),
+        server::PullMode::LocalOnly => manager.fetch_local_only(),
     });
     let status = Arc::new(crate::status::StatusPoller::new());
     let costs = Arc::new(crate::costs::CostScanner::from_env());

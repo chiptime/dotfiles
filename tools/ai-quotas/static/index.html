@@ -603,7 +603,7 @@ function group(provider, recs) {
   return html + '</section>';
 }
 
-async function load(forceRefresh = false) {
+async function load(forceRefresh = false, localOnly = false) {
   const btn = document.getElementById('btn-refresh');
   const btnIcon = document.getElementById('btn-icon');
   const btnText = document.getElementById('btn-text');
@@ -622,20 +622,24 @@ async function load(forceRefresh = false) {
     } catch { HISTORY = []; }
     LEARNED_DUR = learnDurations(HISTORY);
 
-    const url = forceRefresh ? '/api/refresh' : '/api/quotas';
+    const url = forceRefresh ? '/api/refresh' : (localOnly ? '/api/quotas?local=1' : '/api/quotas');
     // Incident state rides along with the quotas fetch; a /api/status
     // failure must never break quota rendering (badges just stay hidden).
-    const [data, statusData, costsData] = await Promise.all([
-      fetch(url).then(resp => {
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        return resp.json();
-      }),
-      fetch('/api/status').then(r => (r.ok ? r.json() : {})).catch(() => ({})),
-      // A /api/costs failure must never break quota rendering.
-      fetch('/api/costs').then(r => (r.ok ? r.json() : {})).catch(() => ({})),
-    ]);
-    STATUS = statusData.providers || {};
-    COSTS = costsData;
+    // Local-only reloads skip status and costs: both can fire their own
+    // TTL refreshes (status pages, pricing fetch) and must stay quiet.
+    const requests = [fetch(url).then(resp => {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
+    })];
+    if (!localOnly) {
+      requests.push(fetch('/api/status').then(r => (r.ok ? r.json() : {})).catch(() => ({})));
+      requests.push(fetch('/api/costs').then(r => (r.ok ? r.json() : {})).catch(() => ({})));
+    }
+    const [data, statusData, costsData] = await Promise.all(requests);
+    if (!localOnly) {
+      STATUS = statusData.providers || {};
+      COSTS = costsData;
+    }
 
     if (data.config) {
       if (Array.isArray(data.config.order)) ORDER = data.config.order;
@@ -921,14 +925,14 @@ function syncMoreInfoButton() {
   if (document.body) document.body.classList.toggle('moreinfo', moreinfo.on);
 }
 
-// Auto-refresh: reload /api/quotas every minute while enabled (same cached
-// fetch + render path as the manual button, just periodic). Persisted like
-// the other toggles.
-// Randomized cadence (10-30 min) so the dashboard never hammers the API
-// on a predictable beat; each cycle schedules the next one.
-const AUTOREFRESH_MIN_MS = 10 * 60_000;
-const AUTOREFRESH_MAX_MS = 30 * 60_000;
-const autorefresh = { on: localStorage.getItem('autoRefresh') === '1', timer: null };
+// Auto-refresh: local-only reload every 30 s while enabled. It fetches
+// /api/quotas?local=1 (state-dir files + the server's in-memory pull cache,
+// zero remote API calls) through the same render path as the manual button;
+// /api/status and /api/costs are skipped so periodic reloads never trigger
+// their TTL fetches. Remote pulls happen only on the manual refresh button
+// or a full page load. Persisted like the other toggles; on by default.
+const AUTOREFRESH_MS = 30_000;
+const autorefresh = { on: localStorage.getItem('autoRefresh') !== '0', timer: null };
 
 function toggleAutoRefresh() {
   setAutoRefresh(!autorefresh.on);
@@ -946,14 +950,10 @@ function setAutoRefresh(on) {
   syncAutoRefreshButton();
 }
 
-function nextAutoRefreshDelay() {
-  return AUTOREFRESH_MIN_MS + Math.random() * (AUTOREFRESH_MAX_MS - AUTOREFRESH_MIN_MS);
-}
-
 function scheduleAutoRefresh() {
   autorefresh.timer = setTimeout(() => {
-    load(false).finally(scheduleAutoRefresh);
-  }, nextAutoRefreshDelay());
+    load(false, true).finally(scheduleAutoRefresh);
+  }, AUTOREFRESH_MS);
 }
 
 function syncAutoRefreshButton() {
@@ -961,12 +961,12 @@ function syncAutoRefreshButton() {
   if (btn) {
     btn.textContent = 'auto-refresh: ' + (autorefresh.on ? 'on' : 'off');
     btn.classList.toggle('on', autorefresh.on);
-    btn.title = 'Recarga los datos automáticamente cada 10-30 minutos (intervalo aleatorio).';
+    btn.title = 'Recarga local cada 30 s (ficheros de estado + caché del servidor, sin llamadas a APIs remotas); el botón de refresco fuerza un pull remoto.';
   }
 }
 
-// Initial load (from cache / state dir only; periodic reloads only when the
-// user turned auto-refresh on)
+// Initial load (from cache / state dir only; periodic local reloads run
+// unless the user turned auto-refresh off)
 syncMoreInfoButton();
 syncWorkdayButton();
 setAutoRefresh(autorefresh.on);

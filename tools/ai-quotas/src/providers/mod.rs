@@ -126,6 +126,14 @@ impl<S: QuotaSource> CachedSource<S> {
         self.fetch()
     }
 
+    /// Serve whatever the in-memory cache holds, expired or not, with zero
+    /// network: a cold cache yields an empty vec, a warm one yields the last
+    /// served snapshot. Never calls the inner source.
+    pub fn fetch_local_only(&self) -> Vec<ProviderRecord> {
+        let guard = self.state.read().unwrap_or_else(|p| p.into_inner());
+        guard.cached.clone().unwrap_or_default()
+    }
+
     /// Force a live fetch immediately, bypassing cache TTL and updating cache.
     pub fn fetch_force(&self) -> Vec<ProviderRecord> {
         let fetched = self.inner.fetch();
@@ -238,6 +246,18 @@ impl PullManager {
         out.extend(self.opencode.fetch_force());
         out.extend(self.deepseek.fetch_force());
         out.extend(self.zai.fetch_force());
+        out
+    }
+
+    /// Zero-network variant: every provider serves its in-memory snapshot,
+    /// expired or not; no provider API is ever contacted.
+    pub fn fetch_local_only(&self) -> Vec<ProviderRecord> {
+        let mut out = Vec::new();
+        out.extend(self.claude.fetch_local_only());
+        out.extend(self.chatgpt.fetch_local_only());
+        out.extend(self.opencode.fetch_local_only());
+        out.extend(self.deepseek.fetch_local_only());
+        out.extend(self.zai.fetch_local_only());
         out
     }
 }
@@ -366,5 +386,21 @@ mod tests {
         assert_eq!(out[0].state, State::Error);
         assert!(out[0].record.is_none());
         assert_eq!(out[0].detail.as_deref(), Some("no network"));
+    }
+
+    #[test]
+    fn local_only_fetch_serves_cache_without_network() {
+        let source = ScriptedSource::new(vec![ok_rec("p", 5.0)]);
+        let cached = CachedSource::with_ttl(source, Duration::ZERO);
+        // Cold cache: local-only yields nothing and must not touch the source.
+        assert!(cached.fetch_local_only().is_empty());
+        assert_eq!(cached.inner.calls.get(), 0);
+        // Warm the cache with one live fetch (TTL=ZERO refetches on every
+        // normal call); local-only must return that snapshot unchanged.
+        let warmed = cached.fetch();
+        assert_eq!(cached.inner.calls.get(), 1);
+        let out = cached.fetch_local_only();
+        assert_eq!(cached.inner.calls.get(), 1, "local-only must never fetch");
+        assert_eq!(out, warmed);
     }
 }

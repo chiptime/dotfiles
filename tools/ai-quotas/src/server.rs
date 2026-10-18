@@ -19,9 +19,33 @@ use crate::{balancer, costs, history};
 const INDEX_HTML: &str = include_str!("../static/index.html");
 pub const DEFAULT_PORT: u16 = 47_623;
 
+/// Pull strategy for quota requests, parsed from the URL.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PullMode {
+    /// Serve the TTL cache; fetch live only when the window expired.
+    Cached,
+    /// Bypass the cache and fetch live from the providers.
+    Force,
+    /// State-dir files + in-memory pull cache only; never touch the network.
+    LocalOnly,
+}
+
+/// `refresh=1|true` (or the `/api/refresh` path) forces live pulls;
+/// `local=1|true` serves local state with zero network. Refresh wins over
+/// local when both are present.
+fn pull_mode(raw_url: &str, path: &str) -> PullMode {
+    if raw_url.contains("refresh=1") || raw_url.contains("refresh=true") || path == "/api/refresh" {
+        PullMode::Force
+    } else if raw_url.contains("local=1") || raw_url.contains("local=true") {
+        PullMode::LocalOnly
+    } else {
+        PullMode::Cached
+    }
+}
+
 /// Shared, thread-safe provider of live pull records (e.g. `pull_all` or `PullManager`).
-/// The bool parameter specifies whether a force refresh (bypassing TTL cache) was requested.
-pub type PullFn = Arc<dyn Fn(bool) -> Vec<Status> + Send + Sync>;
+/// The mode parameter selects cached, forced, or zero-network local pulls.
+pub type PullFn = Arc<dyn Fn(PullMode) -> Vec<Status> + Send + Sync>;
 
 /// Bind and serve forever. Returns an error only when binding fails.
 pub fn serve(bind_addr: &str, dir: PathBuf, pull: PullFn, status: Arc<StatusPoller>, costs: Arc<costs::CostScanner>) -> Result<(), String> {
@@ -112,11 +136,11 @@ fn handle(request: tiny_http::Request, dir: &Path, pull: &PullFn, status: &Statu
 fn route(request: &tiny_http::Request, dir: &Path, pull: &PullFn, status: &StatusPoller, costs: &costs::CostScanner) -> (u16, String, String) {
     let raw_url = request.url();
     let path = raw_url.split('?').next().unwrap_or("/");
-    let is_refresh = raw_url.contains("refresh=1") || raw_url.contains("refresh=true") || path == "/api/refresh";
+    let mode = pull_mode(raw_url, path);
     match path {
         "/" => (200, "text/html; charset=utf-8".into(), INDEX_HTML.into()),
         "/api/health" => (200, "application/json".into(), "{\"status\":\"ok\"}".into()),
-        "/api/quotas" | "/api/refresh" => (200, "application/json".into(), quotas_body(dir, pull, is_refresh)),
+        "/api/quotas" | "/api/refresh" => (200, "application/json".into(), quotas_body(dir, pull, mode)),
         "/api/status" => (200, "application/json".into(), status_body(status)),
         "/api/costs" => (200, "application/json".into(), costs_body(costs)),
         "/api/history" => (200, "application/json".into(), history_body(dir)),
@@ -139,10 +163,10 @@ fn config_body() -> String {
 /// via the cached wrappers, one flat JSON object per status. Also appends a
 /// throttled (max one per hour) history snapshot under the state dir so the
 /// UI can show weekly closes, ritmo trends and learned window durations.
-fn quotas_body(dir: &Path, pull: &PullFn, force_refresh: bool) -> String {
+fn quotas_body(dir: &Path, pull: &PullFn, mode: PullMode) -> String {
     let now = Utc::now();
     let file_statuses = reader::read_dir_status(dir);
-    let pull_statuses = pull(force_refresh);
+    let pull_statuses = pull(mode);
     let statuses = reader::merge_statuses(file_statuses, pull_statuses);
     append_history_snapshot(dir, &statuses, now);
     let records: Vec<Value> = statuses.iter().map(|s| status_to_json(s, now)).collect();
@@ -255,7 +279,7 @@ fn history_body(dir: &Path) -> String {
 /// same state dir (R8 — this server is the sole history writer).
 fn balancer_recommend_body(dir: &Path, pull: &PullFn, model: &str) -> String {
     let now = Utc::now();
-    let statuses = reader::merge_statuses(reader::read_dir_status(dir), pull(false));
+    let statuses = reader::merge_statuses(reader::read_dir_status(dir), pull(PullMode::Cached));
     let advice = balancer::advise(balancer::load_config().as_ref(), model, &statuses);
     history::append(dir, now, &advice);
     serde_json::to_string(&advice).unwrap_or_else(|_| "{}".to_string())
@@ -364,6 +388,30 @@ mod tests {
     use crate::providers::missing_record;
     use crate::reader::State;
     use crate::schema::{Kind, Record, Source};
+
+    #[test]
+    fn pull_mode_parses_refresh_local_and_default() {
+        assert_eq!(pull_mode("/api/quotas", "/api/quotas"), PullMode::Cached);
+        assert_eq!(pull_mode("/api/refresh", "/api/refresh"), PullMode::Force);
+        assert_eq!(pull_mode("/api/quotas?refresh=1", "/api/quotas"), PullMode::Force);
+        assert_eq!(
+            pull_mode("/api/quotas?refresh=true", "/api/quotas"),
+            PullMode::Force
+        );
+        assert_eq!(
+            pull_mode("/api/quotas?local=1", "/api/quotas"),
+            PullMode::LocalOnly
+        );
+        assert_eq!(
+            pull_mode("/api/quotas?local=true", "/api/quotas"),
+            PullMode::LocalOnly
+        );
+        // An explicit force refresh wins over local-only.
+        assert_eq!(
+            pull_mode("/api/quotas?local=1&refresh=1", "/api/quotas"),
+            PullMode::Force
+        );
+    }
 
     fn at() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-08-20T14:05:12Z")
