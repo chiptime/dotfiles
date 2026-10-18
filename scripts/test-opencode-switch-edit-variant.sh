@@ -126,7 +126,11 @@ test_migration_data() {
     else
       fail "models.$map.json: model values or metadata drifted from the pre-migration snapshot"
     fi
-    if jq -e --argjson frag "$frag_variants" '
+    local expected_variants="$frag_variants"
+    if [ "$map" = "openai" ]; then
+      expected_variants='{"general":"high","gentle-orchestrator":"","gentle-ai-explore":"high","gentle-ai-worker":"high","gentle-ai-worker-fallback":"high","gentle-ai-verify":"high","jd-fix-agent":"max","jd-fix-agent-fallback":"high"}'
+    fi
+    if jq -e --argjson frag "$expected_variants" '
         [.agents | to_entries[] | .value.variant == ($frag[.key] // "")] | all
       ' "$file" >/dev/null 2>&1; then
       ok "models.$map.json: migrated variants (shared-fragment agents kept theirs, others default)"
@@ -226,6 +230,21 @@ run_switch() { # profile bindir input(with \n escapes)
     bash "$SWITCH_UNDER_TEST" edit "$1" > "$SB/out.log" 2> "$SB/err.log" || RUN_RC=$?
 }
 
+run_switch_cmd() { # bindir input(with \n escapes) args...
+  local bindir="$1"
+  local input="$2"
+  shift 2
+  RUN_RC=0
+  printf '%b' "$input" | env \
+    HOME="$SB/home" \
+    PATH="$SB/$bindir:$PATH" \
+    OC_MARK="$SB/opencode.marker" \
+    OC_INSTALLER_LOG="$SB/installer.log" \
+    OPENCODE_SWITCH_MODELS_DIR="$MODELS_SB" \
+    OPENCODE_SWITCH_INSTALLER="$SB/installer-fake.sh" \
+    bash "$SWITCH_UNDER_TEST" "$@" > "$SB/out.log" 2> "$SB/err.log" || RUN_RC=$?
+}
+
 marker_calls() { wc -l < "$SB/opencode.marker" | tr -d ' '; }
 installer_runs() { wc -l < "$SB/installer.log" | tr -d ' '; }
 
@@ -256,11 +275,23 @@ test_agent_list_shows_model_and_variant() {
   make_sandbox
   run_switch active bin-broken '\n'
   assert_eq "exit code" 0 "$RUN_RC"
+  assert_contains "list shows small_model" "$SB/out.log" "small_model"
   assert_contains "list shows pair model" "$SB/out.log" "fake/model-a"
   assert_contains "list shows pair variant" "$SB/out.log" "high"
   assert_contains "list marks legacy entries" "$SB/out.log" "legacy"
   assert_no_writes
   assert_installer_never
+  cleanup_sandbox
+}
+
+test_edit_small_model_active() {
+  echo "edit small_model on active profile: writes new small_model, does not ask for variant"
+  make_sandbox
+  run_switch active bin-ok 'small_model\nfake/model-b\nn\n'
+  assert_eq "exit code" 0 "$RUN_RC"
+  assert_eq "small_model updated in profile" "fake/model-b" "$(jq -r '.small_model' "$MODELS_SB/models.v2.json")"
+  assert_eq "installer never invoked" 0 "$(installer_runs)"
+  assert_eq "catalogue consulted once" 1 "$(marker_calls)"
   cleanup_sandbox
 }
 
@@ -276,6 +307,62 @@ test_variant_only_active() {
   assert_eq "installer ran exactly once" 1 "$(installer_runs)"
   assert_eq "opencode models never called" 0 "$(marker_calls)"
   assert_contains "variant prompt shows selected model" "$SB/out.log" "fake/model-a"
+  cleanup_sandbox
+}
+
+test_variant_only_active_declined() {
+  echo "variant-only on active profile + decline: profile saved, no installer"
+  make_sandbox
+  run_switch active bin-broken 'worker\n2\nmax\nn\n'
+  assert_eq "exit code" 0 "$RUN_RC"
+  assert_eq "worker stays a pair" "pair" "$(agent_kind worker models.v2.json)"
+  assert_eq "worker variant updated in profile" "max" "$(agent_variant worker models.v2.json)"
+  assert_eq "installer never invoked" 0 "$(installer_runs)"
+  assert_eq "opencode models never called" 0 "$(marker_calls)"
+  assert_contains "communicates saved but not applied" "$SB/out.log" "NO aplicado"
+  cleanup_sandbox
+}
+
+test_continue_modifying_models_active() {
+  echo "continue modifying models in active profile: loop edits multiple agents and applies once"
+  make_sandbox
+  run_switch active bin-broken 'worker\n2\nmax\nhelper\n2\nlow\ns\n'
+  assert_eq "exit code" 0 "$RUN_RC"
+  assert_eq "worker variant updated" "max" "$(agent_variant worker models.v2.json)"
+  assert_eq "helper variant updated" "low" "$(agent_variant helper models.v2.json)"
+  assert_eq "installer ran exactly once" 1 "$(installer_runs)"
+  cleanup_sandbox
+}
+
+test_continue_modifying_models_active_declined() {
+  echo "continue modifying models in active profile + decline: loop edits multiple agents, no installer"
+  make_sandbox
+  run_switch active bin-broken 'worker\n2\nmax\nhelper\n2\nlow\nn\n'
+  assert_eq "exit code" 0 "$RUN_RC"
+  assert_eq "worker variant updated" "max" "$(agent_variant worker models.v2.json)"
+  assert_eq "helper variant updated" "low" "$(agent_variant helper models.v2.json)"
+  assert_eq "installer never invoked" 0 "$(installer_runs)"
+  assert_contains "communicates saved but not applied" "$SB/out.log" "NO aplicado"
+  cleanup_sandbox
+}
+
+test_no_apply_flag_active() {
+  echo "--no-apply flag on active profile: writes pair and exits without installer"
+  make_sandbox
+  run_switch_cmd bin-broken 'worker\n2\nmax\n' --no-apply edit active
+  assert_eq "exit code" 0 "$RUN_RC"
+  assert_eq "worker variant updated" "max" "$(agent_variant worker models.v2.json)"
+  assert_eq "installer never invoked" 0 "$(installer_runs)"
+  assert_contains "communicates --no-apply" "$SB/out.log" "--no-apply activado"
+  cleanup_sandbox
+}
+
+test_apply_command() {
+  echo "apply subcommand: runs installer on active profile"
+  make_sandbox
+  run_switch_cmd bin-broken '' apply
+  assert_eq "exit code" 0 "$RUN_RC"
+  assert_eq "installer ran exactly once" 1 "$(installer_runs)"
   cleanup_sandbox
 }
 
@@ -597,7 +684,13 @@ main() {
   echo "SKIP pseudo-tty fzf flow (unstable to automate deterministically; read-path covered below)"
   test_migration_data
   test_agent_list_shows_model_and_variant
+  test_edit_small_model_active
   test_variant_only_active
+  test_variant_only_active_declined
+  test_continue_modifying_models_active
+  test_continue_modifying_models_active_declined
+  test_no_apply_flag_active
+  test_apply_command
   test_variant_only_inactive_declined
   test_variant_only_inactive_accepted
   test_variant_default_clears
