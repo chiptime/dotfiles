@@ -1,6 +1,6 @@
 # Launchpad — custom app/service launcher
 
-Objective: a personal launchpad web service listing local applications and services as health-checked tiles. Branch: current (uncommitted work in dotfiles). Delivery: ask-on-risk. Runner: `cargo test` in `tools/launchpad`.
+Objective: a personal launchpad web service listing local applications and services as health-checked tiles. Branch: master. Commits: ai-quotas 9d14e75, launchpad 3194e4d (work-unit). Delivery: ask-on-risk. Runner: `cargo test` in `tools/launchpad`.
 
 ## Specs
 
@@ -44,3 +44,4 @@ Objective: a personal launchpad web service listing local applications and servi
 - L7 (2026-10-18): T6-T9 done. Evidence: `cargo test` 16 passed; discovery stdout valid JSON; `--merge` 14 added (9 script de scripts/, 4 ai/*, port-4097, port-47625) → 21 tiles (9 web / 12 script), segunda pasada 0 added (idempotente); deploy back OK; `/api/tiles` 9/9 web up; playwright: secciones renderizadas, alias resuelto (`$ opencode-switch`), click copia → "copiado ✓". Known cosmetic: tiktok-ingest description empieza a mitad de frase (README parser toma la primera línea de cuerpo); favicon 404. Sin commit (no pedido).
 - L8 (2026-10-18): "te pedire que la web no corte los titulos, no deben tener elipsis sino permitir el render completo del titutlo. por el momento me parece todo bien, si puedes mira en otras rutas que a lo mejor tengo features como voice-assistant, llm-hub (con sus funcionalidades principales como whisper->voz, embedings o pensamiento de llm pequeño) o similar que no aparecen"
 - L9 (2026-10-18): T10-T11 done. Recon: proyectos personales en ~/Code/personal (30 dirs no-worktree; llm-hub sirve API :4000 con llama-chat GPU + nomic-embed; voice-assistant usa faster-whisper RTX 4090; agent-tts hostea herdr-brain). Merge 29 added → 50 tiles; idempotencia 0 added; README documenta kind/autodiscovery. Cosmetics previos se mantienen.
+- L10 (2026-10-18): user authorized work-unit commits. 9d14e75 feat(ai-quotas) local-only auto-refresh (4 files, +125/-43, cargo test 131); 3194e4d feat(launchpad) tool + doc (14 files, +2689 incl. Cargo.lock y tiles.json de 50 tiles, cargo test 16). Secret scan clean; pre-existing dirty files (tiktok-ingest, aliases, etc.) left untouched.
