@@ -14,8 +14,8 @@
 dotfiles:
   scope: personal
   status: active
-  desc: Infra personal — skills OpenCode/agy-cli, opencode-switch (selector interactivo modelo/variante con flechas, small_model y loop diferido), tiktok-ingest (resume idempotente y reintentos intra-fase con barreras de memoria), config modelos, notificaciones ntfy, tools
-  next: commitear tiktok-ingest (resume, reintentos intra-fase y nuevo CLI ingest) tras validación del usuario; refactor quota-balancer a tools/ai-quotas/plugin
+  desc: Infra personal — skills OpenCode/agy-cli, opencode-switch, tiktok-ingest, ai-quotas (ritmo multi-ventana semanal/mensual con cuello de botella y soporte monthly_labels), config modelos, notificaciones ntfy, tools. 19/10: launchpad con buscador+facetas tipo/tema, tags auto (personal/trabajo/ia/voz/sap/teams), discovery recursivo de ~/Code/Work (20 repos Stratesys) y portal fase 1 (nav Catálogo/Seguimiento + discovery timer 30min atómico y local)
+  next: commitear el trabajo pendiente (launchpad+portal fase 1, tiktok-ingest, ai-quotas) tras validación del usuario; portal fase 2 (fichas unificadas tile↔tracker) cuando toque; limpiar tiles-grupo obsoletas del tiles.json
 
 agy-bridge:
   scope: personal
@@ -44,14 +44,14 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 15/10: el cockpit del PWA herdr-brain pasó a tabs (pantalla / vista del agente) con la terminal llenando el panel en vez de una franja fija de 110px; verificado por capas (1789 unit + 155 browser + 391 js + 32 e2e verdes); sigue abierta la vía de audio (TTS_PLAYBACK=local resolvió la mala calidad; pendiente resampler en el decode y los 429 de edge-tts)
-  next: Commitear el cockpit con tabs (hosts/herdr/brain — 4 modificados + 2 nuevos, todavía sin commit); pruebas manuales F2 Android + UAT V3 AT-11; validar AT-06 M-01 (WASAPI) y AT-07 en 2 apps; siguiente implementable HT-08 briefing matinal
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 19/10: la PWA permite responder diálogos bloqueados del agente desde el móvil (herdr send-keys con allowlist cerrada, POST /pane/keys), pinta el question-tool como HTML legible y estrena temas claro/oscuro conmutables en Ajustes con contraste >=4.5:1; footer de llamada anclado al viewport con reserva medida; 2002 unit + 186 browser + 391 js verdes
+  next: Push del commit local 4b13d75 y confirmar en Android que Llamar se ve entero; decidir chips de respuesta rápida (validar anclaje en agente desechable); el cursor del terminal NO existe en la API de herdr, no habrá marcador de opción seleccionada; sigue abierta la vía de audio (resampler en decode, 429 de edge-tts) y F2/UAT pendientes
 
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) via Dokploy. UI rediseño mergeado + CI verde + 58 tests frontend a 0. Maratón baselines de productos 3/19 verificados en master (a4cac3aa: Mercadona 4321 walk API, DIA 7810 sitemap, ALDI 2682 Algolia); 16 pending con método anotado en backend/data/market-product-baselines.json
-  next: Verificar los 16 mercados restantes (10-20 min por market en sesión fresca: Eroski stealth, La Sirena GraphQL, Carrefour cloud-api, sitemaps Ahorramas/Spar); al llegar a 6-8 verificados, conectar Fase 2 (volume-ok/volume-low en canary_results + columna en coverage report). Handoff backend (~559 tests + gate TS) sigue pendiente en Engram
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) via Dokploy. UI rediseño mergeado + CI verde + 58 tests frontend a 0. Maratón baselines de productos 8/19 verificados en master (083ecf55: Gadis 12075, Consum 9284, Masymas 7785, Mercadona 4321, Ahorramas 4519, DIA 7810, ALDI 2682, Spar 1707); 11 pending con método anotado en backend/data/market-product-baselines.json
+  next: Gate Fase 2 superado (8 verificados) — sesión propia para implementar volume-ok/volume-low en canary_results + columna en coverage report. Seguir con los 11 restantes (Eroski stealth, La Sirena GraphQL, Carrefour cloud-api, Alcampo necesita browser por 403, Bonarea/ECI/BM/Alimerka/Condis/Hiperber). Ojo: ApiSparCategoryScraper apunta a sitemaps hoy 404 (shop real en spar.es/wpold/); master divergido de origin (local 8 baselines vs bb22c42c docs ODD pusheado) — resolver antes de pushear. Handoff backend (~559 tests + gate TS) pendiente en Engram
 
 vps:
   scope: personal
