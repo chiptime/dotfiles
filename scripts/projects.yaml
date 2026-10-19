@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) deployed via Dokploy; Carrefour desbloqueado en prod (99 categorias cat-* via cloud-api/categories/menu + crawl verificado 48 items, 0 errores); DIA/Eroski/Masymas remediados; Mercadona en curso; golden set v2 de matching curado (200 entradas)
-  next: VPS — backfill-dia-category-code --apply (tabla scraped_market_products) y verificar CANARY PASS del cron; coordinar proxy-surface de Carrefour al aterrizar la sesion proxy; graduacion strict de Eroski tras medir rejection rate en VPS; matching — decidir backfill/regeneracion de embeddings (50 de 137 masters esperados son alcanzables) y resolver los 9 matches a producto equivocado del ultimo run
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) via Dokploy. UI redisena completa mergeada (shell admin desacoplado, tokens AA, a11y) + CI verde (docs-links, visual con baselines CI, gate TS 0/0) + 58 tests frontend a 0 + product_url e2e + seed e2e espanol. Pendiente: ~559 tests backend (triaje en docs) y gate TS backend en WIP de otro flujo
+  next: Handoff prompt guardado en Engram (HANDOFF backend test debt + gate TS) para cerrar ~559 tests backend y ~16 errores TS en sesion propia; VPS backfill-dia y canary del cron siguen en su flujo
 
 vps:
   scope: personal
@@ -98,6 +98,12 @@ llm-hub:
   scope: personal
   status: active
   desc: Hub para levantar modelos locales — vivo, uso puntual
+
+modular-saas:
+  scope: personal
+  status: active
+  desc: SaaS modular para comercios de barrio (piezas de Lego) — Angular + Bun/Elysia + PostgreSQL; especificación funcional cerrada (140 reglas), proveedores verificados y precios fijados en docs/
+  next: redactar PRD técnico y plan de sprints del MVP a partir de docs/features.md
 
 # ---- Personal: learning / one-offs ----
 
