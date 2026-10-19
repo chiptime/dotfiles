@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) via Dokploy. UI redisena completa mergeada (shell admin desacoplado, tokens AA, a11y) + CI verde (docs-links, visual con baselines CI, gate TS 0/0) + 58 tests frontend a 0 + product_url e2e + seed e2e espanol. Pendiente: ~559 tests backend (triaje en docs) y gate TS backend en WIP de otro flujo
-  next: Handoff prompt guardado en Engram (HANDOFF backend test debt + gate TS) para cerrar ~559 tests backend y ~16 errores TS en sesion propia; VPS backfill-dia y canary del cron siguen en su flujo
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) via Dokploy. UI rediseño mergeado + CI verde + 58 tests frontend a 0. Maratón baselines de productos 3/19 verificados en master (a4cac3aa: Mercadona 4321 walk API, DIA 7810 sitemap, ALDI 2682 Algolia); 16 pending con método anotado en backend/data/market-product-baselines.json
+  next: Verificar los 16 mercados restantes (10-20 min por market en sesión fresca: Eroski stealth, La Sirena GraphQL, Carrefour cloud-api, sitemaps Ahorramas/Spar); al llegar a 6-8 verificados, conectar Fase 2 (volume-ok/volume-low en canary_results + columna en coverage report). Handoff backend (~559 tests + gate TS) sigue pendiente en Engram
 
 vps:
   scope: personal
