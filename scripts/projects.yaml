@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) via Dokploy. UI rediseño mergeado + CI verde + 58 tests frontend a 0. Baselines de productos 17/19 verificadas en master (f7bbbe16: Alcampo 93845, Bonarea 13190, Carrefour 12491, Gadis 12075, Consum 9284, BM 8078, DIA 7810, Masymas 7785, Hiperber 6978, Alimerka 6875, Condis 7590, Mercadona 4321, Ahorramas 4519, ALDI 2682, Eroski 22096 grocery, Spar 1707, La Sirena 1432); 2 bloqueados con evidencia (Hipercor/El Corte Inglés). Fase 2 volume-checks implementada y en master (61cd1bdf).
-  next: Desbloquear Hipercor/El Corte Inglés (requieren sesión navegador con ZIP de entrega + walk de categorías, tipo Eroski); revisar ApiSparCategoryScraper (sitemaps 404, shop en spar.es/wpold/); handoff backend (~559 tests + gate TS) sigue pendiente en Engram
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) via Dokploy. UI rediseño mergeado + CI verde + 58 tests frontend a 0. Baselines de productos 19/19 verificadas en master (6e24ab15): Alcampo 93845, Eroski 22096 (grocery), El Corte Inglés 19996, Hipercor 19584, Bonarea 13190, Carrefour 12491, Gadis 12075, Consum 9284, BM 8078, DIA 7810, Masymas 7785, Condis 7590, Hiperber 6978, Alimerka 6875, Mercadona 4321, Ahorramas 4519, ALDI 2682, Spar 1707, La Sirena 1432. Fase 2 volume-checks implementada y en master (61cd1bdf).
+  next: Revisar HttpECIFinder (apunta a /api/productos/search que devuelve 404; la vía real es JSON SSR con response_type: json + plp.pagination.count, raíz capada en 10000, sumar L1) y ApiSparCategoryScraper (sitemaps 404, shop en spar.es/wpold/); handoff backend (~559 tests + gate TS) sigue pendiente en Engram
 
 vps:
   scope: personal
@@ -102,8 +102,8 @@ llm-hub:
 modular-saas:
   scope: personal
   status: active
-  desc: SaaS modular para comercios de barrio (piezas de Lego) — Angular + Bun/Elysia + PostgreSQL; 140 reglas cerradas, PRD técnico v2 aprobado (SMS fuera, 7 sprints × 2 semanas)
-  next: arrancar SDD del sprint 1 (fundación: monorepo, CI, RLS, auth, i18n) tras releer docs/prds/mvp-tecnico.md
+  desc: SaaS modular para comercios de barrio (piezas de Lego) — Angular + Bun/Elysia + PostgreSQL; 10 módulos con diagramas, MOD_BILLING (ficha venta/Holded), PRD técnico aprobado (7 sprints)
+  next: commit de especificaciones y arrancar SDD de S1 (fundación: monorepo, CI, RLS, auth, Meta API)
 
 # ---- Personal: learning / one-offs ----
 
