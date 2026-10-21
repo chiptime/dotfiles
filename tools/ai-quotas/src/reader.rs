@@ -32,6 +32,7 @@ pub struct KnownProvider {
 pub const KNOWN_PROVIDERS: &[KnownProvider] = &[
     KnownProvider { id: "claude", display_name: "Claude Pro", mode: Mode::Pull },
     KnownProvider { id: "gemini", display_name: "Google Gemini", mode: Mode::File },
+    KnownProvider { id: "gemini-argon", display_name: "Gemini 4 Argon", mode: Mode::File },
     KnownProvider { id: "gemini-3p", display_name: "Antigravity (Claude)", mode: Mode::File },
     KnownProvider { id: "chatgpt", display_name: "ChatGPT Plus", mode: Mode::Pull },
     KnownProvider { id: "opencode", display_name: "OpenCode Go", mode: Mode::Pull },
@@ -154,7 +155,7 @@ pub fn read_dir_status(dir: &Path) -> Vec<Status> {
             // split is handled here at read time.
             let provider = remap_provider(&raw_provider, status.record.as_ref());
             status.provider = provider.clone();
-            if provider == "gemini-3p" {
+            if provider == "gemini-3p" || provider == "gemini-argon" {
                 status.display_name = known_display_name(&provider);
                 if let Some(ref mut rec) = status.record {
                     rec.provider = provider.clone();
@@ -190,7 +191,8 @@ pub fn read_dir_status(dir: &Path) -> Vec<Status> {
 
 /// Remap a raw provider id using the record label. `"gemini"` records whose
 /// label starts with `"3p"` (ASCII case-insensitive) are promoted to
-/// `"gemini-3p"` so they appear as a separate group in the dashboard without
+/// `"gemini-3p"`, and records containing `"argon"` are promoted to
+/// `"gemini-argon"` so they appear as separate groups in the dashboard without
 /// requiring any change to the hook that writes the state files.
 fn remap_provider(provider: &str, record: Option<&crate::schema::Record>) -> String {
     if provider == "gemini" {
@@ -200,6 +202,13 @@ fn remap_provider(provider: &str, record: Option<&crate::schema::Record>) -> Str
             .unwrap_or(false);
         if is_3p {
             return "gemini-3p".to_string();
+        }
+        let is_argon = record
+            .and_then(|r| r.label.as_deref())
+            .map(|l| l.to_ascii_lowercase().contains("argon"))
+            .unwrap_or(false);
+        if is_argon {
+            return "gemini-argon".to_string();
         }
     }
     provider.to_string()
@@ -390,9 +399,10 @@ mod tests {
     fn absent_dir_yields_all_file_providers_missing() {
         let statuses = read_dir_status(Path::new("/nonexistent-ai-quotas-dir"));
         let file_mode: Vec<&Status> = statuses.iter().filter(|s| s.state == State::Missing).collect();
-        assert_eq!(file_mode.len(), 2, "one Missing per known file-mode provider");
+        assert_eq!(file_mode.len(), 3, "one Missing per known file-mode provider");
         assert!(statuses.iter().all(|s| s.state == State::Missing));
         assert!(file_mode.iter().any(|s| s.provider == "gemini"));
+        assert!(file_mode.iter().any(|s| s.provider == "gemini-argon"));
         assert!(file_mode.iter().any(|s| s.provider == "gemini-3p"));
         // Pull-mode providers are never synthesized as Missing.
         assert!(statuses.iter().all(|s| s.provider != "deepseek" && s.provider != "zai" && s.provider != "claude" && s.provider != "chatgpt" && s.provider != "opencode"));
@@ -415,6 +425,7 @@ mod tests {
             ("gemini-weekly.json", "Weekly"),
             ("gemini-3p-5h.json", "3P 5h window"),
             ("gemini-3p-weekly.json", "3P Weekly"),
+            ("gemini-argon-weekly.json", "Argon Weekly"),
         ] {
             let json = format!(
                 r#"{{"provider":"gemini","kind":"window","used":10.0,"limit":100.0,"unit":"percent","label":"{label}","display_name":"Google Gemini","fetched_at":"{now}","source":"local-log"}}"#
@@ -433,7 +444,13 @@ mod tests {
         assert_eq!(gemini_3p[0].record.as_ref().unwrap().provider, "gemini-3p");
         assert_eq!(gemini_3p[0].record.as_ref().unwrap().display_name.as_deref(), Some("Antigravity (Claude)"));
 
-        // Neither is Missing
-        assert!(!statuses.iter().any(|s| (s.provider == "gemini" || s.provider == "gemini-3p") && matches!(s.state, State::Missing)));
+        let gemini_argon: Vec<&Status> = statuses.iter().filter(|s| s.provider == "gemini-argon").collect();
+        assert_eq!(gemini_argon.len(), 1, "Argon records remapped to gemini-argon");
+        assert_eq!(gemini_argon[0].display_name.as_deref(), Some("Gemini 4 Argon"));
+        assert_eq!(gemini_argon[0].record.as_ref().unwrap().provider, "gemini-argon");
+        assert_eq!(gemini_argon[0].record.as_ref().unwrap().display_name.as_deref(), Some("Gemini 4 Argon"));
+
+        // None of the configured file providers is Missing
+        assert!(!statuses.iter().any(|s| (s.provider == "gemini" || s.provider == "gemini-argon" || s.provider == "gemini-3p") && matches!(s.state, State::Missing)));
     }
 }

@@ -26,6 +26,8 @@ pub struct AppConfig {
     pub main_labels: Vec<String>,
     #[serde(default = "default_weekly_labels")]
     pub weekly_labels: BTreeMap<String, String>,
+    #[serde(default = "default_monthly_labels")]
+    pub monthly_labels: BTreeMap<String, String>,
 }
 
 pub fn default_order() -> Vec<String> {
@@ -35,6 +37,7 @@ pub fn default_order() -> Vec<String> {
         "chatgpt".into(),
         "opencode".into(),
         "gemini".into(),
+        "gemini-argon".into(),
         "gemini-3p".into(),
         "deepseek".into(),
     ]
@@ -47,6 +50,7 @@ pub fn default_capacity() -> BTreeMap<String, f64> {
     m.insert("chatgpt".into(), 1.0);
     m.insert("opencode".into(), 1.0);
     m.insert("gemini".into(), 1.0);
+    m.insert("gemini-argon".into(), 1.0);
     m.insert("gemini-3p".into(), 1.0);
     m
 }
@@ -56,6 +60,10 @@ pub fn default_file_providers() -> Vec<ConfiguredFileProvider> {
         ConfiguredFileProvider {
             id: "gemini".into(),
             display_name: "Google Gemini".into(),
+        },
+        ConfiguredFileProvider {
+            id: "gemini-argon".into(),
+            display_name: "Gemini 4 Argon".into(),
         },
         ConfiguredFileProvider {
             id: "gemini-3p".into(),
@@ -81,6 +89,10 @@ pub fn default_weekly_labels() -> BTreeMap<String, String> {
     m
 }
 
+pub fn default_monthly_labels() -> BTreeMap<String, String> {
+    BTreeMap::new()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -89,6 +101,7 @@ impl Default for AppConfig {
             file_providers: default_file_providers(),
             main_labels: default_main_labels(),
             weekly_labels: default_weekly_labels(),
+            monthly_labels: default_monthly_labels(),
         }
     }
 }
@@ -128,11 +141,15 @@ mod tests {
     #[test]
     fn defaults_are_well_formed() {
         let cfg = AppConfig::default();
+        assert!(cfg.order.contains(&"gemini-argon".to_string()));
         assert!(cfg.order.contains(&"gemini-3p".to_string()));
+        assert_eq!(cfg.capacity.get("gemini-argon"), Some(&1.0));
         assert_eq!(cfg.capacity.get("gemini-3p"), Some(&1.0));
+        assert!(cfg.file_providers.iter().any(|p| p.id == "gemini-argon" && p.display_name == "Gemini 4 Argon"));
         assert!(cfg.file_providers.iter().any(|p| p.id == "gemini-3p" && p.display_name == "Antigravity (Claude)"));
         assert!(cfg.main_labels.contains(&"3p 5h window".to_string()));
         assert_eq!(cfg.weekly_labels.get("gemini-3p"), Some(&"3p weekly".to_string()));
+        assert!(cfg.monthly_labels.is_empty());
     }
 
     #[test]
@@ -144,7 +161,8 @@ mod tests {
             "file_providers": [
                 { "id": "mistral", "display_name": "Mistral Le Chat" }
             ],
-            "main_labels": ["12h window"]
+            "main_labels": ["12h window"],
+            "monthly_labels": { "mistral": "custom monthly" }
         }"#;
         f.write_all(custom_json.as_bytes()).unwrap();
 
@@ -156,6 +174,7 @@ mod tests {
         assert_eq!(cfg.file_providers[0].display_name, "Mistral Le Chat");
         assert_eq!(cfg.main_labels, vec!["12h window"]);
         assert_eq!(cfg.weekly_labels.get("gemini-3p"), Some(&"3p weekly".to_string())); // default preserved
+        assert_eq!(cfg.monthly_labels.get("mistral"), Some(&"custom monthly".to_string()));
     }
 
     #[test]

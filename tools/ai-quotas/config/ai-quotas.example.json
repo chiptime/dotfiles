@@ -5,6 +5,7 @@
     "chatgpt",
     "opencode",
     "gemini",
+    "gemini-argon",
     "gemini-3p",
     "deepseek"
   ],
@@ -14,12 +15,17 @@
     "chatgpt": 1.0,
     "opencode": 1.0,
     "gemini": 1.0,
+    "gemini-argon": 1.0,
     "gemini-3p": 1.0
   },
   "file_providers": [
     {
       "id": "gemini",
       "display_name": "Google Gemini"
+    },
+    {
+      "id": "gemini-argon",
+      "display_name": "Gemini 4 Argon"
     },
     {
       "id": "gemini-3p",
