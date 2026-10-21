@@ -44,8 +44,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 19/10: la PWA permite responder diálogos bloqueados del agente desde el móvil (herdr send-keys con allowlist cerrada, POST /pane/keys), pinta el question-tool como HTML legible y estrena temas claro/oscuro conmutables en Ajustes con contraste >=4.5:1; footer de llamada anclado al viewport con reserva medida; 2002 unit + 186 browser + 391 js verdes
-  next: Push del commit local 4b13d75 y confirmar en Android que Llamar se ve entero; decidir chips de respuesta rápida (validar anclaje en agente desechable); el cursor del terminal NO existe en la API de herdr, no habrá marcador de opción seleccionada; sigue abierta la vía de audio (resampler en decode, 429 de edge-tts) y F2/UAT pendientes
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 22/10: visor interactivo de diagramas Mermaid en la PWA de herdr-brain con renderizado SVG nativo, toolbar de alternancia código/diagrama, copia de código, sincronización de temas claro/oscuro y visor modal (lightbox) con pan y zoom vectorial nítido hasta 10x; suite completa verde
+  next: Push de commits locales y confirmar en móvil la interacción con diagramas Mermaid; decidir chips de respuesta rápida; sigue abierta la vía de audio (resampler en decode, 429 de edge-tts) y F2/UAT pendientes
 
 compare-prices:
   scope: personal
@@ -91,8 +91,8 @@ odata-batch:
 ssff-mcp:
   scope: personal
   status: active
-  desc: MCP local SSFF OData v2 read-only; 0.5.0 en npm/main (granularidad por campo). Fase 2 hosting multi-tenant en feat/multitenant-hosting (worktree): serve Streamable HTTP + /healthz, claves por tenant/entorno, aislamiento por credencial/caché/cursores/campos, Docker no-root, docs de hosting; validada en local (577 tests, 18/18 sondas HTTP, opencode real como cliente, podman) y ronda SAP DEV solo metadatos; añadido cache invalidate --tenant (sin commit); RDD pausado por defecto de gentle-ai
-  next: commitear el change-set de cache invalidate --tenant (7 ficheros en el worktree), desplegar Dokploy/TLS y validar clientes GUI; después merge a main y publicar 0.6.0
+  desc: MCP SSFF OData v2 read-only; hosting multi-tenant y cache invalidate --tenant integrados en main, sin push; guard de referencias percent-encoded en 92ab3c5. Fase 3 IAS por cliente y roles MCP consolidada en PRD DRAFT, sin implementar; ROADMAP modificado y PRD nuevo sin commit. Claves API independientes y SSFF con cuenta técnica; revisión RDD anterior omitida por decisión del usuario
+  next: revisar docs/PRD-phase3-ias-roles.md y obtener permiso de acceso IAS antes de validar login OpenCode, tokens y grupos; autorizar por separado implementación y commit de documentos. Pendientes de Fase 2: push/release y despliegue Dokploy/TLS con autorización
 
 llm-hub:
   scope: personal
