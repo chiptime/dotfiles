@@ -14,8 +14,8 @@
 dotfiles:
   scope: personal
   status: active
-  desc: Infra personal — skills OpenCode/agy-cli, opencode-switch, tiktok-ingest, ai-quotas (ritmo multi-ventana semanal/mensual con cuello de botella y soporte monthly_labels), config modelos, notificaciones ntfy, tools. 19/10: launchpad con buscador+facetas tipo/tema, tags auto (personal/trabajo/ia/voz/sap/teams), discovery recursivo de ~/Code/Work (20 repos Stratesys) y portal fase 1 (nav Catálogo/Seguimiento + discovery timer 30min atómico y local)
-  next: commitear el trabajo pendiente (launchpad+portal fase 1, tiktok-ingest, ai-quotas) tras validación del usuario; portal fase 2 (fichas unificadas tile↔tracker) cuando toque; limpiar tiles-grupo obsoletas del tiles.json
+  desc: Infra personal — skills OpenCode/agy-cli, improve-system (meta-auditor dual OpenCode+AGY con time-ledger y Engram), jest-delta (CLI y skill), symlink global sis-hana-trace, opencode-switch, tiktok-ingest, ai-quotas, config modelos, notificaciones ntfy, tools. 19/10: launchpad con buscador+facetas, tags auto, discovery recursivo de ~/Code/Work y portal fase 1
+  next: commitear el trabajo pendiente (jest-delta, symlinks, launchpad+portal fase 1, tiktok-ingest, ai-quotas) tras validación del usuario; portal fase 2 cuando toque; primera pasada semanal con /improve-system en 3-4 días
 
 agy-bridge:
   scope: personal
@@ -218,14 +218,14 @@ recruiting-frontend:
   scope: work
   group: sis
   status: active
-  desc: Frontend Clece (Angular) · vulnerable-hijo con externalCode por fila; cambio de colectivo descarta certificado anterior sin perder identidad ni restaurarlo al hidratar · 42 tests focales verdes · sesión 21/10 archivada, sin commits
-  next: completar aceptación DEV de vulnerable-hijo y revisar unidades para commit en fix/vulnerable-hijo-external-code, excluyendo environment.ts ajeno · pendientes previos del modal y PRD conservados
+  desc: Frontend Clece (Angular) · vulnerable-hijo con externalCode por fila; cambio de colectivo descarta certificado anterior sin perder identidad ni restaurarlo al hidratar · scripts apps-workspaces evolucionados para soportar .agents del backend · sesión 21/10 archivada
+  next: completar aceptación DEV de vulnerable-hijo y revisar unidades para commit en fix/vulnerable-hijo-external-code, excluyendo environment.ts ajeno · commitear evolución de manage-apps-workspaces.sh cuando proceda
 
 recruiting-backend:
   scope: work
   group: sis
   status: active
-  desc: Backend Clece (SAP CAP) · vulnerable-hijo delta por externalCode; unlink por $links DELETE, bajas por HTTP DELETE y lectura de adjuntos por colectivo · 64 tests focales verdes, 67 fallos previos en suite amplia · sin commits
+  desc: Backend Clece (SAP CAP) · vulnerable-hijo delta por externalCode; unlink por $links DELETE, bajas por HTTP DELETE y lectura de adjuntos por colectivo · skill sis-context y CLI sis-hana-trace en .agents/skills/sis-context (sin scripts en /tmp) · 64 tests focales verdes · sin commits
   next: aceptación DEV T5 — quedan V3 (fallo de batch), S12 cambio de colectivo con adjunto, borrado de fila completa (toDelete), payload legacy y S13 en tenant; luego revisión nativa y commits de vulnerable-hijo sin package-lock ajeno · sincronizar Log del doc con correcciones $links/select ligero · sospecha histórico no reproducida, posible fecha de prueba · mantener pendientes previos toISOString, limiter, passportCancelled, G-09 y OQ-3
 
 # Products
