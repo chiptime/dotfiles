@@ -68,7 +68,7 @@ from .state import (
 from .validation import MediaValidation, sha256_of_file, validate_media_file
 
 _TIKTOK_URL_RE = re.compile(
-    r"^https://www\.tiktok\.com/@(?P<author>[A-Za-z0-9_.]+)/video/(?P<video_id>\d+)/?$"
+    r"^https://www\.tiktok\.com/@(?P<author>[A-Za-z0-9_.]+)/video/(?P<video_id>\d+)(?:[/?#].*)?$"
 )
 
 

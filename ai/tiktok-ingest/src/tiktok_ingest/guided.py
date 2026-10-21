@@ -301,6 +301,8 @@ class _GuidedRunScopedConsent(ConsentProvider):
 
     def ask(self, window: ConsentWindow) -> bool:
         if window.kind == "verify":
+            if getattr(self.authorization, "allow_verify", False):
+                return self.authorization.ask(window)
             return self.human.ask(window)
         return self.authorization.ask(window)
 
@@ -2096,6 +2098,7 @@ def run_guided(
     out: Callable[[str], None] | None = None,
     auto_synthesizer: Callable[[str, StateRoot, Callable[[ConsentWindow], bool]], Any]
     | None = None,
+    auto_verify: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Select a tanda, then plan-only (dry run) or consent-gated execute.
 
@@ -2233,6 +2236,7 @@ def run_guided(
                 "at a time, under ONE authorization for the whole tanda; "
                 "each id is attempted in exactly ONE tanda"
             ),
+            auto_verify=auto_verify,
         )
         if not human.ask(plan_window):
             report = GuidedRun(
@@ -2249,7 +2253,7 @@ def run_guided(
             return 0, report
 
         authorization = RunScopedAuthorization(
-            human=human, plan=run_plan, out=out_fn
+            human=human, plan=run_plan, out=out_fn, allow_verify=auto_verify
         )
         runner_consent: ConsentProvider = _GuidedRunScopedConsent(
             human=human, authorization=authorization

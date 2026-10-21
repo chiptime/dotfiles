@@ -46,6 +46,7 @@ class ParserTests(unittest.TestCase):
                 "backlog-apply",
                 "guided-run",
                 "collection-run",
+                "ingest",
                 "summary",
             },
         )
@@ -74,6 +75,49 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(args.limit, 3)
         self.assertEqual(args.declared_count, 7)
         self.assertEqual(args.end_evidence, "end of list")
+        self.assertFalse(args.rescan)
+
+    def test_collection_run_parses_rescan(self) -> None:
+        args = self.parser.parse_args(
+            [
+                "collection-run",
+                "https://www.tiktok.com/@user/collection/slug-1",
+                "--rescan",
+            ]
+        )
+        self.assertTrue(args.rescan)
+
+    def test_collection_run_parses_retry_failed(self) -> None:
+        args = self.parser.parse_args(
+            [
+                "collection-run",
+                "https://www.tiktok.com/@user/collection/slug-1",
+                "--retry-failed",
+                "3",
+            ]
+        )
+        self.assertEqual(args.retry_failed, 3)
+
+    def test_ingest_parses_rescan(self) -> None:
+        args = self.parser.parse_args(
+            [
+                "ingest",
+                "https://www.tiktok.com/@user/collection/slug-1",
+                "--rescan",
+            ]
+        )
+        self.assertTrue(args.rescan)
+
+    def test_ingest_parses_retry_failed(self) -> None:
+        args = self.parser.parse_args(
+            [
+                "ingest",
+                "https://www.tiktok.com/@user/collection/slug-1",
+                "--retry-failed",
+                "0",
+            ]
+        )
+        self.assertEqual(args.retry_failed, 0)
 
     def test_collection_run_missing_url_is_a_usage_error(self) -> None:
         stderr = io.StringIO()
