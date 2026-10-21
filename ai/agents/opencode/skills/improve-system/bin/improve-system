@@ -1,0 +1,1086 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * improve-system — deterministic telemetry harvester for Bruno's AI feedback loop.
+ *
+ * Dual-Runtime & Ecosystem Harvester:
+ *   1. Dual Runtimes: Mines OpenCode (~/.local/share/opencode/opencode.db) AND
+ *      Antigravity (~/.gemini/antigravity-cli/brain/<uuid>/transcript.jsonl)
+ *   2. Operator Feedback-Loop & Communication Anti-Patterns (telegraphic prompts,
+ *      correction spirals, manual QA log-pasting, zombie sessions, unplanned heavy work)
+ *   3. Project Effort & Focus: Mines Time-Ledger (~/.local/share/time-ledger/entries.csv)
+ *      and cross-audits with scripts/projects.yaml (hours per project, dormant active projects)
+ *   4. Durable Knowledge Mining: Extracts observations from Engram (~/.engram/engram.db)
+ *      to identify unpromoted technical discoveries and gotchas
+ *   5. Skill & Tool Candidates (repeated workflow commands, agent bash fallbacks,
+ *      missed skill triggers)
+ *   6. Harness Health (unused MCPs, installed skills status, broken symlinks, AGENTS.md size)
+ *   7. Incremental Trend Tracking (~/.local/share/opencode/improve-system-state.json)
+ *
+ * Zero runtime dependencies. Requires Node >= 18 and sqlite3 on PATH.
+ */
+
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const HOME = os.homedir();
+const OPENCODE_DB = path.join(HOME, '.local/share/opencode/opencode.db');
+const STATE_FILE = path.join(HOME, '.local/share/opencode/improve-system-state.json');
+const OPENCODE_CONFIG_DIR = path.join(HOME, '.config/opencode');
+const OPENCODE_SKILLS_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
+const OPENCODE_JSON = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
+const GLOBAL_AGENTS_MD = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
+const AGY_BRAIN_DIR = path.join(HOME, '.gemini/antigravity-cli/brain');
+const TIME_LEDGER_CSV = path.join(HOME, '.local/share/time-ledger/entries.csv');
+const PROJECTS_YAML = path.join(HOME, '.dotfiles/scripts/projects.yaml');
+const ENGRAM_DB = path.join(HOME, '.engram/engram.db');
+
+function fail(msg) {
+  process.stderr.write(`improve-system: ${msg}\n`);
+  process.exit(1);
+}
+
+function parseArgs(argv) {
+  const opts = {
+    days: null,
+    project: null,
+    json: false,
+    recordRun: false,
+    status: false,
+    note: null,
+    dismiss: [],
+    apply: [],
+  };
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--json') opts.json = true;
+    else if (a === '--record-run') opts.recordRun = true;
+    else if (a === '--status') opts.status = true;
+    else if (a === '--days' && argv[i + 1]) opts.days = parseFloat(argv[++i]);
+    else if (a.startsWith('--days=')) opts.days = parseFloat(a.split('=')[1]);
+    else if (a === '--project' && argv[i + 1]) opts.project = argv[++i];
+    else if (a.startsWith('--project=')) opts.project = a.split('=')[1];
+    else if (a === '--note' && argv[i + 1]) opts.note = argv[++i];
+    else if (a === '--dismiss' && argv[i + 1]) opts.dismiss.push(argv[++i]);
+    else if (a === '--apply' && argv[i + 1]) opts.apply.push(argv[++i]);
+    else if (a === '-h' || a === '--help') {
+      process.stdout.write(
+        [
+          'Usage: improve-system [options]',
+          '',
+          'Options:',
+          '  --status           Check days since last run and whether audit is due',
+          '  --days <N>         Lookback window in days (default: since last run, or 4 days)',
+          '  --project <substr> Filter sessions by project directory substring',
+          '  --json             Emit full structured JSON report',
+          '  --record-run       Persist current run timestamp & metrics to state file',
+          '  --apply <slug>     Record a proposal slug as applied',
+          '  --dismiss <slug>   Record a proposal slug as dismissed (never re-propose)',
+          '  --note <text>      Optional note when recording a run',
+          '',
+        ].join('\n')
+      );
+      process.exit(0);
+    }
+  }
+  return opts;
+}
+
+function parseJsonc(raw) {
+  const withoutTrailingCommas = raw.replace(/,(\s*[}\]])/g, '$1');
+  return JSON.parse(withoutTrailingCommas);
+}
+
+function loadState() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    }
+  } catch (_) {}
+  return {
+    lastRunAtMs: null,
+    runs: [],
+    appliedProposals: [],
+    dismissedProposals: [],
+  };
+}
+
+function saveState(state) {
+  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2) + '\n', 'utf8');
+}
+
+function sqliteJson(dbPath, sql) {
+  if (!fs.existsSync(dbPath)) return [];
+  const res = spawnSync('sqlite3', ['-json', dbPath, sql], {
+    encoding: 'utf8',
+    maxBuffer: 128 * 1024 * 1024,
+  });
+  if (res.error) fail(`sqlite3 error: ${res.error.message}`);
+  const out = (res.stdout || '').trim();
+  if (!out) return [];
+  try {
+    return JSON.parse(out);
+  } catch (_) {
+    return [];
+  }
+}
+
+function normalizeProject(dir) {
+  if (!dir) return 'unknown';
+  const rel = dir.startsWith(HOME) ? '~' + dir.slice(HOME.length) : dir;
+  const parts = rel.split('/').filter(Boolean);
+  if (parts.length <= 3) return rel;
+  return parts.slice(-2).join('/');
+}
+
+function countWords(text) {
+  if (!text) return 0;
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function detectRawPaste(text) {
+  if (!text || text.length < 280) return false;
+  const lines = text.split('\n');
+  const stackSignals = lines.filter((l) =>
+    /^\s*(at\s+|File\s+".*",\s+line\s+\d+|Error:|TypeError:|SyntaxError:|FAIL\s+|●\s+|npm ERR!|Command exited|Traceback|\[ERROR\]|\d+\s*\|\s*)/i.test(
+      l
+    )
+  ).length;
+  if (stackSignals >= 3) return true;
+  if (lines.length >= 12 && text.length >= 600) {
+    const proseFirstLine = countWords(lines[0]);
+    if (proseFirstLine <= 12 && stackSignals >= 1) return true;
+  }
+  return false;
+}
+
+const CORRECTION_PATTERNS = [
+  /\bno[,\s]+(eso\s+no|no\s+es|me\s+refiero|me\s+refer[ií]a|era|quiero|lo\s+que|te\s+dije|no\s+toques|no\s+cambies|no\s+hagas|debemos)/i,
+  /\b(espera|para|frena|cancela|equivocad[oa]|incorrecto|sigue\s+fallando|sigue\s+sin\s+funcionar|no\s+funciona|rompi[oó]|has\s+roto|otra\s+vez\s+igual|te\s+has\s+dejado|te\s+olvidaste|olvidaste)\b/i,
+  /\b(no\s+me\s+deja|sigue\s+dando\s+error|me\s+da\s+error|da\s+el\s+mismo\s+error|eso\s+est[aá]\s+mal|no\s+me\s+sirve)\b/i,
+  /\b(ojo,\s*para\s+que\s+me\s+entiendas|adem[aá]s\s+te\s+he\s+dicho|perdona,\s*creo\s+que\s+lo\s+primero|no\s+debemos\s+borrar)\b/i,
+  /\b(wrong|that's\s+not|stop|wait,\s+no|still\s+broken|still\s+failing|you\s+missed|you\s+broke)\b/i,
+];
+
+function detectCorrection(text, turnIndex) {
+  if (!text || turnIndex <= 1) return false;
+  const clean = text.slice(0, 400);
+  return CORRECTION_PATTERNS.some((re) => re.test(clean));
+}
+
+function classifyBashCommand(cmd) {
+  if (!cmd) return null;
+  let c = cmd.trim();
+  if (/git\s+worktree\s+add\s+.*\/tmp\//i.test(c)) {
+    return { kind: 'workflow', pattern: 'git worktree add /tmp/* (RULE VIOLATION)' };
+  }
+  if (/hana-client|default-env\.json|\/tmp\/opencode\/trace/i.test(c)) {
+    return { kind: 'workflow', pattern: 'ad-hoc HANA query script (@sap/hana-client + default-env.json)' };
+  }
+  c = c.replace(/^cd\s+[^\s;&|]+\s*(&&|;)\s*/i, '');
+  const envPrefixMatch = c.match(/^((?:[A-Z_][A-Z0-9_]*=[^\s]+\s+)+)(.+)$/);
+  let envPrefix = '';
+  if (envPrefixMatch) {
+    envPrefix = envPrefixMatch[1].replace(/=[^\s]+/g, '=*').trim() + ' ';
+    c = envPrefixMatch[2];
+  }
+  const firstSegment = c.split(/\s*(?:&&|\|\||;)\s*/)[0].trim();
+  const tokens = firstSegment.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return null;
+
+  const bin = tokens[0];
+  if (['pwd', 'ls', 'echo', 'cat', 'head', 'tail', 'true', 'mkdir', 'rm', 'cp', 'mv', 'sleep', 'wc', 'which', 'date'].includes(bin)) {
+    return null;
+  }
+  if (['grep', 'rg', 'sed', 'awk', 'find'].includes(bin)) {
+    return { kind: 'agentFallback', pattern: `${bin} (bash fallback instead of native tool)` };
+  }
+  if ((bin === 'python3' || bin === 'python' || bin === 'node') && (tokens[1] === '-' || tokens[1] === '-c' || tokens[1] === '-e')) {
+    return { kind: 'agentFallback', pattern: `${bin} inline script` };
+  }
+  if (bin === 'git') {
+    const sub = tokens[1] || '';
+    if (['status', 'log', 'diff', 'branch', 'rev-parse', 'show', 'fetch', 'checkout'].includes(sub)) return null;
+    return { kind: 'workflow', pattern: `git ${sub}` };
+  }
+  if (['npx', 'bunx', 'bun', 'npm', 'pnpm', 'gentle-ai'].includes(bin)) {
+    return { kind: 'workflow', pattern: `${envPrefix}${tokens.slice(0, 3).join(' ')}` };
+  }
+  return { kind: 'workflow', pattern: `${envPrefix}${tokens.slice(0, 2).join(' ')}` };
+}
+
+const GENERIC_STOP_TRIGGERS = new Set(['image', 'screenshot', 'listo', 'diario', 'prd', 'feature']);
+
+function loadInstalledSkills() {
+  const skills = [];
+  if (!fs.existsSync(OPENCODE_SKILLS_DIR)) return skills;
+  const entries = fs.readdirSync(OPENCODE_SKILLS_DIR);
+  for (const name of entries) {
+    if (name.startsWith('.') || name === '_shared') continue;
+    const skillDir = path.join(OPENCODE_SKILLS_DIR, name);
+    const skillMd = path.join(skillDir, 'SKILL.md');
+    let brokenSymlink = false;
+    let exists = false;
+    try {
+      fs.statSync(skillDir);
+      exists = fs.existsSync(skillMd);
+    } catch (_) {
+      brokenSymlink = true;
+    }
+    let triggers = [];
+    let bodyLines = 0;
+    if (exists) {
+      try {
+        const raw = fs.readFileSync(skillMd, 'utf8');
+        bodyLines = raw.split('\n').length;
+        const descMatch = raw.match(/^description:\s*["']?(.+?)["']?\s*$/m);
+        if (descMatch) {
+          const desc = descMatch[1];
+          const trigMatch = desc.match(/Trigger:\s*([^.]+)\./i);
+          if (trigMatch) {
+            triggers = trigMatch[1]
+              .split(',')
+              .map((s) => s.trim().toLowerCase())
+              .filter((s) => s.length >= 6 && !GENERIC_STOP_TRIGGERS.has(s));
+          }
+        }
+      } catch (_) {}
+    }
+    skills.push({
+      name,
+      brokenSymlink,
+      missingSkillMd: !brokenSymlink && !exists,
+      bodyLines,
+      triggers,
+    });
+  }
+  return skills;
+}
+
+function loadMcpConfigured() {
+  try {
+    if (!fs.existsSync(OPENCODE_JSON)) return [];
+    const cfg = parseJsonc(fs.readFileSync(OPENCODE_JSON, 'utf8'));
+    const mcp = cfg.mcp || {};
+    return Object.entries(mcp)
+      .filter(([, v]) => v && v.enabled !== false)
+      .map(([k]) => k);
+  } catch (_) {
+    return [];
+  }
+}
+
+function getAgentsMdStats() {
+  const res = {
+    globalPath: GLOBAL_AGENTS_MD,
+    globalLines: 0,
+    projectPath: null,
+    projectLines: 0,
+  };
+  if (fs.existsSync(GLOBAL_AGENTS_MD)) {
+    res.globalLines = fs.readFileSync(GLOBAL_AGENTS_MD, 'utf8').split('\n').length;
+  }
+  const cwdAgents = path.join(process.cwd(), 'AGENTS.md');
+  const cwdClaude = path.join(process.cwd(), 'CLAUDE.md');
+  if (fs.existsSync(cwdAgents)) {
+    res.projectPath = cwdAgents;
+    res.projectLines = fs.readFileSync(cwdAgents, 'utf8').split('\n').length;
+  } else if (fs.existsSync(cwdClaude)) {
+    res.projectPath = cwdClaude;
+    res.projectLines = fs.readFileSync(cwdClaude, 'utf8').split('\n').length;
+  }
+  return res;
+}
+
+/**
+ * Harvest Antigravity (AGY) sessions from ~/.gemini/antigravity-cli/brain/
+ */
+function harvestAgySessions(sinceMs, projectFilter) {
+  if (!fs.existsSync(AGY_BRAIN_DIR)) return [];
+  const entries = fs.readdirSync(AGY_BRAIN_DIR);
+  const sessions = [];
+
+  for (const dirName of entries) {
+    const transcriptPath = path.join(AGY_BRAIN_DIR, dirName, '.system_generated/logs/transcript.jsonl');
+    if (!fs.existsSync(transcriptPath)) continue;
+    let stat;
+    try {
+      stat = fs.statSync(transcriptPath);
+    } catch (_) {
+      continue;
+    }
+    if (stat.mtimeMs < sinceMs) continue;
+
+    let content;
+    try {
+      content = fs.readFileSync(transcriptPath, 'utf8');
+    } catch (_) {
+      continue;
+    }
+
+    const lines = content.trim().split('\n');
+    const prompts = [];
+    const toolCalls = [];
+    let detectedCwd = null;
+    let title = null;
+    let isSubagent = false;
+
+    for (const line of lines) {
+      if (!line) continue;
+      try {
+        const step = JSON.parse(line);
+        const t = step.created_at ? new Date(step.created_at).getTime() : stat.mtimeMs;
+
+        if ((step.type === 'USER_INPUT' || step.source === 'USER_EXPLICIT') && step.content) {
+          let text = step.content;
+          text = text.replace(/<ADDITIONAL_METADATA>[\s\S]*?<\/ADDITIONAL_METADATA>/g, '');
+          text = text.replace(/<USER_SETTINGS_CHANGE>[\s\S]*?<\/USER_SETTINGS_CHANGE>/g, '');
+          const reqMatch = text.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+          if (reqMatch) text = reqMatch[1];
+          text = text.trim();
+          if (text && !text.startsWith('{{ CHECKPOINT')) {
+            const isSynthetic = /^(You are the |You are an? |Write the COMPLETE exploration|Map relevant files)/i.test(text);
+            if (isSynthetic) {
+              isSubagent = true;
+              if (!title) title = `Subagent: ${text.replace(/\s+/g, ' ').slice(0, 60)}`;
+            } else {
+              if (!title) title = text.replace(/\s+/g, ' ').slice(0, 100);
+              prompts.push({ timeCreated: t, text });
+            }
+          }
+        }
+
+        if (step.tool_calls && Array.isArray(step.tool_calls)) {
+          for (const tc of step.tool_calls) {
+            let cmd = null;
+            let filePath = null;
+            let skillName = null;
+
+            if (tc.name === 'run_command' && tc.args) {
+              cmd = tc.args.CommandLine;
+              if (typeof cmd === 'string' && cmd.startsWith('"') && cmd.endsWith('"')) {
+                cmd = cmd.slice(1, -1);
+              }
+              if (tc.args.Cwd && !detectedCwd) {
+                let c = tc.args.Cwd;
+                if (typeof c === 'string' && c.startsWith('"') && c.endsWith('"')) c = c.slice(1, -1);
+                detectedCwd = c;
+              }
+            } else if ((tc.name === 'read_file' || tc.name === 'view_file') && tc.args) {
+              filePath = tc.args.Path || tc.args.filePath || tc.args.path;
+              if (filePath && filePath.endsWith('/SKILL.md')) {
+                const parts = filePath.split('/');
+                skillName = parts[parts.length - 2];
+              }
+            }
+            toolCalls.push({
+              tool: tc.name,
+              bash_cmd: cmd,
+              file_path: filePath,
+              skill_name: skillName,
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    const directory = detectedCwd || 'unknown';
+    if (projectFilter && !directory.toLowerCase().includes(projectFilter.toLowerCase())) {
+      continue;
+    }
+
+    if (prompts.length > 0 || toolCalls.length > 0) {
+      sessions.push({
+        id: dirName,
+        runtime: 'agy',
+        parent_id: isSubagent ? 'agy-subagent' : null,
+        isSubagent,
+        directory,
+        title: title || 'Antigravity Session',
+        agent: 'gemini',
+        model: 'gemini-3.7-flash',
+        has_revert: 0,
+        has_compaction: lines.some((l) => l.includes('CHECKPOINT')),
+        time_created: prompts[0] ? prompts[0].timeCreated : stat.mtimeMs,
+        time_updated: stat.mtimeMs,
+        prompts,
+        toolCalls,
+      });
+    }
+  }
+  return sessions;
+}
+
+/**
+ * Harvest Time Ledger entries (~/.local/share/time-ledger/entries.csv)
+ */
+function harvestTimeLedger(sinceMs) {
+  if (!fs.existsSync(TIME_LEDGER_CSV)) {
+    return { totalHours: 0, byProject: {}, entriesCount: 0 };
+  }
+  let totalHours = 0;
+  const byProject = {};
+  let entriesCount = 0;
+
+  try {
+    const raw = fs.readFileSync(TIME_LEDGER_CSV, 'utf8').trim();
+    const lines = raw.split('\n').slice(1);
+    for (const l of lines) {
+      const parts = l.split(',');
+      if (parts.length < 3) continue;
+      const d = new Date(parts[0].trim());
+      if (isNaN(d.getTime()) || d.getTime() < sinceMs) continue;
+
+      const proj = parts[1].trim();
+      const hrs = parseFloat(parts[2]) || 0;
+      const source = (parts[3] || 'ai').trim();
+      const note = parts.slice(4).join(',').trim();
+
+      totalHours += hrs;
+      entriesCount++;
+      if (!byProject[proj]) {
+        byProject[proj] = { hours: 0, entries: 0, latestNote: note };
+      }
+      byProject[proj].hours = Math.round((byProject[proj].hours + hrs) * 100) / 100;
+      byProject[proj].entries++;
+      if (note) byProject[proj].latestNote = note;
+    }
+  } catch (_) {}
+
+  return {
+    totalHours: Math.round(totalHours * 100) / 100,
+    byProject,
+    entriesCount,
+  };
+}
+
+/**
+ * Cross-audit projects.yaml with time-ledger hours
+ */
+function auditProjectsYaml(ledgerByProject) {
+  if (!fs.existsSync(PROJECTS_YAML)) {
+    return { activeProjects: [], activeNoHours: [], highEffort: [] };
+  }
+  const activeProjects = [];
+  const activeNoHours = [];
+  const highEffort = [];
+
+  try {
+    const content = fs.readFileSync(PROJECTS_YAML, 'utf8');
+    const blocks = content.split(/\n(?=[a-zA-Z0-9_\-]+:\s*\n)/);
+    for (const b of blocks) {
+      const m = b.match(/^([a-zA-Z0-9_\-]+):\s*\n/);
+      if (!m) continue;
+      const name = m[1];
+      const statusM = b.match(/^\s+status:\s*([a-zA-Z0-9_\-]+)/m);
+      const nextM = b.match(/^\s+next:\s*(.+)$/m);
+      const descM = b.match(/^\s+desc:\s*(.+)$/m);
+      const status = statusM ? statusM[1] : 'unknown';
+
+      if (status === 'active') {
+        const logged = ledgerByProject[name] || { hours: 0, entries: 0 };
+        activeProjects.push(name);
+        if (logged.hours === 0) {
+          activeNoHours.push({
+            project: name,
+            desc: descM ? descM[1].slice(0, 100) : null,
+            next: nextM ? nextM[1].slice(0, 100) : null,
+          });
+        } else if (logged.hours >= 5) {
+          highEffort.push({
+            project: name,
+            hours: logged.hours,
+            next: nextM ? nextM[1].slice(0, 120) : 'NO NEXT DEFINED',
+          });
+        }
+      }
+    }
+  } catch (_) {}
+
+  return {
+    activeProjects,
+    activeNoHours,
+    highEffort: highEffort.sort((a, b) => b.hours - a.hours),
+  };
+}
+
+/**
+ * Harvest Engram technical discoveries and gotchas (~/.engram/engram.db)
+ */
+function harvestEngramLearnings(sinceMs) {
+  if (!fs.existsSync(ENGRAM_DB)) {
+    return { total: 0, byType: {}, highlights: [] };
+  }
+  const sinceIso = new Date(sinceMs).toISOString().replace('T', ' ').slice(0, 19);
+  const sql = `SELECT id, type, title, project, topic_key, created_at FROM observations WHERE datetime(created_at) >= datetime('${sinceIso}') AND type IN ('discovery', 'pattern', 'gotcha', 'bugfix') AND deleted_at IS NULL ORDER BY created_at DESC;`;
+  const rows = sqliteJson(ENGRAM_DB, sql);
+
+  const byType = {};
+  for (const r of rows) {
+    byType[r.type] = (byType[r.type] || 0) + 1;
+  }
+
+  // Filter unpromoted gotchas/discoveries with high technical learning value
+  const candidates = rows.filter((r) =>
+    /\b(unlink|bypass|never worked|fails|loss|trace|exhaustion|gotcha|workaround|fix|reconcile|ignored)\b/i.test(r.title)
+  );
+
+  return {
+    total: rows.length,
+    byType,
+    highlights: (candidates.length > 0 ? candidates : rows).slice(0, 12).map((r) => ({
+      id: r.id,
+      type: r.type,
+      project: r.project || 'global',
+      title: r.title,
+      createdAt: r.created_at,
+    })),
+  };
+}
+
+function main() {
+  const opts = parseArgs(process.argv);
+  const state = loadState();
+  const nowMs = Date.now();
+
+  if (opts.status) {
+    const lastRunAtMs = state.lastRunAtMs;
+    if (!lastRunAtMs) {
+      process.stdout.write('improve-system: nunca se ha registrado una pasada. Cadencia recomendada: 1-2 veces por semana (ejecuta /improve-system).\n');
+      process.exit(0);
+    }
+    const daysSince = Math.round(((nowMs - lastRunAtMs) / (86400 * 1000)) * 10) / 10;
+    const isDue = daysSince >= 4;
+    const msg = isDue
+      ? `improve-system: última pasada hace ${daysSince} días (CADENCIA VENCIDA, >= 4d). Ejecuta /improve-system para auditar.\n`
+      : `improve-system: última pasada hace ${daysSince} días (OK, cadencia al día).\n`;
+    process.stdout.write(msg);
+    process.exit(0);
+  }
+
+  let sinceMs;
+  let windowDays;
+  if (opts.days !== null && !Number.isNaN(opts.days)) {
+    windowDays = opts.days;
+    sinceMs = nowMs - windowDays * 86400 * 1000;
+  } else if (state.lastRunAtMs) {
+    sinceMs = state.lastRunAtMs;
+    windowDays = Math.max(0.5, Math.round(((nowMs - sinceMs) / (86400 * 1000)) * 10) / 10);
+  } else {
+    windowDays = 4;
+    sinceMs = nowMs - windowDays * 86400 * 1000;
+  }
+
+  // 1. Harvest OpenCode SQLite
+  const projectFilterSql = opts.project
+    ? `AND directory LIKE '%${opts.project.replace(/'/g, "''")}%'`
+    : '';
+
+  const opencodeSessionsRaw = sqliteJson(
+    OPENCODE_DB,
+    `SELECT
+       id, parent_id, directory, title, agent, model,
+       summary_additions, summary_deletions, summary_files,
+       CASE WHEN revert IS NOT NULL THEN 1 ELSE 0 END AS has_revert,
+       CASE WHEN time_compacting IS NOT NULL THEN 1 ELSE 0 END AS has_compaction,
+       time_created, time_updated,
+       tokens_input, tokens_output, tokens_reasoning, tokens_cache_read
+     FROM session
+     WHERE time_created >= ${Math.floor(sinceMs)} ${projectFilterSql}
+     ORDER BY time_created DESC;`
+  ).map((s) => ({ ...s, runtime: 'opencode' }));
+
+  const opencodeRootSessions = opencodeSessionsRaw.filter((s) => !s.parent_id);
+  const opencodeChildSessions = opencodeSessionsRaw.filter((s) => !!s.parent_id);
+  const opencodeChildrenByParent = new Map();
+  for (const c of opencodeChildSessions) {
+    if (!opencodeChildrenByParent.has(c.parent_id)) opencodeChildrenByParent.set(c.parent_id, []);
+    opencodeChildrenByParent.get(c.parent_id).push(c);
+  }
+
+  const allOpencodeIds = opencodeSessionsRaw.map((s) => `'${s.id.replace(/'/g, "''")}'`);
+
+  let opencodeUserTextRows = [];
+  let opencodeToolRows = [];
+  if (allOpencodeIds.length > 0) {
+    const idList = allOpencodeIds.join(',');
+    opencodeUserTextRows = sqliteJson(
+      OPENCODE_DB,
+      `SELECT
+         m.session_id,
+         m.id AS message_id,
+         m.time_created,
+         json_extract(p.data, '$.text') AS text
+       FROM message m
+       JOIN part p ON p.message_id = m.id
+       WHERE m.session_id IN (${idList})
+         AND json_extract(m.data, '$.role') = 'user'
+         AND json_extract(p.data, '$.type') = 'text'
+       ORDER BY m.time_created ASC;`
+    );
+
+    opencodeToolRows = sqliteJson(
+      OPENCODE_DB,
+      `SELECT
+         p.session_id,
+         json_extract(p.data, '$.tool') AS tool,
+         json_extract(p.data, '$.state.input.name') AS skill_name,
+         json_extract(p.data, '$.state.input.filePath') AS file_path,
+         json_extract(p.data, '$.state.input.command') AS bash_cmd
+       FROM part p
+       WHERE p.session_id IN (${idList})
+         AND json_extract(p.data, '$.type') = 'tool';`
+    );
+  }
+
+  // 2. Harvest Antigravity (AGY) sessions
+  const agySessions = harvestAgySessions(sinceMs, opts.project);
+
+  // 3. Harvest Time-Ledger, Projects YAML, and Engram Learnings
+  const timeLedgerData = harvestTimeLedger(sinceMs);
+  const projectsYamlData = auditProjectsYaml(timeLedgerData.byProject);
+  const engramData = harvestEngramLearnings(sinceMs);
+
+  // Index OpenCode prompts & tools
+  const promptsBySession = new Map();
+  for (const r of opencodeUserTextRows) {
+    const text = (r.text || '').trim();
+    if (!text || /^\/(usage|compact|clear|help)$/i.test(text)) continue;
+    if (!promptsBySession.has(r.session_id)) promptsBySession.set(r.session_id, []);
+    promptsBySession.get(r.session_id).push({
+      timeCreated: r.time_created,
+      text,
+    });
+  }
+
+  // Add AGY prompts
+  for (const s of agySessions) {
+    promptsBySession.set(s.id, s.prompts);
+  }
+
+  const rootBySessionId = new Map();
+  for (const r of opencodeRootSessions) rootBySessionId.set(r.id, r.id);
+  for (const c of opencodeChildSessions) {
+    rootBySessionId.set(c.id, rootBySessionId.get(c.parent_id) || c.parent_id);
+  }
+  for (const s of agySessions) {
+    rootBySessionId.set(s.id, s.id);
+  }
+
+  // Aggregate tools from OpenCode + AGY
+  const allToolRows = [...opencodeToolRows];
+  for (const s of agySessions) {
+    for (const t of s.toolCalls) {
+      allToolRows.push({
+        session_id: s.id,
+        tool: t.tool,
+        skill_name: t.skill_name,
+        file_path: t.file_path,
+        bash_cmd: t.bash_cmd,
+      });
+    }
+  }
+
+  const skillCounts = new Map();
+  const skillsByRootSession = new Map();
+  const mcpToolCounts = new Map();
+  const workflowBashMap = new Map();
+  const fallbackBashMap = new Map();
+
+  for (const t of allToolRows) {
+    const rootId = rootBySessionId.get(t.session_id) || t.session_id;
+    const tool = t.tool || '';
+
+    let loadedSkill = null;
+    if (tool === 'skill' && t.skill_name) {
+      loadedSkill = t.skill_name;
+    } else if ((tool === 'read' || tool === 'read_file' || tool === 'view_file') && t.file_path && t.file_path.endsWith('/SKILL.md')) {
+      const parts = t.file_path.split('/');
+      loadedSkill = parts[parts.length - 2];
+    }
+    if (loadedSkill) {
+      skillCounts.set(loadedSkill, (skillCounts.get(loadedSkill) || 0) + 1);
+      if (!skillsByRootSession.has(rootId)) skillsByRootSession.set(rootId, new Set());
+      skillsByRootSession.get(rootId).add(loadedSkill);
+    }
+
+    if (
+      tool &&
+      !['bash', 'run_command', 'read', 'read_file', 'view_file', 'edit', 'edit_file', 'write', 'write_file', 'glob', 'grep', 'task', 'skill', 'todowrite', 'todoread', 'question', 'webfetch', 'apply_patch', 'invalid'].includes(tool)
+    ) {
+      mcpToolCounts.set(tool, (mcpToolCounts.get(tool) || 0) + 1);
+    }
+
+    if ((tool === 'bash' || tool === 'run_command') && t.bash_cmd) {
+      const classified = classifyBashCommand(t.bash_cmd);
+      if (classified) {
+        const targetMap = classified.kind === 'workflow' ? workflowBashMap : fallbackBashMap;
+        if (!targetMap.has(classified.pattern)) {
+          targetMap.set(classified.pattern, {
+            pattern: classified.pattern,
+            count: 0,
+            sessions: new Set(),
+            sample: t.bash_cmd.replace(/\s+/g, ' ').slice(0, 140),
+          });
+        }
+        const entry = targetMap.get(classified.pattern);
+        entry.count++;
+        entry.sessions.add(rootId);
+      }
+    }
+  }
+
+  // Combined Root Sessions (OpenCode + AGY)
+  const agyRootSessions = agySessions.filter((s) => !s.isSubagent);
+  const agyChildSessions = agySessions.filter((s) => !!s.isSubagent);
+  const combinedRootSessions = [...opencodeRootSessions, ...agyRootSessions];
+
+  let totalUserTurns = 0;
+  let totalFollowUpTurns = 0;
+  let totalCorrectionTurns = 0;
+  let totalRawPasteTurns = 0;
+  let revertSessionsCount = 0;
+
+  const telegraphicStarts = [];
+  const correctionSpirals = [];
+  const rawLogPastes = [];
+  const zombieSessions = [];
+  const unplannedHeavySessions = [];
+  const promptsByProject = new Map();
+
+  const installedSkills = loadInstalledSkills();
+  const missedSkillOpportunities = [];
+
+  for (const s of combinedRootSessions) {
+    const prompts = promptsBySession.get(s.id) || [];
+    if (prompts.length === 0) continue;
+
+    const project = normalizeProject(s.directory);
+    const children = opencodeChildrenByParent.get(s.id) || [];
+    const actualSkillsUsed = new Set(skillsByRootSession.get(s.id) || []);
+    const reportedMissedInSession = new Set();
+    const durationMin = Math.max(1, Math.round((s.time_updated - s.time_created) / 60000));
+
+    if (s.has_revert) revertSessionsCount++;
+
+    const sessionCorrections = [];
+    prompts.forEach((p, idx) => {
+      const turn = idx + 1;
+      totalUserTurns++;
+      if (turn > 1) totalFollowUpTurns++;
+
+      const isRawPaste = detectRawPaste(p.text);
+      if (isRawPaste) {
+        totalRawPasteTurns++;
+        rawLogPastes.push({
+          sessionId: s.id,
+          runtime: s.runtime,
+          project,
+          title: s.title,
+          turn,
+          charCount: p.text.length,
+          preview: p.text.replace(/\s+/g, ' ').slice(0, 160),
+        });
+      }
+
+      const isCorr = detectCorrection(p.text, turn);
+      if (isCorr) {
+        totalCorrectionTurns++;
+        sessionCorrections.push({
+          turn,
+          text: p.text.replace(/\s+/g, ' ').slice(0, 220),
+        });
+      }
+
+      const lowerText = p.text.toLowerCase();
+      for (const sk of installedSkills) {
+        if (actualSkillsUsed.has(sk.name) || reportedMissedInSession.has(sk.name)) continue;
+        const matchedTrigger = sk.triggers.find((trig) => lowerText.includes(trig));
+        if (matchedTrigger) {
+          missedSkillOpportunities.push({
+            sessionId: s.id,
+            runtime: s.runtime,
+            project,
+            skill: sk.name,
+            matchedTrigger,
+            promptPreview: p.text.replace(/\s+/g, ' ').slice(0, 150),
+          });
+          reportedMissedInSession.add(sk.name);
+        }
+      }
+    });
+
+    const firstPrompt = prompts[0].text;
+    const firstWords = countWords(firstPrompt);
+
+    if (firstWords > 0 && firstWords < 15 && prompts.length >= 4 && !firstPrompt.startsWith('/')) {
+      telegraphicStarts.push({
+        sessionId: s.id,
+        runtime: s.runtime,
+        project,
+        title: s.title,
+        firstPrompt: firstPrompt.replace(/\s+/g, ' ').slice(0, 180),
+        firstPromptWords: firstWords,
+        totalUserTurns: prompts.length,
+        correctionCount: sessionCorrections.length,
+        followUpSample: prompts
+          .slice(1, 4)
+          .map((x) => x.text.replace(/\s+/g, ' ').slice(0, 120)),
+      });
+    }
+
+    if (sessionCorrections.length >= 2 || (sessionCorrections.length >= 1 && s.has_revert)) {
+      correctionSpirals.push({
+        sessionId: s.id,
+        runtime: s.runtime,
+        project,
+        title: s.title,
+        userTurns: prompts.length,
+        hasRevert: !!s.has_revert,
+        firstPrompt: firstPrompt.replace(/\s+/g, ' ').slice(0, 180),
+        corrections: sessionCorrections,
+      });
+    }
+
+    if (prompts.length >= 10 || s.has_compaction) {
+      zombieSessions.push({
+        sessionId: s.id,
+        runtime: s.runtime,
+        project,
+        title: s.title,
+        userTurns: prompts.length,
+        durationMin,
+        hasCompaction: !!s.has_compaction,
+        hasRevert: !!s.has_revert,
+      });
+    }
+
+    const usedPlanning =
+      s.agent === 'plan' ||
+      actualSkillsUsed.has('grill-me') ||
+      actualSkillsUsed.has('prd') ||
+      actualSkillsUsed.has('prd-loop');
+    if (!usedPlanning && prompts.length >= 6 && ((s.summary_files || 0) >= 4 || sessionCorrections.length >= 1)) {
+      unplannedHeavySessions.push({
+        sessionId: s.id,
+        runtime: s.runtime,
+        project,
+        title: s.title,
+        userTurns: prompts.length,
+        filesChanged: s.summary_files || 0,
+        subagentCount: children.length,
+        firstPrompt: firstPrompt.replace(/\s+/g, ' ').slice(0, 160),
+      });
+    }
+
+    if (!promptsByProject.has(project)) promptsByProject.set(project, []);
+    promptsByProject.get(project).push({
+      sessionId: s.id,
+      runtime: s.runtime,
+      title: s.title,
+      userTurns: prompts.length,
+      subagents: children.length,
+      skills: Array.from(actualSkillsUsed),
+      firstPrompt: firstPrompt.replace(/\s+/g, ' ').slice(0, 200),
+    });
+  }
+
+  const correctionRatePct =
+    totalFollowUpTurns > 0 ? Math.round((totalCorrectionTurns / totalFollowUpTurns) * 1000) / 10 : 0;
+
+  const formatClusters = (map) =>
+    Array.from(map.values())
+      .filter((b) => b.sessions.size >= 2 || b.count >= 3)
+      .map((b) => ({
+        pattern: b.pattern,
+        totalRuns: b.count,
+        distinctSessions: b.sessions.size,
+        sample: b.sample,
+      }))
+      .sort((a, b) => b.distinctSessions - a.distinctSessions || b.totalRuns - a.totalRuns)
+      .slice(0, 10);
+
+  const workflowBashClusters = formatClusters(workflowBashMap);
+  const agentFallbackClusters = formatClusters(fallbackBashMap);
+
+  const configuredMcps = loadMcpConfigured();
+  const usedMcpTools = Object.fromEntries(mcpToolCounts.entries());
+  const unusedMcps = configuredMcps.filter((mcpName) => {
+    const norm = mcpName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return !Object.keys(usedMcpTools).some((t) => t.toLowerCase().replace(/[^a-z0-9]/g, '').includes(norm));
+  });
+
+  const metrics = {
+    totalSessions: combinedRootSessions.length,
+    opencodeRootSessions: opencodeRootSessions.length,
+    agySessions: agyRootSessions.length,
+    subagentSessions: opencodeChildSessions.length + agyChildSessions.length,
+    totalUserTurns,
+    totalFollowUpTurns,
+    correctionTurns: totalCorrectionTurns,
+    correctionRatePct,
+    telegraphicSessions: telegraphicStarts.length,
+    correctionSpiralSessions: correctionSpirals.length,
+    rawLogPasteTurns: totalRawPasteTurns,
+    zombieSessions: zombieSessions.length,
+    revertSessions: revertSessionsCount,
+  };
+
+  if (opts.apply.length > 0) {
+    for (const slug of opts.apply) {
+      if (!state.appliedProposals.includes(slug)) state.appliedProposals.push(slug);
+    }
+  }
+  if (opts.dismiss.length > 0) {
+    for (const slug of opts.dismiss) {
+      if (!state.dismissedProposals.includes(slug)) state.dismissedProposals.push(slug);
+    }
+  }
+  if (opts.recordRun) {
+    state.lastRunAtMs = nowMs;
+    state.runs.push({
+      timestampIso: new Date(nowMs).toISOString(),
+      windowDays,
+      metrics,
+      note: opts.note || null,
+    });
+    if (state.runs.length > 20) state.runs = state.runs.slice(-20);
+    saveState(state);
+  } else if (opts.apply.length > 0 || opts.dismiss.length > 0) {
+    saveState(state);
+  }
+
+  const previousRun = state.runs.length > 0 ? state.runs[state.runs.length - 1] : null;
+
+  const report = {
+    window: {
+      sinceIso: new Date(sinceMs).toISOString(),
+      untilIso: new Date(nowMs).toISOString(),
+      days: windowDays,
+      lastRunIso: state.lastRunAtMs ? new Date(state.lastRunAtMs).toISOString() : null,
+      previousRunMetrics: previousRun ? previousRun.metrics : null,
+    },
+    runtimesAudited: {
+      opencode: { rootSessions: opencodeRootSessions.length, subagents: opencodeChildSessions.length },
+      antigravity: { rootSessions: agyRootSessions.length, subagents: agyChildSessions.length },
+    },
+    metrics,
+    projectEffort: {
+      ledger: timeLedgerData,
+      projectsYamlAudit: projectsYamlData,
+    },
+    engramLearnings: engramData,
+    operatorSignals: {
+      telegraphicStarts: telegraphicStarts.slice(0, 8),
+      correctionSpirals: correctionSpirals.slice(0, 8),
+      rawLogPastes: rawLogPastes.slice(0, 8),
+      zombieSessions: zombieSessions.slice(0, 8),
+      unplannedHeavySessions: unplannedHeavySessions.slice(0, 8),
+    },
+    automationCandidates: {
+      workflowBashClusters,
+      agentFallbackClusters,
+      workflowsByProject: Object.fromEntries(
+        Array.from(promptsByProject.entries()).map(([proj, list]) => [proj, list.slice(0, 10)])
+      ),
+    },
+    harnessHealth: {
+      skillsUsed: Object.fromEntries(skillCounts.entries()),
+      installedSkills: installedSkills.map((sk) => ({
+        name: sk.name,
+        usedCount: skillCounts.get(sk.name) || 0,
+        brokenSymlink: sk.brokenSymlink,
+        missingSkillMd: sk.missingSkillMd,
+        bodyLines: sk.bodyLines,
+      })),
+      missedSkillOpportunities: missedSkillOpportunities.slice(0, 8),
+      mcp: {
+        configuredEnabled: configuredMcps,
+        usedTools: usedMcpTools,
+        unusedEnabled: unusedMcps,
+      },
+      agentsMd: getAgentsMdStats(),
+    },
+    state: {
+      appliedProposals: state.appliedProposals || [],
+      dismissedProposals: state.dismissedProposals || [],
+    },
+  };
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    return;
+  }
+
+  // Human-readable summary
+  const lines = [];
+  lines.push(`=== IMPROVE-SYSTEM TELEMETRY (${report.window.days}d window) ===`);
+  lines.push(
+    `Audited Runtimes: OpenCode (${metrics.opencodeRootSessions} root, ${opencodeChildSessions.length} subagents) + Antigravity (${metrics.agySessions} root, ${agyChildSessions.length} subagents)`
+  );
+  lines.push(`Total User Turns: ${metrics.totalUserTurns}`);
+  lines.push(
+    `Operator Signals: Correction Rate=${metrics.correctionRatePct}% (${metrics.correctionTurns}/${metrics.totalFollowUpTurns} follow-ups) | Telegraphic Starts=${metrics.telegraphicSessions} | Spirals=${metrics.correctionSpiralSessions} | Raw Log Pastes=${metrics.rawLogPasteTurns} | Zombie Sessions=${metrics.zombieSessions}`
+  );
+  lines.push('');
+
+  // Project Effort section
+  if (timeLedgerData.totalHours > 0) {
+    lines.push(`Project Effort (Time-Ledger): ${timeLedgerData.totalHours}h logged across ${timeLedgerData.entriesCount} entries:`);
+    const sortedProjs = Object.entries(timeLedgerData.byProject).sort((a, b) => b[1].hours - a[1].hours);
+    for (const [p, data] of sortedProjs.slice(0, 6)) {
+      lines.push(`  - ${p.padEnd(20)}: ${data.hours}h (${data.entries} sessions) | Note: ${data.latestNote.slice(0, 60)}`);
+    }
+    lines.push('');
+  }
+
+  if (projectsYamlData.activeNoHours.length > 0) {
+    lines.push(`Dormant Active Projects (0h in window according to projects.yaml):`);
+    for (const p of projectsYamlData.activeNoHours.slice(0, 5)) {
+      lines.push(`  - ${p.project}: ${p.next || p.desc || 'No next action'}`);
+    }
+    lines.push('');
+  }
+
+  // Engram Discoveries section
+  if (engramData.total > 0) {
+    lines.push(`Engram Discoveries & Gotchas (${engramData.total} in window):`);
+    for (const h of engramData.highlights.slice(0, 5)) {
+      lines.push(`  - [${h.type}] ${h.project}: ${h.title}`);
+    }
+    lines.push('');
+  }
+
+  if (workflowBashClusters.length > 0) {
+    lines.push('Top Repeated Workflow Commands (Tool/CLI Candidates):');
+    for (const b of workflowBashClusters.slice(0, 6)) {
+      lines.push(`  - [${b.distinctSessions} sessions, ${b.totalRuns} runs] ${b.pattern}  (e.g. ${b.sample})`);
+    }
+    lines.push('');
+  }
+
+  if (agentFallbackClusters.length > 0) {
+    lines.push('Agent Tool-Discipline Signals (Bash used instead of Native Tools):');
+    for (const b of agentFallbackClusters.slice(0, 4)) {
+      lines.push(`  - [${b.distinctSessions} sessions, ${b.totalRuns} runs] ${b.pattern}`);
+    }
+    lines.push('');
+  }
+
+  if (unusedMcps.length > 0) {
+    lines.push(`Unused Enabled MCPs in window: ${unusedMcps.join(', ')}`);
+  }
+
+  lines.push('');
+  lines.push('Run with --json for full prompt quotes and per-session diagnostics.');
+  process.stdout.write(lines.join('\n') + '\n');
+}
+
+main();

@@ -41,7 +41,9 @@ The tracker lives in `~/.dotfiles`:
 3. Update only that project's block: `status` if the lifecycle changed, `desc` if the one-liner is stale, `next` with the concrete next action (or drop `next` if none). `next` must be actionable, not a wish.
 4. If the sweep would show new repos (a project was cloned/created), add blocks for them or leave them for the "Unclassified" triage section — never leave work repos silently unclassified after a triage round.
 5. Rerun `projects` so the snapshot regenerates.
-6. If the tracker files themselves changed and the user authorized a commit, commit ONLY `scripts/projects.yaml` and/or `scripts/projects-dashboard.sh` with a conventional message.
+6. **Improve-System Cadence Check**: Run `improve-system --status`. If the check reports `CADENCIA VENCIDA`, append a gentle one-liner at the very end of your response:
+   > 💡 *Han pasado N días desde la última auditoría de `/improve-system`. Cuando tengas un hueco, ejecútalo para revisar el feedback loop y gotchas de la semana.*
+7. If the tracker files themselves changed and the user authorized a commit, commit ONLY `scripts/projects.yaml` and/or `scripts/projects-dashboard.sh` with a conventional message.
 
 ## Status Vocabulary
 
