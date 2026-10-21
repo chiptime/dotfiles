@@ -102,7 +102,7 @@ llm-hub:
 modular-saas:
   scope: personal
   status: active
-  desc: SaaS modular para comercios de barrio (piezas de Lego) — Angular + Bun/Elysia + PostgreSQL; 10 módulos con diagramas, MOD_BILLING (ficha venta/Holded), PRD técnico aprobado (7 sprints)
+  desc: SaaS modular para comercios de barrio (piezas de Lego) — Angular 22+ Hybrid SSR + Bun/Elysia Hexagonal + PostgreSQL 17; 10 módulos con diagramas, MOD_BILLING (Holded), PRD técnico aprobado y guía de arquitectura, estilo visual y UX
   next: commit de especificaciones y arrancar SDD de S1 (fundación: monorepo, CI, RLS, auth, Meta API)
 
 # ---- Personal: learning / one-offs ----
@@ -218,15 +218,15 @@ recruiting-frontend:
   scope: work
   group: sis
   status: active
-  desc: Frontend Clece (Angular) · adjuntos SC: gating del modal de progreso simplificado + tests D9 (rama feature/retry-hr-attachments-form-wizard, validada)
-  next: pushear la rama del modal y decidir PR · decidir commit del PRD
+  desc: Frontend Clece (Angular) · vulnerable-hijo con externalCode por fila; cambio de colectivo descarta certificado anterior sin perder identidad ni restaurarlo al hidratar · 42 tests focales verdes · sesión 21/10 archivada, sin commits
+  next: completar aceptación DEV de vulnerable-hijo y revisar unidades para commit en fix/vulnerable-hijo-external-code, excluyendo environment.ts ajeno · pendientes previos del modal y PRD conservados
 
 recruiting-backend:
   scope: work
   group: sis
   status: active
-  desc: Backend Clece (SAP CAP) · adjuntos SC: dispatch idempotente; fix HANA Cannot bind parameter(3) (Date en where tagged-template -> toISOString) validado en envio real
-  next: commitear el fix toISOString (7 sitios) junto/aparte del WIP del limiter · arreglar 4 tests del limiter (self-heal en un statement) y passportCancelled · reconciliar G-09 (413 real) · OQ-3
+  desc: Backend Clece (SAP CAP) · vulnerable-hijo delta por externalCode; unlink por $links DELETE, bajas por HTTP DELETE y lectura de adjuntos por colectivo · 64 tests focales verdes, 67 fallos previos en suite amplia · sin commits
+  next: aceptación DEV T5 — quedan V3 (fallo de batch), S12 cambio de colectivo con adjunto, borrado de fila completa (toDelete), payload legacy y S13 en tenant; luego revisión nativa y commits de vulnerable-hijo sin package-lock ajeno · sincronizar Log del doc con correcciones $links/select ligero · sospecha histórico no reproducida, posible fecha de prueba · mantener pendientes previos toISOString, limiter, passportCancelled, G-09 y OQ-3
 
 # Products
 HyperMonitor:
