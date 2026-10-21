@@ -1,0 +1,643 @@
+#!/usr/bin/env python3
+"""
+jest-delta: Clean regression verification for Jest test suites in Git.
+
+In repositories with pre-existing failing tests (e.g. 67 historical failures),
+jest-delta runs the test suite and diffs against HEAD (or a cached baseline).
+It outputs only newly introduced failures, avoiding heavy clones or manual log diffs.
+
+Exit codes:
+  0: No new failures (identical or improved)
+  1: Regression detected (one or more new failures)
+  2: Configuration, git, or command execution error
+"""
+
+import argparse
+import collections
+import hashlib
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+ANSI_REGEX = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+JEST_FAIL_HEADER_REGEX = re.compile(r'^\s*●\s+(.+)$')
+JEST_SUMMARY_REGEX = re.compile(r'Tests:\s+(?:(\d+)\s+failed,?\s*)?(?:(\d+)\s+passed,?\s*)?(?:(\d+)\s+total)?')
+JEST_STOP_SNIPPET_REGEX = re.compile(r'^(Test Suites:|Tests:|Snapshots:|Time:|Ran all|\s*●\s+)')
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return ANSI_REGEX.sub('', text)
+
+
+def parse_jest_output(raw_output: str) -> tuple[list[str], dict[str, str], dict[str, int]]:
+    """
+    Parse Jest console output.
+    Returns:
+      failures: list of failing test names/descriptions (in order of appearance)
+      snippets: mapping of test name -> failure message snippet
+      stats: summary statistics (failed, passed, total)
+    """
+    clean_text = strip_ansi(raw_output)
+    failures: list[str] = []
+    snippets: dict[str, str] = {}
+    stats: dict[str, int] = {}
+
+    current_test: str | None = None
+    current_snippet_lines: list[str] = []
+
+    def commit_snippet():
+        nonlocal current_test, current_snippet_lines
+        if current_test:
+            snippet = '\n'.join(current_snippet_lines).strip()
+            # If multiple tests share exact same name, keep the first or append
+            if current_test not in snippets or not snippets[current_test]:
+                snippets[current_test] = snippet
+            current_test = None
+            current_snippet_lines = []
+
+    for line in clean_text.splitlines():
+        # Check for summary stats
+        summary_match = JEST_SUMMARY_REGEX.search(line)
+        if summary_match:
+            failed_str, passed_str, total_str = summary_match.groups()
+            if failed_str:
+                stats['failed'] = int(failed_str)
+            if passed_str:
+                stats['passed'] = int(passed_str)
+            if total_str:
+                stats['total'] = int(total_str)
+
+        # Check for failing test marker (● <TestName>)
+        fail_match = JEST_FAIL_HEADER_REGEX.match(line)
+        if fail_match:
+            commit_snippet()
+            test_name = fail_match.group(1).strip()
+            failures.append(test_name)
+            current_test = test_name
+            current_snippet_lines = []
+            continue
+
+        if current_test:
+            if JEST_STOP_SNIPPET_REGEX.match(line.strip()):
+                commit_snippet()
+            else:
+                current_snippet_lines.append(line)
+
+    commit_snippet()
+    return failures, snippets, stats
+
+
+def get_git_info(cwd: pathlib.Path) -> dict | None:
+    """Return Git repository metadata if cwd is inside a git worktree."""
+    try:
+        is_inside = subprocess.run(
+            ['git', '-C', str(cwd), 'rev-parse', '--is-inside-work-tree'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        if is_inside.returncode != 0 or is_inside.stdout.strip() != 'true':
+            return None
+
+        root_proc = subprocess.run(
+            ['git', '-C', str(cwd), 'rev-parse', '--show-toplevel'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        root = pathlib.Path(root_proc.stdout.strip()).resolve()
+
+        # Common git dir (handles worktrees & submodules properly)
+        git_dir_proc = subprocess.run(
+            ['git', '-C', str(cwd), 'rev-parse', '--git-common-dir'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        git_dir_raw = pathlib.Path(git_dir_proc.stdout.strip())
+        if not git_dir_raw.is_absolute():
+            git_dir = (root / git_dir_raw).resolve()
+        else:
+            git_dir = git_dir_raw.resolve()
+
+        # Status check
+        status_proc = subprocess.run(
+            ['git', '-C', str(root), 'status', '--porcelain'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        is_dirty = bool(status_proc.stdout.strip())
+
+        rel_cwd = os.path.relpath(cwd.resolve(), root)
+        if rel_cwd == '.':
+            rel_cwd = ''
+
+        return {
+            'root': root,
+            'git_dir': git_dir,
+            'is_dirty': is_dirty,
+            'rel_cwd': rel_cwd,
+        }
+    except Exception:
+        return None
+
+
+def resolve_git_ref(git_root: pathlib.Path, ref: str) -> str | None:
+    """Resolve a git ref (branch, tag, HEAD, HEAD~1) to a commit SHA."""
+    try:
+        proc = subprocess.run(
+            ['git', '-C', str(git_root), 'rev-parse', ref],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return proc.stdout.strip()
+    except Exception:
+        return None
+
+
+def get_cache_path(git_dir: pathlib.Path, commit_sha: str, command: list[str]) -> pathlib.Path:
+    """Return path to cache file for a specific commit and test command."""
+    cache_dir = git_dir / 'jest-delta-cache'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cmd_str = ' '.join(command).strip()
+    cmd_hash = hashlib.sha256(cmd_str.encode('utf-8')).hexdigest()[:16]
+    return cache_dir / f"{commit_sha}_{cmd_hash}.json"
+
+
+def load_cached_failures(cache_path: pathlib.Path) -> dict | None:
+    """Load cached test failures if file exists and is valid."""
+    if not cache_path.exists():
+        return None
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict) and 'failed_tests' in data:
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def save_cached_failures(
+    cache_path: pathlib.Path,
+    commit_sha: str,
+    command: list[str],
+    failures: list[str],
+    snippets: dict[str, str],
+    stats: dict[str, int]
+):
+    """Save test failures and metadata to cache file."""
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            'commit': commit_sha,
+            'command': command,
+            'timestamp': int(time.time()),
+            'failed_count': len(failures),
+            'failed_tests': failures,
+            'snippets': snippets,
+            'stats': stats,
+        }
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2)
+    except Exception as err:
+        sys.stderr.write(f"[jest-delta] Warning: Failed to write cache: {err}\n")
+
+
+def link_dependencies(src_root: pathlib.Path, dst_root: pathlib.Path):
+    """
+    Symlink node_modules and .cache directories from src_root to dst_root,
+    reproducing directory structure without running npm install.
+    """
+    # Search up to 4 directory levels for node_modules
+    for current_dir, dirs, _ in os.walk(src_root):
+        rel = os.path.relpath(current_dir, src_root)
+        depth = 0 if rel == '.' else len(pathlib.Path(rel).parts)
+        if depth > 4:
+            dirs.clear()
+            continue
+
+        if '.git' in dirs:
+            dirs.remove('.git')
+
+        for dep_folder in ['node_modules', '.cache']:
+            if dep_folder in dirs:
+                dep_src = pathlib.Path(current_dir) / dep_folder
+                dep_dst = dst_root / rel / dep_folder if rel != '.' else dst_root / dep_folder
+                dep_dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dep_dst.exists() and not dep_dst.is_symlink():
+                    try:
+                        os.symlink(dep_src.resolve(), dep_dst)
+                    except OSError:
+                        pass
+                dirs.remove(dep_folder)
+
+
+def run_command(command: list[str], cwd: pathlib.Path, verbose: bool = False) -> tuple[int, str]:
+    """Execute command in cwd and capture combined stdout and stderr."""
+    if verbose:
+        sys.stderr.write(f"[jest-delta] Running: {' '.join(command)} (cwd: {cwd})\n")
+    proc = subprocess.run(
+        command,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=os.environ.copy()
+    )
+    if verbose and proc.stdout:
+        sys.stderr.write(proc.stdout + '\n')
+    return proc.returncode, proc.stdout or ''
+
+
+def run_base_in_worktree(
+    git_root: pathlib.Path,
+    base_ref: str,
+    base_commit: str,
+    rel_cwd: str,
+    test_command: list[str],
+    verbose: bool = False
+) -> tuple[list[str], dict[str, str], dict[str, int]]:
+    """
+    Create an ephemeral git worktree at base_commit, symlink dependencies,
+    run the test command, extract failures, and remove the worktree.
+    """
+    base_dir = pathlib.Path.home() / ".cache" / "jest-delta" / "worktrees"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    worktree_name = f"{git_root.name}-{base_commit[:8]}-{os.getpid()}"
+    worktree_path = base_dir / worktree_name
+
+    if verbose:
+        sys.stderr.write(f"[jest-delta] Creating ephemeral worktree at {worktree_path} (ref: {base_ref})...\n")
+
+    try:
+        # Add worktree
+        add_proc = subprocess.run(
+            ['git', '-C', str(git_root), 'worktree', 'add', '--detach', str(worktree_path), base_commit],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        if add_proc.returncode != 0:
+            raise RuntimeError(f"git worktree add failed: {add_proc.stderr.strip()}")
+
+        # Symlink node_modules / caches
+        link_dependencies(git_root, worktree_path)
+
+        # Working directory inside worktree
+        test_cwd = worktree_path / rel_cwd if rel_cwd else worktree_path
+        if not test_cwd.exists():
+            test_cwd = worktree_path
+
+        if verbose:
+            sys.stderr.write(f"[jest-delta] Executing base tests in {test_cwd}...\n")
+
+        _, output = run_command(test_command, cwd=test_cwd, verbose=verbose)
+        return parse_jest_output(output)
+
+    finally:
+        # Clean up worktree
+        if verbose:
+            sys.stderr.write(f"[jest-delta] Cleaning up worktree {worktree_path}...\n")
+        subprocess.run(
+            ['git', '-C', str(git_root), 'worktree', 'remove', '--force', str(worktree_path)],
+            capture_output=True,
+            check=False
+        )
+        if worktree_path.exists():
+            shutil.rmtree(worktree_path, ignore_errors=True)
+        subprocess.run(
+            ['git', '-C', str(git_root), 'worktree', 'prune'],
+            capture_output=True,
+            check=False
+        )
+
+
+def compare_failures(
+    base_failures: list[str],
+    current_failures: list[str]
+) -> tuple[list[str], list[str], list[str]]:
+    """
+    Compare current failures against baseline using multiset diffing.
+    Returns:
+      new_failures: tests failing in current that were not in base (regressions)
+      pre_existing_failures: tests failing in both base and current
+      fixed_failures: tests failing in base that now pass
+    """
+    base_counts = collections.Counter(base_failures)
+    current_counts = collections.Counter(current_failures)
+
+    new_failures: list[str] = []
+    pre_existing_failures: list[str] = []
+    fixed_failures: list[str] = []
+
+    # New failures (in current more times than base)
+    for test, count in current_counts.items():
+        base_cnt = base_counts.get(test, 0)
+        overlap = min(count, base_cnt)
+        if overlap > 0:
+            pre_existing_failures.extend([test] * overlap)
+        diff = count - base_cnt
+        if diff > 0:
+            new_failures.extend([test] * diff)
+
+    # Fixed failures (in base more times than current)
+    for test, count in base_counts.items():
+        current_cnt = current_counts.get(test, 0)
+        diff = count - current_cnt
+        if diff > 0:
+            fixed_failures.extend([test] * diff)
+
+    return new_failures, pre_existing_failures, fixed_failures
+
+
+def parse_arguments(argv: list[str]):
+    """
+    Parse jest-delta options and extract the downstream test command.
+    Accepts:
+      jest-delta [options] [--] <test-command...>
+      jest-delta [options] <test-command...>
+    """
+    parser = argparse.ArgumentParser(
+        prog="jest-delta",
+        description="Verify Jest test suites in repositories with pre-existing broken tests without false alarms.",
+        add_help=False
+    )
+    parser.add_argument("-h", "--help", action="store_true", help="Show this help message and exit")
+    parser.add_argument("--base", default="HEAD", help="Git reference for baseline comparison (default: HEAD)")
+    parser.add_argument("--base-cache", "--base-log", dest="base_file", help="Load baseline directly from a JSON or raw test log file")
+    parser.add_argument("--save-base", dest="save_base_file", help="Save current test failures as baseline to specified JSON file")
+    parser.add_argument("--record-base", action="store_true", help="Record baseline for HEAD without diffing against working tree")
+    parser.add_argument("--no-cache", action="store_true", help="Bypass cached baseline and force re-running base suite")
+    parser.add_argument("--clear-cache", action="store_true", help="Clear cached baselines for the current repository")
+    parser.add_argument("--json", action="store_true", help="Output machine-readable JSON for agents/scripts")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Print debug information and test runner logs")
+    parser.add_argument("--stdin", action="store_true", help="Read current test runner output from stdin")
+
+    # If '--' is in argv, split there
+    if "--" in argv:
+        idx = argv.index("--")
+        opt_args = argv[:idx]
+        cmd_args = argv[idx + 1:]
+        args = parser.parse_args(opt_args)
+        return args, cmd_args
+
+    # Otherwise parse known args
+    args, cmd_args = parser.parse_known_args(argv)
+    return args, cmd_args
+
+
+def main() -> int:
+    args, test_command = parse_arguments(sys.argv[1:])
+
+    if args.help:
+        print("""Usage: jest-delta [options] [--] <test-command...>
+
+Regression verification CLI for suites with pre-existing broken tests.
+Extracts failing tests (● <TestName>) and reports only newly introduced regressions.
+
+Options:
+  --base <ref>          Git ref for baseline (default: HEAD)
+  --base-cache <file>   Load baseline from pre-recorded JSON or test log file
+  --base-log <file>     Alias for --base-cache
+  --save-base <file>    Save current test failures to specified JSON file
+  --record-base         Record baseline for HEAD and exit
+  --no-cache            Ignore cached baseline and force re-evaluating HEAD
+  --clear-cache         Remove all cached baselines for current repository
+  --json                Output results in JSON format
+  -v, --verbose         Verbose progress output to stderr
+  --stdin               Read current test runner output from stdin
+  -h, --help            Show this help message
+
+Examples:
+  # Check test file against HEAD failures:
+  jest-delta npx jest srv/OperationalCenters/HiringRequest/HiringRequestRepository.test.ts
+
+  # Machine-readable JSON output for agents:
+  jest-delta --json -- npm test
+
+  # Pre-record baseline for current HEAD:
+  jest-delta --record-base -- npx jest
+
+  # Use a saved baseline log:
+  jest-delta --base-log base_failures.log -- npm test
+""")
+        return 0
+
+    cwd = pathlib.Path.cwd()
+    git_info = get_git_info(cwd)
+
+    if args.clear_cache:
+        if not git_info:
+            sys.stderr.write("[jest-delta] Error: Not inside a Git repository.\n")
+            return 2
+        cache_dir = git_info['git_dir'] / 'jest-delta-cache'
+        if cache_dir.exists():
+            count = len(list(cache_dir.glob('*.json')))
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            if not args.json:
+                print(f"✓ Cleared {count} cached baseline(s).")
+            else:
+                print(json.dumps({"status": "SUCCESS", "cleared_baselines": count}))
+        else:
+            if not args.json:
+                print("✓ No cached baselines found.")
+            else:
+                print(json.dumps({"status": "SUCCESS", "cleared_baselines": 0}))
+        return 0
+
+    # Ensure we have a command or stdin
+    has_stdin = args.stdin or (not sys.stdin.isatty() and not test_command)
+    if not test_command and not has_stdin:
+        sys.stderr.write("[jest-delta] Error: No test command specified.\n")
+        sys.stderr.write("Usage: jest-delta [options] [--] <test-command...>\n")
+        return 2
+
+    # Baseline failures container
+    base_failures: list[str] = []
+    base_snippets: dict[str, str] = {}
+    base_commit: str = "EXTERNAL"
+    cache_path: pathlib.Path | None = None
+
+    # 1. Load baseline from file if requested
+    if args.base_file:
+        base_file_path = pathlib.Path(args.base_file).resolve()
+        if not base_file_path.exists():
+            sys.stderr.write(f"[jest-delta] Error: Baseline file not found: {base_file_path}\n")
+            return 2
+        try:
+            with open(base_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            # Try parsing as JSON first
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and 'failed_tests' in data:
+                    base_failures = data['failed_tests']
+                    base_snippets = data.get('snippets', {})
+                elif isinstance(data, list):
+                    base_failures = data
+                else:
+                    base_failures, base_snippets, _ = parse_jest_output(content)
+            except json.JSONDecodeError:
+                base_failures, base_snippets, _ = parse_jest_output(content)
+        except Exception as e:
+            sys.stderr.write(f"[jest-delta] Error reading baseline file: {e}\n")
+            return 2
+
+    # 2. Or resolve baseline from Git repository
+    else:
+        if not git_info:
+            sys.stderr.write("[jest-delta] Error: Must be in a Git repository or specify --base-cache <file>.\n")
+            return 2
+
+        if not test_command:
+            sys.stderr.write("[jest-delta] Error: Cannot evaluate baseline from Git without a test command. Specify --base-cache/--base-log or provide the test command.\n")
+            return 2
+
+        git_root = git_info['root']
+        git_dir = git_info['git_dir']
+        base_commit_sha = resolve_git_ref(git_root, args.base)
+        if not base_commit_sha:
+            sys.stderr.write(f"[jest-delta] Error: Could not resolve git reference: {args.base}\n")
+            return 2
+        base_commit = base_commit_sha
+        cache_path = get_cache_path(git_dir, base_commit, test_command)
+
+        # Check cache unless --no-cache is set
+        cached_data = load_cached_failures(cache_path) if not args.no_cache else None
+
+        if cached_data is not None:
+            base_failures = cached_data['failed_tests']
+            base_snippets = cached_data.get('snippets', {})
+            if args.verbose:
+                sys.stderr.write(f"[jest-delta] Loaded {len(base_failures)} baseline failure(s) from cache ({cache_path.name})\n")
+        else:
+            # Need to compute baseline
+            if args.verbose:
+                sys.stderr.write(f"[jest-delta] Baseline not cached for {base_commit[:8]}. Computing baseline...\n")
+
+            if not git_info['is_dirty'] and args.base in ("HEAD", "@"):
+                # Working tree is clean and identical to HEAD!
+                # We can execute directly in working tree
+                if args.verbose:
+                    sys.stderr.write("[jest-delta] Working tree is clean. Executing test on current tree for baseline...\n")
+                _, output = run_command(test_command, cwd=cwd, verbose=args.verbose)
+                base_failures, base_snippets, base_stats = parse_jest_output(output)
+                save_cached_failures(cache_path, base_commit, test_command, base_failures, base_snippets, base_stats)
+            else:
+                # Working tree has changes: run base suite in ephemeral worktree
+                if args.verbose:
+                    sys.stderr.write(f"[jest-delta] Working tree is dirty. Running baseline suite for {base_commit[:8]} in ephemeral worktree...\n")
+                base_failures, base_snippets, base_stats = run_base_in_worktree(
+                    git_root=git_root,
+                    base_ref=args.base,
+                    base_commit=base_commit,
+                    rel_cwd=git_info['rel_cwd'],
+                    test_command=test_command,
+                    verbose=args.verbose
+                )
+                save_cached_failures(cache_path, base_commit, test_command, base_failures, base_snippets, base_stats)
+
+    # If --record-base was specified, we are done
+    if args.record_base:
+        if args.json:
+            print(json.dumps({
+                "status": "RECORDED",
+                "base_commit": base_commit,
+                "command": test_command,
+                "failed_tests_count": len(base_failures),
+                "failed_tests": base_failures
+            }, indent=2))
+        else:
+            print(f"✓ Recorded baseline for {args.base} ({base_commit[:8]}): {len(base_failures)} failure(s) cached.")
+        return 0
+
+    # 3. Run current tests (or read from stdin)
+    if has_stdin:
+        if args.verbose:
+            sys.stderr.write("[jest-delta] Reading test output from stdin...\n")
+        current_output = sys.stdin.read()
+    else:
+        if args.verbose:
+            sys.stderr.write(f"[jest-delta] Executing current tests: {' '.join(test_command)}\n")
+        _, current_output = run_command(test_command, cwd=cwd, verbose=args.verbose)
+
+    current_failures, current_snippets, current_stats = parse_jest_output(current_output)
+
+    # Save baseline to file if requested
+    if args.save_base_file:
+        out_path = pathlib.Path(args.save_base_file).resolve()
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "timestamp": int(time.time()),
+                    "failed_count": len(current_failures),
+                    "failed_tests": current_failures,
+                    "snippets": current_snippets,
+                    "stats": current_stats
+                }, f, indent=2)
+            if args.verbose:
+                sys.stderr.write(f"[jest-delta] Saved baseline to {out_path}\n")
+        except Exception as e:
+            sys.stderr.write(f"[jest-delta] Warning: Could not save baseline to {out_path}: {e}\n")
+
+    # 4. Compare failures
+    new_failures, pre_existing_failures, fixed_failures = compare_failures(
+        base_failures=base_failures,
+        current_failures=current_failures
+    )
+
+    has_regressions = len(new_failures) > 0
+
+    # 5. Output results
+    if args.json:
+        payload = {
+            "status": "FAIL" if has_regressions else "PASS",
+            "regression": has_regressions,
+            "pre_existing_failures_count": len(pre_existing_failures),
+            "new_failures_count": len(new_failures),
+            "fixed_failures_count": len(fixed_failures),
+            "new_failures": new_failures,
+            "new_failures_details": [
+                {"name": name, "snippet": current_snippets.get(name, "")}
+                for name in new_failures
+            ],
+            "pre_existing_failures": pre_existing_failures,
+            "fixed_failures": fixed_failures,
+            "current_total_failures": len(current_failures),
+            "base_ref": args.base,
+            "base_commit": base_commit
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        if not has_regressions:
+            # Format explicitly required:
+            # ✓ IDENTICAL / NO REGRESSIONS: X pre-existing failures, 0 new failures.
+            print(f"✓ IDENTICAL / NO REGRESSIONS: {len(pre_existing_failures)} pre-existing failures, 0 new failures.")
+            if fixed_failures:
+                print(f"  🎉 {len(fixed_failures)} pre-existing failure(s) were FIXED!")
+        else:
+            print(f"✗ REGRESSION DETECTED: {len(new_failures)} new failure(s) found! ({len(pre_existing_failures)} pre-existing failures)")
+            print("\nNew failing test(s):")
+            for fail in new_failures:
+                print(f"  ● {fail}")
+                if args.verbose and fail in current_snippets and current_snippets[fail]:
+                    indented = "\n".join("      " + line for line in current_snippets[fail].splitlines()[:10])
+                    print(indented)
+            if fixed_failures:
+                print(f"\n  (Note: {len(fixed_failures)} pre-existing failure(s) were fixed)")
+
+    return 1 if has_regressions else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

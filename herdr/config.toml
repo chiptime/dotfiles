@@ -36,6 +36,7 @@ last_pane = "prefix+`"
 # lazygit popup
 [[keys.command]]
 key = "prefix+g"
+description = "lazygit popup"
 type = "popup"
 command = "lazygit"
 width = "90%"
@@ -44,6 +45,7 @@ height = "90%"
 # htop popup
 [[keys.command]]
 key = "prefix+alt+h"
+description = "htop popup"
 type = "popup"
 command = "htop"
 width = "80%"
@@ -52,6 +54,7 @@ height = "80%"
 # fzf file finder in popup
 [[keys.command]]
 key = "prefix+f"
+description = "fzf file finder popup"
 type = "popup"
 command = "fzf --preview 'batcat --color=always {}' --preview-window=right:50%"
 width = "80%"
@@ -60,66 +63,78 @@ height = "80%"
 # Voice Feedback (TTS) — Play / Stop toggle on focused chat
 [[keys.command]]
 key = "prefix+r"
+description = "TTS: play/stop focused chat"
 type = "shell"
 command = "herdr-tts --toggle-play"
 
 [[keys.command]]
 key = "prefix+ctrl+r"
+description = "TTS: play/stop focused chat"
 type = "shell"
 command = "herdr-tts --toggle-play"
 
 # Voice Feedback (TTS) — TL;DR Quick Summary on focused chat
 [[keys.command]]
 key = "prefix+t"
+description = "TTS: TL;DR summary of chat"
 type = "shell"
 command = "herdr-tts --tldr"
 
 [[keys.command]]
 key = "prefix+ctrl+t"
+description = "TTS: TL;DR summary of chat"
 type = "shell"
 command = "herdr-tts --tldr"
 
 # Voice Feedback (TTS) — Stop audio immediately
 [[keys.command]]
 key = "prefix+s"
+description = "TTS: stop audio now"
 type = "shell"
 command = "herdr-tts --stop"
 
 [[keys.command]]
 key = "prefix+ctrl+s"
+description = "TTS: stop audio now"
 type = "shell"
 command = "herdr-tts --stop"
 
 # Voice Feedback (TTS) — Toggle automatic background reading
 [[keys.command]]
 key = "prefix+v"
+description = "TTS: toggle auto-read"
 type = "shell"
 command = "herdr-tts --toggle-auto"
 
 [[keys.command]]
 key = "prefix+ctrl+v"
+description = "TTS: toggle auto-read"
 type = "shell"
 command = "herdr-tts --toggle-auto"
 
 # Voice Feedback (TTS) — Dashboard TUI (plugin popup, closes with q)
 [[keys.command]]
 key = "prefix+d"
+description = "TTS: dashboard TUI"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-dashboard"
 
 [[keys.command]]
 key = "prefix+ctrl+d"
+description = "TTS: dashboard TUI"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-dashboard"
 
 # Voice Feedback (TTS) — Voice palette (fzf: turns per chat, focus/mute/snooze)
 [[keys.command]]
 key = "prefix+o"
+description = "TTS: voice palette (fzf)"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-palette"
 
 [[keys.command]]
 key = "prefix+ctrl+o"
+description = "TTS: voice palette (fzf)"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-palette"
 
@@ -127,74 +142,87 @@ command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-palette"
 # los ajustes de voz/audio viven dentro, tecla "a")
 [[keys.command]]
 key = "prefix+u"
+description = "TTS: voice menu/settings"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-menu"
 
 [[keys.command]]
 key = "prefix+ctrl+u"
+description = "TTS: voice menu/settings"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-menu"
 
 # Voice Feedback (TTS) — Mute / Snooze (v0.9, nunca cableadas en esta config)
 [[keys.command]]
 key = "prefix+m"
+description = "TTS: mute focused pane"
 type = "shell"
 command = "herdr-tts --mute-pane"
 
 [[keys.command]]
 key = "prefix+z"
+description = "TTS: snooze focused pane"
 type = "shell"
 command = "herdr-tts --snooze-pane"
 
 [[keys.command]]
 key = "prefix+Z"
+description = "TTS: snooze all (global)"
 type = "shell"
 command = "herdr-tts --snooze-global"
 
 # Voice Feedback (TTS) — Pause / Resume audio playback
 [[keys.command]]
 key = "prefix+p"
+description = "TTS: pause/resume playback"
 type = "shell"
 command = "herdr-tts --toggle-pause"
 
 [[keys.command]]
 key = "prefix+ctrl+p"
+description = "TTS: pause/resume playback"
 type = "shell"
 command = "herdr-tts --toggle-pause"
 
 # Voice Feedback (TTS) — Seek forward 10 seconds
 [[keys.command]]
 key = "prefix+]"
+description = "TTS: seek forward 10s"
 type = "shell"
 command = "herdr-tts --forward"
 
 # Voice Feedback (TTS) — Seek backward 10 seconds
 [[keys.command]]
 key = "prefix+["
+description = "TTS: rewind 10s"
 type = "shell"
 command = "herdr-tts --rewind"
 
 # Voice Feedback (TTS) — Next spoken sentence
 [[keys.command]]
 key = "prefix+n"
+description = "TTS: next sentence"
 type = "shell"
 command = "herdr-tts --next-sentence"
 
 # Voice Feedback (TTS) — Previous spoken sentence
 [[keys.command]]
 key = "prefix+N"
+description = "TTS: previous sentence"
 type = "shell"
 command = "herdr-tts --prev-sentence"
 
 # Voice Feedback (TTS) — Increase speed (+10%)
 [[keys.command]]
 key = "prefix+="
+description = "TTS: speed up 10%"
 type = "shell"
 command = "herdr-tts --rate-up"
 
 # Voice Feedback (TTS) — Decrease speed (-10%)
 [[keys.command]]
 key = "prefix+-"
+description = "TTS: slow down 10%"
 type = "shell"
 command = "herdr-tts --rate-down"
 
@@ -292,5 +320,6 @@ scrollback_limit_bytes = 10000000
 # Open live reader popup for current playback
 [[keys.command]]
 key = "prefix+R"
+description = "TTS: open live reader"
 type = "shell"
 command = "herdr plugin pane open --plugin herdr.tts --entrypoint tts-reader"
