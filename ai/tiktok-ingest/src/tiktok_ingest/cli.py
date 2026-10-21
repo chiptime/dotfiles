@@ -118,6 +118,7 @@ from .guided import (
     run_guided,
     whisper_coordinated_stage_functions,
 )
+from .ingest import IngestError, run_ingest
 from .ollama_runtime import (
     OllamaRuntimeError,
     import_model,
@@ -711,8 +712,7 @@ def build_parser() -> argparse.ArgumentParser:
     collection_run.add_argument(
         "collection_url",
         metavar="COLLECTION_URL",
-        help="canonical https://www.tiktok.com/@<author>/collection/<slug> "
-        "(or /playlist/<slug>) URL",
+        help="canonical TikTok collection URL or direct video URL",
     )
     collection_run.add_argument(
         "--limit",
@@ -744,7 +744,82 @@ def build_parser() -> argparse.ArgumentParser:
         "zero network, zero containers, zero GPU, zero API calls, zero "
         "writes",
     )
+    collection_run.add_argument(
+        "--auto-verify",
+        action="store_true",
+        help="authorize bounded safe verification in the initial run plan (no prompt after synthesis)",
+    )
+    collection_run.add_argument(
+        "--skip-browser-consent",
+        action="store_true",
+        help="proceed directly to browser launch/readiness checkpoint without a separate browser consent prompt",
+    )
+    collection_run.add_argument(
+        "--rescan",
+        action="store_true",
+        help="force a fresh browser inventory even if a persisted collection scan already exists",
+    )
+    collection_run.add_argument(
+        "--retry-failed",
+        type=int,
+        default=1,
+        metavar="N",
+        help="maximum number of intra-phase retry attempts for failed items (default: 1; 0 disables)",
+    )
     add_state_root(collection_run)
+
+    ingest_parser = subparsers.add_parser(
+        "ingest",
+        help="Unified one-command entry point: ingest a collection or single video URL with one upfront consent",
+        description=(
+            "Unified one-click pipeline entry point. Automatically detects if "
+            "the provided URL is a collection (dispatches to browser collection "
+            "flow) or a direct video URL (dispatches directly to guided execution). "
+            "Runs with single upfront run-plan consent (auto-verify enabled by default) "
+            "producing pending entries in backlog.jsonl."
+        ),
+    )
+    ingest_parser.add_argument(
+        "url",
+        metavar="URL",
+        help="TikTok collection URL or direct video URL",
+    )
+    ingest_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"per-batch cap (1..{config.BUDGETS.batch_pilot_clips}; default {config.BUDGETS.batch_pilot_clips})",
+    )
+    ingest_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="dry run: print the plan without network, GPU or disk mutations",
+    )
+    ingest_parser.add_argument(
+        "--no-auto-verify",
+        action="store_true",
+        help="prompt explicitly before verifying candidate URLs instead of upfront run-plan consent",
+    )
+    ingest_parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="output raw JSON instead of human table summary",
+    )
+    ingest_parser.add_argument(
+        "--rescan",
+        action="store_true",
+        help="force a fresh browser inventory for collection URLs even if a persisted scan already exists",
+    )
+    ingest_parser.add_argument(
+        "--retry-failed",
+        type=int,
+        default=1,
+        metavar="N",
+        help="maximum number of intra-phase retry attempts for failed items (default: 1; 0 disables)",
+    )
+    add_state_root(ingest_parser)
 
     summary_parser = subparsers.add_parser(
         "summary",
@@ -1068,6 +1143,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "collection-run":
             from .collection_run import CollectionRunError, run_collection
 
+            rescan = getattr(args, "rescan", False)
+            retry_failed = getattr(args, "retry_failed", 1)
             if args.dry_run:
                 try:
                     exit_code, report = run_collection(
@@ -1077,6 +1154,10 @@ def main(argv: list[str] | None = None) -> int:
                         limit=args.limit,
                         declared_count=args.declared_count,
                         end_evidence=args.end_evidence,
+                        auto_verify=args.auto_verify,
+                        skip_browser_consent=args.skip_browser_consent,
+                        rescan=rescan,
+                        retry_failed=retry_failed,
                     )
                 except CollectionRunError as exc:
                     print(f"collection-run: {exc}", file=sys.stderr)
@@ -1093,11 +1174,77 @@ def main(argv: list[str] | None = None) -> int:
                             end_evidence=args.end_evidence,
                             consent=session.consent,
                             out=session.out,
+                            auto_verify=args.auto_verify,
+                            skip_browser_consent=args.skip_browser_consent,
+                            rescan=rescan,
+                            retry_failed=retry_failed,
                         )
                     except CollectionRunError as exc:
                         print(f"collection-run: {exc}", file=sys.stderr)
                         return 2
             print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+            return exit_code
+
+        if args.command == "ingest":
+            from .collection_run import CollectionRunError
+
+            auto_verify = not args.no_auto_verify
+            rescan = getattr(args, "rescan", False)
+            retry_failed = getattr(args, "retry_failed", 1)
+            if args.dry_run:
+                try:
+                    exit_code, report = run_ingest(
+                        args.url,
+                        state=state,
+                        dry_run=True,
+                        limit=args.limit,
+                        auto_verify=auto_verify,
+                        rescan=rescan,
+                        retry_failed=retry_failed,
+                    )
+                except (IngestError, CollectionRunError) as exc:
+                    print(f"ingest: {exc}", file=sys.stderr)
+                    return 2
+            else:
+                with tui.terminal_ui() as session:
+                    try:
+                        exit_code, report = run_ingest(
+                            args.url,
+                            state=state,
+                            dry_run=False,
+                            limit=args.limit,
+                            consent=session.consent,
+                            out=session.out,
+                            auto_verify=auto_verify,
+                            rescan=rescan,
+                            retry_failed=retry_failed,
+                        )
+                    except (IngestError, CollectionRunError) as exc:
+                        print(f"ingest: {exc}", file=sys.stderr)
+                        return 2
+            if getattr(args, "as_json", False):
+                print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+            else:
+                from .summary import guided_report_summary, render_table
+
+                # Display table view for guided or collection runs
+                if "selected" in report:
+                    table_text = render_table(guided_report_summary(report))
+                    print(table_text)
+                elif "batches" in report:
+                    from .summary import _report_summary
+                    table_text = render_table(_report_summary(state, report, Path("live")))
+                    print(table_text)
+                else:
+                    # In preflight or dry-run without selected items, display structured key-values
+                    if "preflight" in report:
+                        pf = report["preflight"]
+                        print(f"Target:     {pf.get('collection_url')}")
+                        print(f"Status:     Playwright {pf.get('playwright_detail', 'ok')}")
+                        print(f"Text API:   {pf.get('text_api_origin')} ({pf.get('text_api_model')})")
+                    elif report.get("mode") == "dry-run":
+                        print(f"Mode:       {report.get('mode')}")
+                        print(f"State Root: {report.get('state_root')}")
             return exit_code
 
         if args.command == "summary":
@@ -1152,6 +1299,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except GuidedError as exc:
         print(f"guided-run: {exc}", file=sys.stderr)
+        return 2
+    except IngestError as exc:
+        print(f"ingest: {exc}", file=sys.stderr)
         return 2
     except (ConnectionError, OSError) as exc:
         print(f"whisper transport error: {exc}", file=sys.stderr)

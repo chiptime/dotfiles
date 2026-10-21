@@ -49,13 +49,20 @@ except ImportError:  # pragma: no cover - non-POSIX host
 
 from .guided import GUIDED_STAGES, ConsentProvider, render_consent_window
 
-STAGE_ORDER: tuple[str, ...] = GUIDED_STAGES
+STAGE_ORDER: tuple[str, ...] = (
+    "fetch",
+    "prepare",
+    "audio",
+    "vision",
+    "synthesis",
+    "verify",
+)
 
 _STAGE_SHORT = {
     "fetch": "fetch",
     "prepare": "prep",
-    "vision": "vision",
     "audio": "audio",
+    "vision": "vision",
     "synthesis": "synth",
     "verify": "verify",
 }
@@ -281,13 +288,13 @@ def stage_role(state: TuiState, video_id: str, stage: str) -> str:
 
 def _stage_cell(state: TuiState, video_id: str, stage: str, width: int) -> str:
     if state.running.get(video_id) == stage:
-        return "RUN".ljust(width)
+        return "▶ RUN".ljust(width)
     value = state.stages.get(video_id, {}).get(stage, "pending")
     if value == "pending":
-        return ".".ljust(width)
+        return ". ·".ljust(width)
     if value == "complete":
-        return "ok".ljust(width)
-    return value[:width].ljust(width)
+        return "✔ ok".ljust(width)
+    return f"✖ {value}"[:width].ljust(width)
 
 
 def _dashboard_styled(
@@ -295,44 +302,71 @@ def _dashboard_styled(
 ) -> list[StyledLine]:
     """The structured dashboard as role-tagged spans (color-agnostic).
 
-    Layout: a header bar (run title + phase + elapsed), the per-id stage
-    matrix with state-colored cells, and a log panel. The plain-text
-    :func:`render_lines` and the curses drawer are both projections of
-    this single renderer, so colors and text can never diverge.
+    Layout: hero card (live execution + clock + phase), the per-id stage
+    matrix with rounded box borders, status metrics, and a log panel.
+    Matches the exact visual hierarchy and layout of the summary table.
     """
     elapsed = state.elapsed(now)
-    left = " TikTok ingest :: live run "
-    right = f" elapsed {elapsed:5.1f}s "
-    gap = max(0, width - len(left) - len(right))
+    clock = f" ⏱ elapsed {elapsed:5.1f}s "
+    hero_title = "╭─ ⚡ TIKTOK INGEST ─ [LIVE EXECUTION] ─"
+    gap = max(0, width - len(hero_title) - len(clock) - 1)
+    hero_top = hero_title + ("─" * gap) + clock + "─╮"
+    phase_text = f"│  phase: {state.phase}   •   activity: {state.activity or '(idle)'}"
+    gap2 = max(0, width - len(phase_text) - 1)
+    hero_mid = phase_text + (" " * gap2) + "│"
+    hero_bot = "╰" + ("─" * max(0, width - 2)) + "╯"
+
     lines: list[StyledLine] = [
-        [(left + " " * gap + right, ROLE_HEADER)],
-        [
-            (
-                f" phase: {state.phase}    activity: "
-                f"{state.activity or '(idle)'}",
-                ROLE_NORMAL,
-            )
-        ],
-        [("-" * max(0, width), ROLE_FRAME)],
+        [(hero_top[:width], ROLE_HEADER)],
+        [(hero_mid[:width], ROLE_NORMAL)],
+        [(hero_bot[:width], ROLE_FRAME)],
     ]
+
     id_width = max([len("id")] + [len(video_id) for video_id in state.ids])
-    header: StyledLine = [("id".ljust(id_width) + "  ", ROLE_FRAME)]
+    col_w = 6
+    tbl_top = "╭─" + ("─" * id_width) + "─┬─" + "─┬─".join("─" * col_w for _ in STAGE_ORDER) + "─╮"
+    tbl_sep = "├─" + ("─" * id_width) + "─┼─" + "─┼─".join("─" * col_w for _ in STAGE_ORDER) + "─┤"
+    tbl_bot = "╰─" + ("─" * id_width) + "─┴─" + "─┴─".join("─" * col_w for _ in STAGE_ORDER) + "─╯"
+
+    lines.append([(tbl_top[:width], ROLE_FRAME)])
+    header: StyledLine = [("│ ", ROLE_FRAME), ("id".ljust(id_width), ROLE_HEADER)]
     for name in STAGE_ORDER:
-        header.append((_STAGE_SHORT[name].ljust(6) + " ", ROLE_FRAME))
+        header.append((" │ ", ROLE_FRAME))
+        header.append((_STAGE_SHORT[name].ljust(col_w), ROLE_HEADER))
+    header.append((" │", ROLE_FRAME))
     lines.append(header)
-    for video_id in state.ids:
-        spans: StyledLine = [(f"{video_id.ljust(id_width)}  ", ROLE_NORMAL)]
-        for name in STAGE_ORDER:
-            spans.append(
-                (
-                    _stage_cell(state, video_id, name, 6) + " ",
-                    stage_role(state, video_id, name),
+
+    if state.ids:
+        lines.append([(tbl_sep[:width], ROLE_FRAME)])
+        for video_id in state.ids:
+            spans: StyledLine = [("│ ", ROLE_FRAME), (video_id.ljust(id_width), ROLE_NORMAL)]
+            for name in STAGE_ORDER:
+                spans.append((" │ ", ROLE_FRAME))
+                spans.append(
+                    (
+                        _stage_cell(state, video_id, name, col_w),
+                        stage_role(state, video_id, name),
+                    )
                 )
-            )
-        lines.append(spans)
-    lines.append([("", ROLE_NORMAL)])
+            spans.append((" │", ROLE_FRAME))
+            lines.append(spans)
+
+    lines.append([(tbl_bot[:width], ROLE_FRAME)])
+
+    # Status metrics card
+    completed = sum(1 for vid in state.ids if all(state.stages.get(vid, {}).get(st) == "complete" for st in STAGE_ORDER))
+    running_count = len(state.running)
+    tbl_w = len(tbl_top)
+    stat_top = "╭─ Pipeline Status " + ("─" * max(0, tbl_w - 21)) + "╮"
+    stat_text = f"│  Items: {len(state.ids)}  •  ✔ {completed} complete  •  ▶ {running_count} running"
+    stat_mid = stat_text + (" " * max(0, tbl_w - len(stat_text) - 1)) + "│"
+    stat_bot = "╰" + ("─" * max(0, tbl_w - 2)) + "╯"
+    lines.append([(stat_top[:width], ROLE_FRAME)])
+    lines.append([(stat_mid[:width], ROLE_NORMAL)])
+    lines.append([(stat_bot[:width], ROLE_FRAME)])
+
     lines.append(
-        [(" log ", ROLE_FRAME), ("-" * max(0, width - 5), ROLE_FRAME)]
+        [("─── log ", ROLE_FRAME), ("─" * max(0, width - 8), ROLE_FRAME)]
     )
     remaining = max(0, height - len(lines))
     for entry in state.log[-remaining:] if remaining else []:

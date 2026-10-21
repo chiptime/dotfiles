@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+#
+# tiktok-ingest — One-click pipeline runner for collections or direct videos.
+#
+# Accepts a URL as the first argument, or inspects the clipboard (WSL / Linux)
+# to offer immediate one-click execution.
+#
+# Dispatches to:
+#   python3 -m tiktok_ingest ingest "<url>" "$@"
+
+set -euo pipefail
+
+DOTFILES_DIR="${DOTFILES_DIR:-$HOME/.dotfiles}"
+PKG_DIR="$DOTFILES_DIR/ai/tiktok-ingest"
+SRC_DIR="$PKG_DIR/src"
+
+if [ ! -d "$SRC_DIR/tiktok_ingest" ]; then
+  echo "tiktok-ingest: cannot find tiktok_ingest package under $SRC_DIR" >&2
+  exit 2
+fi
+
+export PYTHONPATH="$SRC_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+URL=""
+EXTRA_ARGS=()
+
+# Extract URL wherever it appears in the arguments, and keep the rest as options
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      exec python3 -m tiktok_ingest ingest --help
+      ;;
+    http://*|https://*)
+      if [ -z "$URL" ]; then
+        URL="$arg"
+      else
+        EXTRA_ARGS+=("$arg")
+      fi
+      ;;
+    *)
+      EXTRA_ARGS+=("$arg")
+      ;;
+  esac
+done
+
+# Styling and feedback helpers (ANSI colors, graceful degradation if not TTY)
+if [ -t 1 ]; then
+  BOLD="\033[1m"
+  CYAN="\033[36m"
+  GREEN="\033[32m"
+  YELLOW="\033[33m"
+  DIM="\033[2m"
+  RESET="\033[0m"
+else
+  BOLD=""
+  CYAN=""
+  GREEN=""
+  YELLOW=""
+  DIM=""
+  RESET=""
+fi
+
+# If no URL was passed, try reading from clipboard
+if [ -z "$URL" ]; then
+  CLIP=""
+  # Only check clipboard if stdin is a terminal or non-empty
+  if command -v powershell.exe >/dev/null 2>&1; then
+    CLIP=$(powershell.exe -NoProfile -Command "Get-Clipboard" 2>/dev/null | tr -d '\r' | head -n 1 || true)
+  elif command -v wl-paste >/dev/null 2>&1; then
+    CLIP=$(wl-paste 2>/dev/null | head -n 1 || true)
+  elif command -v xclip >/dev/null 2>&1; then
+    CLIP=$(xclip -selection clipboard -o 2>/dev/null | head -n 1 || true)
+  fi
+
+  if [[ "$CLIP" =~ ^https?://.*tiktok\.com/ ]]; then
+    printf "${CYAN}${BOLD}[tiktok-ingest]${RESET} ${GREEN}✔ Detected TikTok URL in clipboard:${RESET}\n  ${DIM}%s${RESET}\n" "$CLIP"
+    if [ -t 0 ]; then
+      read -r -p "$(printf "${BOLD}Process this URL? [Y/n]${RESET} ")" answer
+      case "$answer" in
+        [nN]*)
+          URL=""
+          ;;
+        *)
+          URL="$CLIP"
+          ;;
+      esac
+    fi
+  fi
+fi
+
+# If still no URL, ask interactively or show usage
+if [ -z "$URL" ]; then
+  if [ -t 0 ]; then
+    printf "${CYAN}${BOLD}[tiktok-ingest]${RESET} No URL provided.\n"
+    read -r -p "$(printf "${BOLD}Enter collection or video URL:${RESET} ")" URL
+  fi
+fi
+
+if [ -z "$URL" ]; then
+  printf "${BOLD}usage:${RESET} tiktok-ingest [URL] [options]\n" >&2
+  printf "       ${DIM}URL can be a collection (@author/collection/...) or video (@author/video/...)${RESET}\n" >&2
+  printf "       ${DIM}Tip: copy a TikTok URL to your clipboard and run 'ti' directly.${RESET}\n" >&2
+  exit 2
+fi
+
+exec python3 -m tiktok_ingest ingest "$URL" "${EXTRA_ARGS[@]}"

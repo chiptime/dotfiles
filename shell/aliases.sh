@@ -120,3 +120,6 @@ alias ocr='systemctl --user restart opencode-web.service mobile-proxy.service &&
 alias ocs='systemctl --user --no-pager status opencode-web.service mobile-proxy.service'
 alias ocl='journalctl --user -u opencode-web.service -u mobile-proxy.service -f'
 alias opencode-switch='~/.dotfiles/scripts/opencode-switch-profile.sh'
+
+# TikTok Ingest
+alias ti='tiktok-ingest'

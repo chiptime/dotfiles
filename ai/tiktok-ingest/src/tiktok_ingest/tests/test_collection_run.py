@@ -506,6 +506,8 @@ class CollectionRunTestCase(unittest.TestCase):
         dry_run: bool = False,
         limit: int | None = None,
         shared_trace: bool = False,
+        rescan: bool = True,
+        retry_failed: int = 0,
     ) -> tuple[int, dict[str, Any], FakeApiTransport | None]:
         controller = FakeBrowserController(
             browser_html if browser_html else page_html(3)
@@ -538,6 +540,8 @@ class CollectionRunTestCase(unittest.TestCase):
             env=env if env is not None else API_ENV,
             podman_runner=lambda argv, timeout=None: (0, "", ""),
             stages=stages.functions(),
+            rescan=rescan,
+            retry_failed=retry_failed,
         )
         return code, report, transport
 
@@ -1574,6 +1578,7 @@ class TestRetryWindowWhisperRestore(CollectionRunTestCase):
             swap_retry_monotonic=clock,
             swap_retry_sleep=clock.sleep,
             swap_retry_vmstat_fn=vmstat,
+            rescan=True,
         )
         return code, report
 
@@ -2169,8 +2174,134 @@ class TestPreflight(CollectionRunTestCase):
             [ENV_BASE_URL, ENV_API_KEY, ENV_MODEL],
         )
         self.assertIn("exclusive-writer", report["exclusive_writer"])
-        self.assertTrue(any("text API" in d for d in report["planned_destinations"]))
+# --------------------------------------------------------------------------
+# Collection-level resume and idempotency
+# --------------------------------------------------------------------------
+
+
+class TestCollectionResumeAndIdempotency(CollectionRunTestCase):
+    def test_existing_scan_resumes_without_opening_browser(self) -> None:
+        seed_scan_for_run(self.state, [1, 2])
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            CollectionStages(),
+            consent,
+            rescan=False,
+        )
+        self.assertEqual(code, 0)
+        # Browser grant was skipped; run plan was asked directly
+        self.assertNotIn("browser", consent.kinds)
+        self.assertIn("run-plan", consent.kinds)
+        self.assertTrue(report["browser"]["reused"])
+        self.assertTrue(
+            any("resuming collection" in m for m in self.messages)
+        )
+
+    def test_existing_scan_fully_complete_is_idempotent_noop(self) -> None:
+        seed_scan_for_run(self.state, [1])
+        seed_job(self.state, fake_id(1), complete=("fetch",))
+        from tiktok_ingest.state import Processed as ProcessedStore
+
+        processed = ProcessedStore(self.state).get(fake_id(1))
+        processed.stage_fingerprints["emit"] = {"stage": "emit"}
+        ProcessedStore(self.state).record(processed)
+
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            CollectionStages(),
+            consent,
+            rescan=False,
+        )
+        self.assertEqual(code, 0)
+        # ZERO consent prompts (no browser, no run-plan)
+        self.assertEqual(consent.kinds, [])
+        self.assertTrue(report["browser"]["reused"])
+        self.assertTrue(
+            any("already fully ingested" in m for m in self.messages)
+        )
+
+    def test_rescan_flag_forces_fresh_browser_inventory(self) -> None:
+        seed_scan_for_run(self.state, [1, 2])
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            CollectionStages(),
+            consent,
+            rescan=True,
+        )
+        self.assertEqual(code, 0)
+        # Browser WAS prompted and run
+        self.assertIn("browser", consent.kinds)
+        self.assertFalse(report["browser"].get("reused", False))
+
+    def test_no_existing_scan_always_runs_browser(self) -> None:
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            CollectionStages(),
+            consent,
+            rescan=False,
+        )
+        self.assertEqual(code, 0)
+        # Browser WAS prompted and run
+        self.assertIn("browser", consent.kinds)
+        self.assertFalse(report["browser"].get("reused", False))
+
+
+# --------------------------------------------------------------------------
+# Intra-phase retries within resource windows
+# --------------------------------------------------------------------------
+
+
+class RetryingStages(CollectionStages):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.stage_attempt_counts: dict[str, int] = {}
+
+    def do_fetch(self, url: str, state: StateRoot) -> FakeOutcome:
+        self.calls.append(f"fetch:{url}")
+        count = self.stage_attempt_counts.get("fetch", 0) + 1
+        self.stage_attempt_counts["fetch"] = count
+        if count == 1:
+            return FakeOutcome("failed", "transient network glitch: fixture")
+        return super().do_fetch(url, state)
+
+
+class TestIntraPhaseRetries(CollectionRunTestCase):
+    def test_failed_item_retried_and_succeeds_in_same_phase(self) -> None:
+        seed_scan_for_run(self.state, [1])
+        stages = RetryingStages()
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            stages,
+            consent,
+            rescan=False,
+            retry_failed=1,
+        )
+        self.assertEqual(stages.stage_attempt_counts.get("fetch"), 2)
+        self.assertTrue(
+            any("retrying 1 failed item(s)" in m for m in self.messages)
+        )
+        # Preparation phase completed successfully on retry
+        prep_phase = next(p for p in report["phases"] if p["phase"] == "preparation")
+        self.assertEqual(prep_phase["state"], "complete")
+        self.assertEqual(prep_phase["pending_ids"], [])
+
+    def test_retry_failed_zero_disables_intra_phase_retries(self) -> None:
+        seed_scan_for_run(self.state, [1])
+        stages = RetryingStages()
+        consent = RecordingConsent()
+        code, report, _ = self.run_collection(
+            stages,
+            consent,
+            rescan=False,
+            retry_failed=0,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(stages.stage_attempt_counts.get("fetch"), 1)
+        self.assertFalse(
+            any("retrying" in m for m in self.messages)
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+

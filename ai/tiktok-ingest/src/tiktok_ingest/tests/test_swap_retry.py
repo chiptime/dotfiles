@@ -1327,6 +1327,7 @@ class TestRunCollectionJourney(SwapRetryTestCase):
         video_ns: list[int],
         limit: int | None = None,
         vmstat: ScriptedVmstat | None = None,
+        retry_failed: int = 0,
     ) -> tuple[int, dict[str, Any]]:
         from tiktok_ingest.tests.fixtures import sample_synthesis_document
 
@@ -1350,6 +1351,8 @@ class TestRunCollectionJourney(SwapRetryTestCase):
             swap_retry_monotonic=self.clock,
             swap_retry_sleep=self.clock.sleep,
             swap_retry_vmstat_fn=vmstat or self.vmstat,
+            rescan=True,
+            retry_failed=retry_failed,
         )
         return code, report
 

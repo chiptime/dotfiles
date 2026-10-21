@@ -239,7 +239,7 @@ def guided_report_summary(report: dict[str, Any]) -> dict[str, Any]:
             )
         )
     return {
-        "mode": "guided-run",
+        "mode": report.get("mode") or "guided-run",
         "state_root": report.get("state_root"),
         "generated_at": utc_now_iso(),
         "collection": None,
@@ -247,31 +247,167 @@ def guided_report_summary(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def render_table(summary: dict[str, Any]) -> str:
-    """Render the human table with one row per item."""
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def _visible_len(text: str) -> int:
+    return len(_ANSI_RE.sub("", text))
+
+
+def _pad(text: str, width: int) -> str:
+    pad_len = max(0, width - _visible_len(text))
+    return text + (" " * pad_len)
+
+
+def render_table(summary: dict[str, Any], *, color: bool | None = None) -> str:
+    """Render a modern, styled table with hero and status metrics."""
+    if color is None:
+        import os
+        import sys
+
+        color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+    if color:
+        c_reset = "\033[0m"
+        c_bold = "\033[1m"
+        c_cyan = "\033[36m"
+        c_green = "\033[32m"
+        c_yellow = "\033[33m"
+        c_red = "\033[31m"
+        c_dim = "\033[2m"
+        c_border = "\033[38;5;240m"
+    else:
+        c_reset = ""
+        c_bold = ""
+        c_cyan = ""
+        c_green = ""
+        c_yellow = ""
+        c_red = ""
+        c_dim = ""
+        c_border = ""
+
     headers = ["id", "author", *SUMMARY_STAGES, "backlog", "next"]
+    items = summary.get("items") or []
+
     rows: list[list[str]] = []
-    for item in summary.get("items") or []:
+    for item in items:
         stages = item.get("stages") or {}
-        rows.append(
-            [
-                str(item.get("id")),
-                str(item.get("author") or "-"),
-                *[str(stages.get(stage, "pending")) for stage in SUMMARY_STAGES],
-                str(item.get("backlog")),
-                str(item.get("next")),
-            ]
-        )
-    widths = [len(header) for header in headers]
+        raw_id = str(item.get("id"))
+        raw_author = str(item.get("author") or "-")
+        raw_backlog = str(item.get("backlog"))
+        raw_next = str(item.get("next"))
+
+        row: list[str] = [raw_id, raw_author]
+        for stage in SUMMARY_STAGES:
+            st_val = str(stages.get(stage, "pending"))
+            if st_val == "complete":
+                row.append(f"{c_green}✔ complete{c_reset}" if color else "✔ complete")
+            elif st_val == "pending":
+                row.append(f"{c_dim}· pending{c_reset}" if color else "· pending")
+            elif st_val in ("running", "RUN"):
+                row.append(f"{c_yellow}{c_bold}▶ running{c_reset}" if color else "▶ running")
+            else:
+                row.append(f"{c_red}{c_bold}✖ {st_val}{c_reset}" if color else f"✖ {st_val}")
+
+        if raw_backlog == "n/a":
+            row.append(f"{c_dim}n/a{c_reset}" if color else "n/a")
+        elif raw_backlog == "pending":
+            row.append(f"{c_yellow}pending{c_reset}" if color else "pending")
+        else:
+            row.append(raw_backlog)
+
+        if raw_next == "complete":
+            row.append(f"{c_green}✔ complete{c_reset}" if color else "✔ complete")
+        elif "pending" in raw_next:
+            row.append(f"{c_yellow}⏳ {raw_next}{c_reset}" if color else f"⏳ {raw_next}")
+        else:
+            row.append(f"{c_red}{c_bold}✖ {raw_next}{c_reset}" if color else f"✖ {raw_next}")
+
+        rows.append(row)
+
+    widths = [_visible_len(h) for h in headers]
     for row in rows:
         for index, cell in enumerate(row):
-            widths[index] = max(widths[index], len(cell))
+            widths[index] = max(widths[index], _visible_len(cell))
 
-    def format_row(row: list[str]) -> str:
-        return "  ".join(
-            cell.ljust(widths[index]) for index, cell in enumerate(row)
-        ).rstrip()
+    top = f"{c_border}╭─" + "─┬─".join("─" * w for w in widths) + f"─╮{c_reset}"
+    head = (
+        f"{c_border}│{c_reset} "
+        + f" {c_border}│{c_reset} ".join(
+            c_bold + _pad(headers[i], widths[i]) + c_reset for i in range(len(headers))
+        )
+        + f" {c_border}│{c_reset}"
+    )
 
-    lines = [format_row(headers), "  ".join("-" * width for width in widths)]
-    lines.extend(format_row(row) for row in rows)
-    return "\n".join(lines)
+    if rows:
+        sep = f"{c_border}├─" + "─┼─".join("─" * w for w in widths) + f"─┤{c_reset}"
+        row_lines = [
+            f"{c_border}│{c_reset} "
+            + f" {c_border}│{c_reset} ".join(
+                _pad(row[i], widths[i]) for i in range(len(row))
+            )
+            + f" {c_border}│{c_reset}"
+            for row in rows
+        ]
+        bot = f"{c_border}╰─" + "─┴─".join("─" * w for w in widths) + f"─╯{c_reset}"
+        table_lines = [top, head, sep, *row_lines, bot]
+    else:
+        bot = f"{c_border}╰─" + "─┴─".join("─" * w for w in widths) + f"─╯{c_reset}"
+        table_lines = [top, head, bot]
+
+    table_width = _visible_len(top)
+
+    # Hero card
+    mode = summary.get("mode") or "pipeline"
+    if mode == "dry-run":
+        badge_text = "DRY-RUN PREVIEW"
+        badge = f"{c_yellow}[{badge_text}]{c_reset}" if color else f"[{badge_text}]"
+    elif mode == "live":
+        badge_text = "LIVE STATE"
+        badge = f"{c_green}[{badge_text}]{c_reset}" if color else f"[{badge_text}]"
+    elif mode == "report":
+        badge_text = "SAVED REPORT"
+        badge = f"{c_cyan}[{badge_text}]{c_reset}" if color else f"[{badge_text}]"
+    else:
+        badge_text = str(mode).upper()
+        badge = f"{c_cyan}[{badge_text}]{c_reset}" if color else f"[{badge_text}]"
+
+    hero_title_len = _visible_len(f"╭─ ⚡ TIKTOK INGEST ─ [{badge_text}] ─")
+    hero_top = (
+        f"{c_cyan}{c_bold}╭─ ⚡ TIKTOK INGEST ─ {badge} "
+        + ("─" * max(0, table_width - hero_title_len - 1))
+        + f"╮{c_reset}"
+    )
+
+    col = summary.get("collection")
+    if col and col.get("url"):
+        target_str = col["url"]
+    elif col and col.get("key"):
+        target_str = f"collection:{col['key']}"
+    elif len(items) == 1 and items[0].get("id"):
+        target_author = items[0].get("author") or "video"
+        target_str = f"https://www.tiktok.com/@{target_author}/video/{items[0]['id']}"
+    else:
+        target_str = f"{len(items)} items in pipeline"
+
+    hero_content = f"{c_cyan}{c_bold}│{c_reset}  Target : {target_str}"
+    hero_line = _pad(hero_content, table_width - 1) + f"{c_cyan}{c_bold}│{c_reset}"
+    hero_bot = f"{c_cyan}{c_bold}╰" + ("─" * max(0, table_width - 2)) + f"╯{c_reset}"
+    hero_card = [hero_top, hero_line, hero_bot]
+
+    # Footer metrics
+    completed = sum(1 for it in items if it.get("next") == "complete")
+    pending = sum(1 for it in items if "pending" in str(it.get("next", "")))
+    failed = len(items) - completed - pending
+
+    foot_top = f"{c_border}╭─ Pipeline Status " + ("─" * max(0, table_width - 21)) + f"╮{c_reset}"
+    comp_str = f"{c_green}✔ {completed} complete{c_reset}" if color else f"✔ {completed} complete"
+    pend_str = f"{c_yellow}· {pending} pending{c_reset}" if color else f"· {pending} pending"
+    fail_str = f"{c_red}✖ {failed} failed{c_reset}" if color else f"✖ {failed} failed"
+    foot_content = f"{c_border}│{c_reset}  Items: {len(items)}  •  {comp_str}  •  {pend_str}  •  {fail_str}"
+    foot_line = _pad(foot_content, table_width - 1) + f"{c_border}│{c_reset}"
+    foot_bot = f"{c_border}╰" + ("─" * max(0, table_width - 2)) + f"╯{c_reset}"
+    footer_card = [foot_top, foot_line, foot_bot]
+
+    all_lines = [*hero_card, "", *table_lines, "", *footer_card]
+    return "\n".join(all_lines)

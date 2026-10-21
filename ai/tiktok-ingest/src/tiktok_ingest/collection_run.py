@@ -73,6 +73,7 @@ restoration hard stop.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import math
 import os
@@ -91,12 +92,14 @@ from .browser import (
 )
 from .collection import (
     CollectionError,
+    CollectionRef,
     build_collection_plan,
     parse_collection_url,
     resolve_collection,
 )
 from .contracts import JobManifest, StageOutcome, utc_now_iso
 from .gates import GATE_SWAP_DELTA
+from .pipeline import parse_tiktok_url
 from .guided import (
     GUIDED_MAX_BATCH,
     ConsentProvider,
@@ -164,6 +167,7 @@ def preflight(
     collection_url: str,
     env: Mapping[str, str],
     browser_controller_injected: bool = False,
+    rescan: bool = False,
 ) -> dict[str, Any]:
     """Read-only preflight: dependencies, state, planned destinations.
 
@@ -196,6 +200,7 @@ def preflight(
         "text_api_model": api_config.model if api_config else None,
         "scan_state_present": scan is not None,
         "scan_status": scan.status if scan is not None else None,
+        "rescan": rescan,
         "batch_cap": GUIDED_MAX_BATCH,
         "exclusive_writer": (
             "this run is a writer like any other: run it in an "
@@ -478,10 +483,14 @@ class RunPlan:
     text_api_origin: str | None
     text_api_model: str | None
     whisper_info: Any = None
+    retry_failed: int = 1
 
 
 def build_run_plan_window(
-    plan: RunPlan, *, sequence: str | None = None
+    plan: RunPlan,
+    *,
+    sequence: str | None = None,
+    auto_verify: bool = False,
 ) -> ConsentWindow:
     """Human decision 2: accept the WHOLE current run exactly as named.
 
@@ -551,16 +560,29 @@ def build_run_plan_window(
             else (f"whisper: {plan.whisper_note}",)
         ),
         (
-            "verification candidate URLs are unknown until synthesis: ONE "
-            "additional grouped authorization will show every exact "
-            "validated URL before any retrieval — nothing is verified "
-            "before that separate decision"
+            (
+                "bounded safe verification of candidate URLs will run automatically "
+                "under safe-URL rules (anti-SSRF, max 2MB, public http/https only) "
+                "without an extra prompt"
+            )
+            if auto_verify
+            else (
+                "verification candidate URLs are unknown until synthesis: ONE "
+                "additional grouped authorization will show every exact "
+                "validated URL before any retrieval — nothing is verified "
+                "before that separate decision"
+            )
         ),
+    )
+    retry_policy = (
+        f"failed items within a phase may be retried up to {plan.retry_failed} "
+        "time(s) before advancing to the next phase; resource gates remain final"
+        if getattr(plan, "retry_failed", 0) > 0
+        else "a failed id is never reattempted this invocation (safe stop; resumable by re-invoking)"
     )
     limits = (
         f"each frozen id is attempted in exactly ONE batch of at most "
-        f"{plan.batch_cap}: a failed id is never reattempted this "
-        "invocation (safe stop; resumable by re-invoking)",
+        f"{plan.batch_cap}: {retry_policy}",
         "no automatic retry of any operation; a fired resource gate is "
         "final for its GPU window and its remaining ids stay pending; "
         "later frozen normal windows retain their existing attempt policy; "
@@ -622,6 +644,7 @@ def _run_plan_dict(plan: RunPlan, granted: bool) -> dict[str, Any]:
             if plan.text_api_origin
             else None
         ),
+        "retry_failed": getattr(plan, "retry_failed", 1),
     }
 
 
@@ -661,6 +684,28 @@ class _RecordingConsent(ConsentProvider):
         return self.inner.await_readiness(prompt)
 
 
+class _AutoGrantedConsent(ConsentProvider):
+    """Auto-grants the browser window while preserving await_readiness."""
+
+    def __init__(
+        self,
+        inner: ConsentProvider,
+        log: list[dict[str, Any]],
+        *,
+        basis: str,
+    ) -> None:
+        self.inner = inner
+        self.log = log
+        self.basis = basis
+
+    def ask(self, window: ConsentWindow) -> bool:
+        _record_decision(self.log, window, True, self.basis)
+        return True
+
+    def await_readiness(self, prompt: str) -> bool:
+        return self.inner.await_readiness(prompt)
+
+
 class RunScopedAuthorization(ConsentProvider):
     """Discharges stage windows covered by the granted run plan.
 
@@ -693,11 +738,13 @@ class RunScopedAuthorization(ConsentProvider):
         plan: RunPlan,
         *,
         out: Callable[[str], None] | None = None,
+        allow_verify: bool = False,
     ) -> None:
         self.human = human
         self.plan = plan
         self.authorization_log: list[dict[str, Any]] = []
         self._out = out or (lambda _text: None)
+        self.allow_verify = allow_verify
 
     # -- audit -------------------------------------------------------------
 
@@ -809,6 +856,17 @@ class RunScopedAuthorization(ConsentProvider):
             )
             return True
         if window.kind == "verify":
+            if self.allow_verify:
+                self._record(
+                    window,
+                    "covered_by_run_plan",
+                    "bounded safe verification authorized in run plan",
+                    True,
+                )
+                self._out(
+                    "authorization: verify window covered by the run plan grant (no prompt)"
+                )
+                return True
             self._record(
                 window,
                 "deferred",
@@ -912,6 +970,7 @@ def _run_grouped_verification(
     frozen_ids: Sequence[str],
     out: Callable[[str], None],
     report: dict[str, Any],
+    auto_verify: bool = False,
 ) -> bool:
     """ONE grouped verification authorization for the whole run.
 
@@ -955,13 +1014,22 @@ def _run_grouped_verification(
             "backlog-list/show/decide/plan/apply",
         ),
     )
-    granted = consent.ask(window)
-    _record_decision(
-        human_decisions,
-        window,
-        granted,
-        "human decision: grouped verification authorization",
-    )
+    if auto_verify:
+        granted = True
+        _record_decision(
+            human_decisions,
+            window,
+            True,
+            "human decision: grouped verification authorized upfront in run plan",
+        )
+    else:
+        granted = consent.ask(window)
+        _record_decision(
+            human_decisions,
+            window,
+            granted,
+            "human decision: grouped verification authorization",
+        )
     outcomes: dict[str, Any] = {}
     for video_id, reason in read_failures:
         outcomes[video_id] = {
@@ -2225,11 +2293,16 @@ def run_collection(
     swap_retry_monotonic: Callable[[], float] | None = None,
     swap_retry_sleep: Callable[[float], None] | None = None,
     swap_retry_vmstat_fn: Callable[[], Any] | None = None,
+    auto_verify: bool = False,
+    skip_browser_consent: bool = False,
+    rescan: bool = False,
+    retry_failed: int = 1,
 ) -> tuple[int, dict[str, Any]]:
-    """The Phase 0 one-command journey for ONE collection URL."""
+    """The Phase 0 one-command journey for ONE collection URL or direct video URL."""
     out = out or (lambda text: print(text, file=sys.stderr))
     consent = consent or ConsoleConsentProvider()
     env = dict(env if env is not None else os.environ)
+    is_video = False
     ref = parse_collection_url(collection_url)
 
     from .runtime import default_urlopen, subprocess_runner
@@ -2243,15 +2316,29 @@ def run_collection(
         collection_url=collection_url,
         env=env,
         browser_controller_injected=browser_controller is not None,
+        rescan=rescan,
+    )
+
+    existing_scan = None
+    try:
+        _, existing_scan = resolve_collection(state, collection_url)
+    except CollectionError:
+        existing_scan = None
+
+    can_resume = (
+        not rescan
+        and existing_scan is not None
+        and len(existing_scan.items) > 0
+        and existing_scan.status != "blocked"
     )
 
     if dry_run:
-        scan = None
-        try:
-            _, scan = resolve_collection(state, collection_url)
-        except CollectionError:
-            scan = None
-        plan_view: dict[str, Any] = {"scan_state_present": scan is not None}
+        scan = existing_scan
+        plan_view: dict[str, Any] = {
+            "scan_state_present": scan is not None,
+            "rescan": rescan,
+            "resuming": can_resume,
+        }
         if scan is not None:
             plan = build_collection_plan(state, scan)
             plan_view.update(
@@ -2299,33 +2386,69 @@ def run_collection(
     }
     exit_code = 0
 
-    # Phase 1: browser inventory — HUMAN DECISION 1 (the browser grant,
-    # which also names the readiness checkpoint and the capture/audit
-    # writes) plus the non-authorizing press-Enter readiness signal.
-    browser_consent = _RecordingConsent(
-        consent, human_decisions, basis="human decision: browser grant"
-    )
-    try:
-        browser_report = run_browser_inventory(
-            state=state,
-            ref=ref,
-            consent=browser_consent,
-            out=out,
-            controller=browser_controller,
-            profile_base=browser_profile_base,
-            declared_count=declared_count,
-            end_evidence=end_evidence,
-        )
-        report["browser"] = browser_report.to_dict()
-    except PlaywrightMissingError as exc:
-        report["hard_stop_reason"] = f"preflight: {exc}"
-        report["batches"] = []
-        out(f"collection-run report saved: {_persist_report(state, report)}")
-        return 1, report
-    except BrowserInventoryError as exc:
-        report["hard_stop_reason"] = f"browser inventory did not run: {exc}"
-        out(f"collection-run report saved: {_persist_report(state, report)}")
-        return 1, report
+    # Phase 1: browser inventory — or resume from persisted scan state if already captured.
+    if can_resume:
+        assert existing_scan is not None
+        plan = build_collection_plan(state, existing_scan)
+        eligible = [
+            item.stable_id
+            for item in plan.items
+            if item.classification in ELIGIBLE_CLASSIFICATIONS
+        ]
+        report["browser"] = {
+            "reused": True,
+            "collection_url": ref.collection_url,
+            "observed_items": len(existing_scan.items),
+            "scan_status": existing_scan.status,
+            "scan_status_reason": existing_scan.status_reason,
+            "audit_html_path": None,
+            "profile_dir": None,
+            "profile_removed": True,
+            "cleanup_notes": [
+                "reused persisted collection scan state; browser inventory skipped (pass --rescan to force new capture)"
+            ],
+        }
+        if not eligible:
+            out(
+                f"collection {ref.collection_url} is already fully ingested "
+                f"({plan.counts.get('complete', 0)} complete, 0 pending/resumable); "
+                "pass --rescan to force new browser capture"
+            )
+        else:
+            out(
+                f"resuming collection {ref.collection_url} from existing scan "
+                f"({len(eligible)} item(s) pending/resumable); pass --rescan to force new browser capture"
+            )
+    else:
+        if skip_browser_consent:
+            browser_consent = _AutoGrantedConsent(
+                consent, human_decisions, basis="human decision: browser grant (authorized by command launch)"
+            )
+        else:
+            browser_consent = _RecordingConsent(
+                consent, human_decisions, basis="human decision: browser grant"
+            )
+        try:
+            browser_report = run_browser_inventory(
+                state=state,
+                ref=ref,
+                consent=browser_consent,
+                out=out,
+                controller=browser_controller,
+                profile_base=browser_profile_base,
+                declared_count=declared_count,
+                end_evidence=end_evidence,
+            )
+            report["browser"] = browser_report.to_dict()
+        except PlaywrightMissingError as exc:
+            report["hard_stop_reason"] = f"preflight: {exc}"
+            report["batches"] = []
+            out(f"collection-run report saved: {_persist_report(state, report)}")
+            return 1, report
+        except BrowserInventoryError as exc:
+            report["hard_stop_reason"] = f"browser inventory did not run: {exc}"
+            out(f"collection-run report saved: {_persist_report(state, report)}")
+            return 1, report
 
     # Phase 2: freeze the inventory, bind the whisper identity read-only
     # and ask HUMAN DECISION 2 — the ONE whole-current-run plan grant.
@@ -2365,8 +2488,9 @@ def run_collection(
             text_api_origin=api_config.origin() if api_config else None,
             text_api_model=api_config.model if api_config else None,
             whisper_info=bound_info,
+            retry_failed=retry_failed,
         )
-        plan_window = build_run_plan_window(run_plan)
+        plan_window = build_run_plan_window(run_plan, auto_verify=auto_verify)
         plan_granted = consent.ask(plan_window)
         _record_decision(
             human_decisions,
@@ -2384,7 +2508,7 @@ def run_collection(
             exit_code = 1
         else:
             authorization = RunScopedAuthorization(
-                human=consent, plan=run_plan, out=out
+                human=consent, plan=run_plan, out=out, allow_verify=auto_verify
             )
             report["run_authorization"]["stage_windows"] = (
                 authorization.authorization_log
@@ -2488,6 +2612,97 @@ def run_collection(
                         )
                         if report["hard_stop_reason"] is not None:
                             break
+
+                # Intra-phase retries: retry failed items within the same phase
+                # up to retry_failed times before advancing to the next phase.
+                phase_prerequisites = {
+                    "preparation": (),
+                    "audio": ("prepare",),
+                    "vision": ("prepare",),
+                    "synthesis": ("audio", "vision"),
+                }
+                for retry_index in range(retry_failed):
+                    if report["hard_stop_reason"] is not None or report["interrupted"]:
+                        break
+                    # If vision window was closed by a resource gate or error, do not retry
+                    if phase == "vision" and any(w.get("vision_window_closed") for w in evidence["windows"]):
+                        break
+                    prereqs = phase_prerequisites.get(phase, ())
+                    retry_candidates = [
+                        video_id for video_id in frozen_ids
+                        if all(derive_item_stages(state, video_id).get(prereq) == "complete"
+                               for prereq in prereqs)
+                        and any(derive_item_stages(state, video_id).get(stage) != "complete"
+                                for stage in required_stages)
+                    ]
+                    if not retry_candidates:
+                        break
+                    out(
+                        f"collection phase {phase}: retrying {len(retry_candidates)} "
+                        f"failed item(s) (attempt {retry_index + 1}/{retry_failed}): "
+                        f"{', '.join(retry_candidates)}"
+                    )
+                    retry_batches = [
+                        list(retry_candidates[i:i + cap])
+                        for i in range(0, len(retry_candidates), cap)
+                    ]
+                    for r_index, r_ids in enumerate(retry_batches):
+                        selection = _phase_selection(state, r_ids, canonical_urls, cap)
+                        runner = GuidedRun(
+                            state, stages=narrated, consent=authorization, out=out,
+                            auto_synthesizer=auto_synthesizer,
+                        )
+                        result = runner._execute_collection_phase(selection, phase)
+                        batch_target = None
+                        for b in report["batches"]:
+                            if any(vid in b["ids"] for vid in r_ids):
+                                batch_target = b
+                                break
+                        if batch_target is not None:
+                            _merge_phase_report(batch_target, result)
+                        window_evidence = {
+                            "phase": phase,
+                            "batch_index": f"retry-{retry_index + 1}.{r_index + 1}",
+                            "stage_calls": result["stage_calls"],
+                            "vision_window_closed": result["vision_window_closed"],
+                        }
+                        if batch_target is not None:
+                            batch_target["phases"].append(window_evidence)
+                        evidence["windows"].append(window_evidence)
+                        if result["interrupted"]:
+                            report["interrupted"] = True
+                            report["hard_stop_reason"] = (
+                                "interrupted: partial evidence preserved; service "
+                                "cleanup may be UNKNOWN; new authorization required"
+                            )
+                        elif result["whisper_restore_failed"]:
+                            report["hard_stop_reason"] = (
+                                "whisper restoration failed: ALL further progress is "
+                                "blocked; verify the service state explicitly; no "
+                                "rollback is performed or implied"
+                            )
+                        elif result["gpu_cleanup_failed"]:
+                            report["hard_stop_reason"] = "isolated GPU cleanup unverified: ALL further progress blocked"
+                        elif result["progress_blocked_reason"] is not None:
+                            report["hard_stop_reason"] = result["progress_blocked_reason"]
+                        if report["hard_stop_reason"] is not None:
+                            break
+                        if phase == "vision":
+                            attempted_ids = [
+                                call.split(":", 1)[1] for call in result["stage_calls"]
+                                if call.startswith("vision:")
+                            ]
+                            _run_swap_retry_flow(
+                                state=state, stages=stages_exec, narrated=narrated,
+                                human=consent, human_decisions=human_decisions,
+                                plan=run_plan, batch_ids=attempted_ids,
+                                offered=swap_retry_offered, out=out, report=report,
+                                monotonic=swap_retry_monotonic, sleep=swap_retry_sleep,
+                                vmstat_fn=swap_retry_vmstat_fn,
+                            )
+                            if report["hard_stop_reason"] is not None:
+                                break
+
                 evidence["pending_ids"] = [
                     video_id for video_id in frozen_ids
                     if any(derive_item_stages(state, video_id)[stage] != "complete"
@@ -2524,6 +2739,7 @@ def run_collection(
                     frozen_ids=frozen_ids,
                     out=out,
                     report=report,
+                    auto_verify=auto_verify,
                 ):
                     exit_code = 1
         except KeyboardInterrupt:
