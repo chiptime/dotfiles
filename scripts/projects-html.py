@@ -524,41 +524,90 @@ week_chip = (f'<span class="chip">{I_CLOCK}<strong>{("%.1f" % week_total).replac
              f'&nbsp;esta semana</span>') if week_total > 0 else ""
 gen = datetime.now().strftime("%d/%m/%Y %H:%M")
 
+# ---------- Ecosistema portal chrome (shared with the Catálogo page) ----------
+# Presentation only. NAV_JS must stay byte-identical to the <script id="portal-nav">
+# in tools/launchpad/static/index.html (test-projects-portal.py checks it). Links are
+# rebuilt from the CURRENT hostname so the portal works over the LAN; the static hrefs
+# are the no-JavaScript fallback only.
+NAV_JS = """(function () {
+  var l = window.location;
+  var web = (l.protocol === 'http:' || l.protocol === 'https:') && l.hostname;
+  var base = (web ? l.protocol : 'http:') + '//' + (web ? l.hostname : 'localhost');
+  var links = document.querySelectorAll('a[data-portal-port]');
+  for (var i = 0; i < links.length; i++) {
+    var a = links[i];
+    a.setAttribute('href', base + ':' + a.getAttribute('data-portal-port') + a.getAttribute('data-portal-path'));
+  }
+})();"""
+SITE_HEADER = """<header class="site">
+  <div class="site-inner">
+    <div class="brand">
+      <span class="brand-name">Ecosistema</span>
+      <span class="brand-sub">Portal local</span>
+    </div>
+    <nav aria-label="Secciones del ecosistema">
+      <a href="http://localhost:47625/" data-portal-port="47625" data-portal-path="/">Catálogo</a>
+      <a href="/PROYECTOS.html" data-portal-port="47624" data-portal-path="/PROYECTOS.html">Proyectos</a>
+      <a href="/PROJECTS.html" data-portal-port="47624" data-portal-path="/PROJECTS.html" aria-current="page">Seguimiento</a>
+    </nav>
+  </div>
+</header>"""
+
 html_doc = f"""<!doctype html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
-<title>Global Project Tracker</title>
+<title>Seguimiento · Ecosistema</title>
 <style>
-  :root {{ --bg:#070b14; --card:#0d1524; --line:#223047; --tx:#e8eef8; --dim:#9db0cc;
+  :root {{ --bg:#070b14; --card:#0d1524; --raise:#101c33; --line:#223047; --tx:#e8eef8; --dim:#9db0cc;
            --acc:#5ec2f7; --ok:#34d399; --prop:#fbbf24; --pau:#fb923c; --cold:#64748b; }}
   * {{ box-sizing: border-box; }}
-  body {{ font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-          margin: 0 auto; max-width: 76rem; padding: 1rem; background: var(--bg); color: var(--tx); }}
+  [hidden] {{ display: none !important; }}
+  body {{ font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; line-height: 1.5;
+          margin: 0; background: var(--bg); color: var(--tx); }}
   a {{ color: var(--acc); text-decoration: none; }}
   a:hover {{ text-decoration: underline; }}
   :focus-visible {{ outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }}
-  h1 {{ font-size: 1.35rem; margin: .2rem 0; color: var(--acc); }}
-  .meta {{ color: var(--dim); font-size: .8rem; margin: .1rem 0 .8rem; }}
-  .strip {{ display: flex; flex-wrap: wrap; gap: .5rem; margin: .6rem 0 1rem; }}
-  .chip {{ background: var(--card); border: 1px solid var(--line); border-radius: 999px;
-           padding: .32rem .75rem; font-size: .84rem; color: var(--tx); cursor: pointer; }}
+  .skip {{ position: absolute; left: .5rem; top: -4rem; z-index: 10; background: var(--acc); color: #04121c;
+           padding: .5rem .9rem; border-radius: .4rem; font-weight: 600; }}
+  .skip:focus {{ top: .5rem; text-decoration: none; }}
+  .site {{ background: #0a1220; border-bottom: 1px solid var(--line); }}
+  .site-inner {{ max-width: 76rem; margin: 0 auto; padding: .6rem 1rem; display: flex; flex-wrap: wrap;
+                 align-items: center; justify-content: space-between; gap: .4rem 1.5rem; }}
+  .brand {{ display: flex; align-items: baseline; flex-wrap: wrap; gap: .1rem .7rem; }}
+  .brand-name {{ font-size: 1.1rem; font-weight: 700; letter-spacing: .02em; color: var(--acc); }}
+  .brand-sub {{ color: var(--dim); font-size: .82rem; }}
+  .site nav {{ display: flex; flex-wrap: wrap; gap: .3rem; }}
+  .site nav a {{ display: inline-flex; align-items: center; min-height: 2.5rem; padding: 0 1rem;
+                 border: 1px solid transparent; border-radius: .5rem; color: var(--dim);
+                 font-weight: 600; transition: background .15s, color .15s; }}
+  .site nav a:hover {{ color: var(--tx); background: var(--card); text-decoration: none; }}
+  .site nav a[aria-current="page"] {{ color: var(--tx); background: var(--raise); border-color: var(--acc); }}
+  .page {{ max-width: 76rem; margin: 0 auto; padding: 1.4rem 1rem 2rem; }}
+  h1 {{ font-size: 1.5rem; line-height: 1.2; margin: 0; color: var(--tx); }}
+  .lead {{ color: var(--dim); margin: .35rem 0 0; max-width: 46rem; }}
+  .meta {{ color: var(--dim); font-size: .82rem; margin: .5rem 0 .9rem; overflow-wrap: anywhere; }}
+  .strip {{ display: flex; flex-wrap: wrap; gap: .5rem; margin: .6rem 0 1.2rem; }}
+  .strip-nav {{ display: flex; flex-wrap: wrap; gap: .5rem; }}
+  .chip {{ background: var(--card); border: 1px solid var(--line); border-radius: 999px; min-height: 2.25rem;
+           display: inline-flex; align-items: center; padding: 0 .85rem; font-size: .86rem; color: var(--tx); }}
   .chip strong {{ color: var(--acc); margin-left: .25rem; }}
+  a.chip:hover {{ border-color: var(--dim); text-decoration: none; }}
   .panel {{ background: var(--card); border: 1px solid var(--line); border-radius: .6rem;
             padding: .8rem 1rem; margin: 0 0 1rem; }}
   .panel h2 {{ font-size: 1rem; margin: 0 0 .5rem; color: var(--acc); display: flex; gap: .4rem; align-items: center; }}
   .panel ul {{ margin: 0; padding-left: 1.1rem; }}
-  .panel li {{ font-size: .87rem; margin: .32rem 0; overflow-wrap: anywhere; }}
-  .ev {{ color: var(--dim); font-size: .76rem; }}
+  .panel li {{ font-size: .9rem; margin: .32rem 0; overflow-wrap: anywhere; }}
+  .ev {{ color: var(--dim); font-size: .8rem; }}
   details > summary {{ list-style: none; cursor: pointer; display: flex; align-items: center; gap: .5rem; }}
   details > summary::-webkit-details-marker {{ display: none; }}
   .tog {{ width: .6rem; height: .6rem; border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
           transform: rotate(45deg); transition: transform .15s; }}
   details[open] .tog {{ transform: rotate(-135deg); }}
-  h2 {{ font-size: 1.05rem; margin: 1.2rem 0 .7rem; color: var(--tx); }}
+  h2 {{ font-size: 1.1rem; margin: 1.4rem 0 .7rem; color: var(--tx); }}
   .count {{ background: var(--card); border: 1px solid var(--line); border-radius: 999px;
             padding: .05rem .55rem; font-size: .8rem; color: var(--acc); }}
-  .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr)); gap: .7rem; }}
+  .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr)); gap: .8rem; }}
   .card {{ background: var(--card); border: 1px solid var(--line); border-radius: .6rem; padding: .75rem .9rem; }}
   .card header {{ display: flex; align-items: center; gap: .5rem; }}
   .card h3 {{ font-size: .98rem; margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--tx); }}
@@ -566,11 +615,11 @@ html_doc = f"""<!doctype html>
   .dot.active {{ background: var(--ok); box-shadow: 0 0 6px var(--ok); }}
   .dot.proposal {{ background: var(--prop); }} .dot.paused {{ background: var(--pau); }}
   .dot.closed, .dot.cold, .dot.unclassified {{ background: var(--cold); }}
-  .status {{ font-size: .7rem; color: var(--dim); border: 1px solid var(--line);
+  .status {{ font-size: .75rem; color: var(--dim); border: 1px solid var(--line);
              border-radius: 999px; padding: .05rem .5rem; flex: none; }}
-  .desc {{ font-size: .84rem; margin: .45rem 0; overflow-wrap: anywhere; }}
+  .desc {{ font-size: .88rem; margin: .45rem 0; overflow-wrap: anywhere; }}
   .badges {{ display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }}
-  .badge {{ font-size: .72rem; border: 1px solid var(--line); border-radius: 999px;
+  .badge {{ font-size: .76rem; border: 1px solid var(--line); border-radius: 999px;
             padding: .1rem .5rem; color: var(--dim); display: inline-flex; gap: .25rem; align-items: center; }}
   .badge.warn {{ color: #fda4af; border-color: #7f1d1d66; }}
   .badge.info {{ color: #93c5fd; }}
@@ -584,40 +633,48 @@ html_doc = f"""<!doctype html>
   .streams {{ display: flex; flex-wrap: wrap; gap: .3rem; }}
   .stream {{ font-size: .72rem; border: 1px solid var(--line); border-radius: 999px;
              padding: .12rem .55rem; color: var(--tx); background: #101c33; }}
-  .convtitle {{ font-size: .68rem; color: var(--dim); text-transform: uppercase; letter-spacing: .06em;
+  .convtitle {{ font-size: .72rem; color: var(--dim); text-transform: uppercase; letter-spacing: .06em;
                  margin: .6rem 0 .15rem; }}
   .conv {{ list-style: none; margin: 0; padding: 0; }}
-  .conv li {{ font-size: .8rem; margin: .28rem 0; display: flex; gap: .35rem; align-items: baseline;
+  .conv li {{ font-size: .85rem; margin: .28rem 0; display: flex; gap: .35rem; align-items: baseline;
                flex-wrap: wrap; overflow-wrap: anywhere; }}
-  .dim {{ color: var(--dim); font-size: .72rem; }}
+  .dim {{ color: var(--dim); font-size: .78rem; }}
   .ic {{ width: .95em; height: .95em; vertical-align: -0.15em; flex: none; }}
   .hours .ic, .conv .ic, .panel h2 .ic, .hubpanel h3 .ic {{ color: var(--acc); }}
   .badge.warn .ic {{ color: #fda4af; }}
-  .hubgrid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: .7rem; }}
+  .hubgrid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: .8rem; }}
   .hubpanel {{ background: #101c33; border: 1px solid var(--line); border-radius: .45rem;
                padding: .55rem .7rem; min-width: 0; }}
   .hubpanel h3 {{ font-size: .85rem; margin: 0 0 .4rem; color: var(--acc);
                   display: flex; gap: .35rem; align-items: center; }}
   .hubpanel ul {{ margin: 0; padding-left: 1rem; }}
-  .hubpanel li {{ font-size: .8rem; margin: .28rem 0; overflow-wrap: anywhere; }}
+  .hubpanel li {{ font-size: .85rem; margin: .28rem 0; overflow-wrap: anywhere; }}
   .hubpanel li.sub {{ list-style: none; margin: .12rem 0 .12rem .7rem; }}
   .hubpanel li.dim, li.dim {{ color: var(--dim); }}
-  .hubbadge {{ font-size: .72rem; border: 1px solid var(--line); border-radius: 999px;
+  .hubbadge {{ font-size: .76rem; border: 1px solid var(--line); border-radius: 999px;
                padding: .12rem .55rem; vertical-align: middle; margin-left: .4rem; }}
   .hubbadge.ok {{ color: var(--ok); border-color: #14532d66; }}
   .hubbadge.stale {{ color: #fda4af; border-color: #7f1d1d66; }}
   .hubbadge.none {{ color: var(--dim); }}
   .hubnodata {{ margin: .2rem 0; }}
-  @media (max-width: 640px) {{ .grid {{ grid-template-columns: 1fr; }} body {{ padding: .6rem; }} }}
-  @media (prefers-reduced-motion: reduce) {{ * {{ transition: none !important; }} }}
+  @media (max-width: 640px) {{ .page {{ padding: 1rem .75rem 1.5rem; }} .panel {{ padding: .7rem .75rem; }} }}
+  @media (prefers-reduced-motion: reduce) {{ *, *::before, *::after {{ transition: none !important; animation: none !important; scroll-behavior: auto !important; }} }}
 </style></head><body>
-<h1>Global Project Tracker</h1>
+<a class="skip" href="#main">Saltar al contenido</a>
+{SITE_HEADER}
+<main id="main" class="page">
+<h1>Seguimiento</h1>
+<p class="lead">Estado de los proyectos: git, horas, sesiones de agentes y cockpit del hub en una sola vista.</p>
 <p class="meta">Actualizado {gen} · fuentes: git sweep + projects.yaml + time-ledger + sesiones OpenCode + hub-state v2 · refresco diario 08:00 · <code>projects</code> regenera</p>
-<div class="strip">{''.join(chips)}{week_chip}</div>
+<div class="strip"><nav class="strip-nav" aria-label="Ir a una sección">{''.join(chips)}</nav>{week_chip}</div>
 <div class="panel"><h2>{I_TARGET}Accionables pendientes</h2><ul>{act_html}</ul></div>
 {hub_section_html}
 <section class="panel" id="sec-opencode" aria-labelledby="opencode-title"><h2 id="opencode-title">{I_CHAT}Proyectos con sesiones multi-agente</h2>{agent_html}</section>
 {''.join(body_sections)}
+</main>
+<script id="portal-nav">
+{NAV_JS}
+</script>
 <script>
 (function () {{
   var el = document.getElementById('hub-fresh');
@@ -638,6 +695,72 @@ html_doc = f"""<!doctype html>
 with open(out_path, "w", encoding="utf-8") as f:
     f.write(html_doc)
 print(f"HTML written: {out_path}")
+
+# ---------- render PROYECTOS.html (unified portal view) ----------
+try:
+    _scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if _scripts_dir not in sys.path:
+        sys.path.insert(0, _scripts_dir)
+    import projects_unified
+
+    _tiles_file = os.environ.get("LAUNCHPAD_TILES") or os.path.expanduser("~/.config/launchpad/tiles.json")
+    if not os.path.exists(_tiles_file):
+        _tiles_file = os.path.join(HOME, ".dotfiles/tools/launchpad/config/tiles.json")
+    _tiles_data = []
+    if os.path.exists(_tiles_file):
+        try:
+            with open(_tiles_file, encoding="utf-8") as _tf:
+                _raw_t = json.load(_tf)
+                _tiles_data = _raw_t.get("tiles", _raw_t) if isinstance(_raw_t, dict) else (_raw_t if isinstance(_raw_t, list) else [])
+        except (OSError, ValueError):
+            _tiles_data = []
+
+    _md_map = {}
+    for _u in units:
+        _wk = 0.0
+        for _n in _u.get("names", []):
+            _e = ledger.get(_n)
+            if _e:
+                _wk += _e.get("week", 0.0)
+        _g = _u.get("git", {})
+        _md_map[_u["display"]] = {
+            "section": _u.get("section", "cold"),
+            "branch": _g.get("branch", ""),
+            "dirty": _g.get("dirty", 0),
+            "hours_week": ("%.1f" % _wk).replace(".", ",") if _wk > 0 else "0.0",
+            "hours_total": "0.0",
+        }
+
+    _sess_map = {}
+    for _name, _s_list in oc_sessions.items():
+        _sess_map[_name] = [{"id": _ses, "title": _title, "updated": _when.isoformat() if _when else None}
+                            for _when, _ses, _title in _s_list]
+
+    _age_lbl = f"hace {_age_label(age_h)}" if (hub_doc is not None and age_h is not None) else None
+    _u_cards = projects_unified.build_unified_cards(
+        tiles=_tiles_data,
+        projects_yaml=projects,
+        projects_md=_md_map,
+        sessions=_sess_map,
+        hub_state=hub_doc,
+        snapshot_time=gen,
+        hub_age_label=_age_lbl,
+    )
+
+    _unified_html = projects_unified.render_proyectos_html(
+        cards=_u_cards,
+        snapshot_time=gen,
+        hub_age_label=_age_lbl,
+        webbase=webbase,
+    )
+
+    _unified_path = os.path.join(os.path.dirname(md_path), "PROYECTOS.html")
+    with open(_unified_path, "w", encoding="utf-8") as _uf:
+        _uf.write(_unified_html)
+    print(f"HTML written: {_unified_path}")
+except Exception as _e:
+    print(f"Warning: could not render PROYECTOS.html: {_e}", file=sys.stderr)
+
 
 # ---------- sensor contract: projects.json (facts for the control hub) ----------
 # The dashboard is a SENSOR: facts only. status_local is the local fallback until

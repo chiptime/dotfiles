@@ -67,8 +67,8 @@ fn route(request: &tiny_http::Request, checker: &HealthChecker) -> (u16, String,
     }
 }
 
-/// `/api/tiles` payload: web tiles carry url/host/health; script tiles carry
-/// command/docs/location and are never probed.
+/// `/api/tiles` payload: web tiles carry url/host/health; script and project
+/// tiles carry command/docs/location and are never probed.
 fn tiles_body(config: &LaunchpadConfig, checker: &HealthChecker) -> String {
     let tiles: Vec<Value> = config
         .tiles
@@ -81,6 +81,9 @@ fn tiles_body(config: &LaunchpadConfig, checker: &HealthChecker) -> String {
                 "kind": t.kind,
                 "description": t.description,
             });
+            if !t.tags.is_empty() {
+                v["tags"] = json!(t.tags);
+            }
             match t.kind {
                 TileKind::Web => {
                     let url = t.url.clone().unwrap_or_default();
@@ -90,7 +93,7 @@ fn tiles_body(config: &LaunchpadConfig, checker: &HealthChecker) -> String {
                         .unwrap_or_else(|_| serde_json::json!(null));
                     v
                 }
-                TileKind::Script => {
+                TileKind::Script | TileKind::Project => {
                     v["command"] = json!(t.command);
                     v["docs"] = json!(t.docs);
                     v["location"] = json!(t.location);
@@ -115,6 +118,39 @@ pub fn host_of(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiles_body_emits_tags_when_present() {
+        let config: LaunchpadConfig = serde_json::from_str(
+            r#"{"tiles":[
+                {"id":"w","name":"W","url":"http://h:1/","tags":["voz"]},
+                {"id":"s","name":"S","kind":"script","command":"foo","location":"scripts/foo.sh"}
+            ]}"#,
+        )
+        .unwrap();
+        let checker = HealthChecker::with_probe(Box::new(|_| Err("refused".into())));
+        let v: Value = serde_json::from_str(&tiles_body(&config, &checker)).unwrap();
+        assert_eq!(v["tiles"][0]["tags"], serde_json::json!(["voz"]));
+        assert!(
+            v["tiles"][1].get("tags").is_none(),
+            "tagless tiles carry no tags key"
+        );
+    }
+
+    #[test]
+    fn tiles_body_separates_project_kind() {
+        let config: LaunchpadConfig = serde_json::from_str(
+            r#"{"tiles":[
+                {"id":"p","name":"P","kind":"project","docs":"~/x/README.md","location":"~/x"}
+            ]}"#,
+        )
+        .unwrap();
+        let checker = HealthChecker::with_probe(Box::new(|_| Err("refused".into())));
+        let v: Value = serde_json::from_str(&tiles_body(&config, &checker)).unwrap();
+        assert_eq!(v["tiles"][0]["kind"], "project");
+        assert!(v["tiles"][0].get("health").is_none(), "projects are never probed");
+        assert_eq!(v["tiles"][0]["location"], "~/x");
+    }
 
     #[test]
     fn host_of_extracts_host_and_port() {

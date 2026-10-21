@@ -1,0 +1,11 @@
+[Unit]
+Description=Launchpad - local ecosystem discovery sync (local only)
+Documentation=file://%h/.dotfiles/tools/launchpad/README.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.dotfiles/tools/launchpad/scripts/discover.py --sync
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Hard bound: discovery only walks local files and probes local ports.
+TimeoutStartSec=5min
+Nice=10

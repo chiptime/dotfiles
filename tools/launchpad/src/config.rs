@@ -12,13 +12,15 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_HEALTH_INTERVAL_SECS: u64 = 15;
 
 /// Tile kind: web services get a link + health probe; scripts are catalog
-/// entries with a copyable command and no probe.
+/// entries with a copyable command and no probe; projects are repo catalog
+/// entries (docs/location) shown in their own front section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TileKind {
     #[default]
     Web,
     Script,
+    Project,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +53,10 @@ pub struct TileConfig {
     /// Where the thing lives (script tiles).
     #[serde(default)]
     pub location: Option<String>,
+    /// Free-form category tags used by the front's type filter; the
+    /// discoverer writes lowercase domains (proyecto, ia, teams, voz, ...).
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 fn default_interval() -> u64 {
@@ -127,6 +133,11 @@ impl LaunchpadConfig {
                     "tile '{}' health_interval_secs must be > 0",
                     t.id
                 ));
+            }
+            for tag in &t.tags {
+                if tag.trim().is_empty() {
+                    return Err(format!("tile '{}' has an empty tag", t.id));
+                }
             }
         }
         Ok(())
@@ -232,5 +243,32 @@ mod tests {
             "command":"foo","url":"ftp://nope/"}]}"#;
         let cfg: LaunchpadConfig = serde_json::from_str(raw).unwrap();
         assert!(cfg.validate().unwrap_err().contains("must start with http"));
+    }
+
+    #[test]
+    fn tags_parse_and_default_empty() {
+        let raw = r#"{"tiles":[{"id":"a","name":"A","url":"http://x/","tags":["voz","teams"]}]}"#;
+        let cfg: LaunchpadConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.tiles[0].tags, vec!["voz".to_string(), "teams".to_string()]);
+        let plain: LaunchpadConfig =
+            serde_json::from_str(&format!("{{\"tiles\":[{}]}}", tile_json("b", "http://x:1/")))
+                .unwrap();
+        assert!(plain.tiles[0].tags.is_empty(), "tags default to empty");
+    }
+
+    #[test]
+    fn empty_tag_is_rejected() {
+        let raw = r#"{"tiles":[{"id":"a","name":"A","url":"http://x/","tags":["voz","  "]}]}"#;
+        let cfg: LaunchpadConfig = serde_json::from_str(raw).unwrap();
+        assert!(cfg.validate().unwrap_err().contains("empty tag"));
+    }
+
+    #[test]
+    fn project_kind_parses_without_url() {
+        let raw = r#"{"tiles":[{"id":"p","name":"P","kind":"project",
+            "docs":"~/Code/personal/p/README.md","location":"~/Code/personal/p"}]}"#;
+        let cfg: LaunchpadConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.tiles[0].kind, TileKind::Project);
+        assert!(cfg.validate().is_ok(), "project tiles need no url");
     }
 }
