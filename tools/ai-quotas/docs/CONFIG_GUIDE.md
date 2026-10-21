@@ -38,6 +38,7 @@ Este es el aspecto que tiene el archivo:
     "chatgpt",
     "opencode",
     "gemini",
+    "gemini-argon",
     "gemini-3p",
     "deepseek"
   ],
@@ -45,10 +46,12 @@ Este es el aspecto que tiene el archivo:
     "zai": 20.0,
     "claude": 1.0,
     "gemini": 1.0,
+    "gemini-argon": 1.0,
     "gemini-3p": 1.0
   },
   "file_providers": [
     { "id": "gemini", "display_name": "Google Gemini" },
+    { "id": "gemini-argon", "display_name": "Gemini 4 Argon" },
     { "id": "gemini-3p", "display_name": "Antigravity (Claude)" }
   ],
   "main_labels": [
@@ -97,14 +100,18 @@ Cada IA puede tener varias cuotas (ej: cuota de 5 horas, cuota semanal, saldo en
 ---
 
 ### 📌 `capacity` — Peso para el ritmo de gasto
-En la parte superior del panel hay una barra de ritmo ("Ritmo semanal: gasta las más atrasadas") que te avisa de qué cuota estás desaprovechando.
+En la parte superior del panel hay una barra de ritmo ("Ritmo — gasta las más atrasadas") que te avisa de qué cuota estás desaprovechando.
 
 Si una suscripción es mucho más cara o tiene mucha más capacidad que otra (por ejemplo, Z.ai que da 20 veces más cuota que una suscripción estándar), le pones un número mayor aquí (ej: `"zai": 20.0`) para que el panel te recuerde gastar antes esa cuota para no tirar dinero.
 
 ---
 
-### 📌 `weekly_labels` — Nombre de tu cuota semanal
-El panel calcula el ritmo semanal buscando una cuota que se llame `"weekly"`. Si algún proveedor tuyo la llama de forma diferente (como Antigravity que la llama `"3p weekly"`), aquí le dices: *"para este proveedor, su cuota semanal es esta"*.
+### 📌 `weekly_labels` y `monthly_labels` — Nombre de tus cuotas semanal y mensual
+El panel calcula el ritmo buscando una cuota semanal (`"weekly"`) y, si existe, una mensual (`"monthly"`). Si un proveedor tiene ambas (como OpenCode Go), **manda siempre la que vaya a ritmo más alto (el cuello de botella)**. Así se evitan falsos positivos como gastar una suscripción cuya cuota semanal acaba de resetearse pero cuya cuota mensual está a punto de agotarse.
+
+Si algún proveedor llama a estas cuotas de forma diferente:
+* **`weekly_labels`**: Por ejemplo, Antigravity la llama `"3p weekly"` (`"gemini-3p": "3p weekly"`).
+* **`monthly_labels`**: Por ejemplo, si un proveedor la llama `"cuota mensual"` (`"mi-proveedor": "cuota mensual"`).
 
 ---
 

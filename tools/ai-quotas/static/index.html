@@ -164,15 +164,16 @@
 const SYMBOLS = { EUR: '€', USD: '$', CNY: '¥' };
 
 // Provider group order (known pull/file ids first, unknown ones after, by name).
-let ORDER = ['claude', 'zai', 'chatgpt', 'opencode', 'gemini', 'gemini-3p', 'deepseek'];
+let ORDER = ['claude', 'zai', 'chatgpt', 'opencode', 'gemini', 'gemini-argon', 'gemini-3p', 'deepseek'];
 
 // Relative subscription capacity, used ONLY as a ranking tie-breaker (at
 // equal pace, the bigger sub wastes more money). Hidden from the UI: pace
 // itself needs no weights. Claude = 1, zai = 20x, tune the rest to taste.
-let CAPACITY = { claude: 1, zai: 20, chatgpt: 1, opencode: 1, gemini: 1, 'gemini-3p': 1 };
+let CAPACITY = { claude: 1, zai: 20, chatgpt: 1, opencode: 1, gemini: 1, 'gemini-argon': 1, 'gemini-3p': 1 };
 
 let MAIN_LABELS = ['5h window', 'weekly', 'monthly', 'daily', '3p 5h window', '3p weekly'];
 let WEEKLY_LABELS = { 'gemini-3p': '3p weekly' };
+let MONTHLY_LABELS = {};
 
 // Window used for cross-sub comparison (the only one all coding subs share).
 const COMPARISON_LABEL = 'weekly';
@@ -210,26 +211,68 @@ function windowTier(label) {
   return 3;
 }
 
-// One sub's weekly pace: pace = used% / elapsed window % (unit-free — no
-// weights needed to know if you are behind). `cap` comes along only as the
-// ranking tie-breaker. Stale records still count (marked, dashed) so the
-// ranking does not flicker on transient pull blips; `stale` flags them and
-// `age` carries seconds since their fetch. Null when not computable (no
-// reset, no weekly, or window just started: elapsed < 2%).
+// Calculate pace for an individual window record.
+function calcWindowPace(r, tierName) {
+  if (!r || (r.state !== 'ok' && r.state !== 'stale')) return null;
+  if (typeof r.used_percent !== 'number' || !r.resets_at) return null;
+  const exp = paceExpected(r);
+  if (exp == null) return null;
+  if (exp < 0.02 && r.used_percent <= 0) return null;
+  const effectiveExp = Math.max(0.005, exp);
+  const pace = (r.used_percent / 100) / effectiveExp;
+  const left = Math.max(0, new Date(r.resets_at).getTime() - Date.now());
+  return {
+    pace,
+    left,
+    usedPct: r.used_percent,
+    tocaPct: exp * 100,
+    stale: r.state === 'stale',
+    age: r.age_seconds || 0,
+    tierName,
+    label: r.label,
+  };
+}
+
+// One sub's pace view across its weekly and monthly windows:
+// pace = used% / elapsed window %. If both weekly and monthly exist, the
+// governing pace is the highest (bottleneck / most consumed relative to time)
+// so a sub that has heavily consumed its monthly quota is not falsely marked
+// as safe to burn just because its weekly window just reset. `cap` comes along
+// only as the ranking tie-breaker.
 function paceView(provider, recs) {
   const cap = CAPACITY[provider];
   if (!cap) return null;
-  const wLabel = weeklyLabel(provider);
+
+  const wLabel = weeklyLabel(provider).toLowerCase();
   const w = recs.find(r => String(r.label || '').toLowerCase() === wLabel);
-  if (!w || (w.state !== 'ok' && w.state !== 'stale')) return null;
-  if (typeof w.used_percent !== 'number') return null;
-  const exp = paceExpected(w);
-  if (exp == null || exp < 0.02) return null;
+  const wPace = calcWindowPace(w, 'semanal');
+
+  const mLabel = monthlyLabel(provider).toLowerCase();
+  const m = recs.find(r =>
+    (String(r.label || '').toLowerCase() === mLabel || windowTier(r.label) === 2) &&
+    r.unit !== 'requests' && r.kind !== 'balance'
+  );
+  const mPace = calcWindowPace(m, 'mensual');
+
+  if (!wPace && !mPace) return null;
+
+  let governing = wPace;
+  if (!governing || (mPace && mPace.pace > governing.pace)) {
+    governing = mPace;
+  }
+
   return {
-    pace: w.used_percent / 100 / exp, cap,
-    left: new Date(w.resets_at) - Date.now(),
-    usedPct: w.used_percent, tocaPct: exp * 100,
-    stale: w.state === 'stale', age: w.age_seconds || 0,
+    pace: governing.pace,
+    cap,
+    left: governing.left,
+    usedPct: governing.usedPct,
+    tocaPct: governing.tocaPct,
+    stale: governing.stale,
+    age: governing.age,
+    tierName: governing.tierName,
+    label: governing.label,
+    weekly: wPace,
+    monthly: mPace,
   };
 }
 
@@ -238,15 +281,25 @@ function paceView(provider, recs) {
 // keep their tick — the data degrades gracefully instead of vanishing.
 const WINDOW_DUR_MS = { 0: 5 * 3600e3, 1: 7 * 86400e3, 2: 30 * 86400e3 };
 function windowDurMs(r) {
-  return LEARNED_DUR[r.provider + '|' + r.label] || WINDOW_DUR_MS[windowTier(r.label)];
+  const tier = windowTier(r.label);
+  const fallback = WINDOW_DUR_MS[tier];
+  const learned = LEARNED_DUR[r.provider + '|' + r.label];
+  if (!learned) return fallback;
+  if (tier === 0 && (learned < 3 * 3600e3 || learned > 8 * 3600e3)) return fallback;
+  if (tier === 1 && (learned < 5 * 86400e3 || learned > 9 * 86400e3)) return fallback;
+  if (tier === 2 && (learned < 25 * 86400e3 || learned > 35 * 86400e3)) return fallback;
+  return learned;
 }
 function paceExpected(r) {
   if ((r.state !== 'ok' && r.state !== 'stale') || !r.resets_at) return null;
-  const dur = windowDurMs(r);
+  let dur = windowDurMs(r);
   if (!dur) return null;
   const end = new Date(r.resets_at).getTime();
-  const start = end - dur;
   const now = Date.now();
+  if (end > now && dur < (end - now)) {
+    dur = Math.max(dur, end - now);
+  }
+  const start = end - dur;
   const frac = workday.on ? workElapsedFraction(start, end, now) : (now - start) / dur;
   return Math.min(1, Math.max(0, frac));
 }
@@ -278,19 +331,27 @@ function workElapsedFraction(start, end, now) {
 function learnDurations(hist) {
   const resets = new Map();
   for (const h of hist) {
-    if (!h.resets_at || !h.label) continue;
+    if (!h.resets_at || !h.label || !h.ts) continue;
     const key = h.provider + '|' + h.label;
-    const t = Date.parse(h.resets_at);
-    if (!isFinite(t)) continue;
+    const resetTime = Date.parse(h.resets_at);
+    const ts = Date.parse(h.ts);
+    if (!isFinite(resetTime) || !isFinite(ts)) continue;
     const arr = resets.get(key) || [];
-    if (!arr.length || arr[arr.length - 1] !== t) arr.push(t);
+    if (!arr.length || arr[arr.length - 1].resetTime !== resetTime) {
+      arr.push({ resetTime, firstSeenTs: ts });
+    }
     resets.set(key, arr);
   }
   const out = {};
   for (const [key, list] of resets) {
     const durs = [];
     for (let i = 1; i < list.length; i++) {
-      const d = list[i] - list[i - 1];
+      const prev = list[i - 1];
+      const curr = list[i];
+      // A new reset timestamp only represents a completed cycle if the previous
+      // reset timestamp had already passed when the new one was observed.
+      if (curr.firstSeenTs < prev.resetTime) continue;
+      const d = curr.resetTime - prev.resetTime;
       if (d > 4 * 3600e3 && d < 35 * 86400e3) durs.push(d); // sane bounds
     }
     if (durs.length) {
@@ -304,6 +365,11 @@ function learnDurations(hist) {
 // Per provider: the label that represents its weekly window.
 function weeklyLabel(provider) {
   return WEEKLY_LABELS[provider] || 'weekly';
+}
+
+// Per provider: the label that represents its monthly window.
+function monthlyLabel(provider) {
+  return MONTHLY_LABELS[provider] || 'monthly';
 }
 
 // Per provider: final used% of the last COMPLETED weekly window in history.
@@ -329,16 +395,18 @@ function weeklyCloses(hist) {
   return out;
 }
 
-// Ritmo series for one provider's weekly window, from history snapshots.
-function ritmoSeries(provider, hist, limit = 14) {
-  const wLabel = weeklyLabel(provider);
-  const learnedKey = provider === 'gemini-3p' ? 'gemini-3p|3P Weekly' : provider + '|Weekly';
+// Ritmo series for one provider's weekly/monthly window, from history snapshots.
+function ritmoSeries(provider, hist, limit = 14, label = null) {
+  const targetLabel = (label || weeklyLabel(provider)).toLowerCase();
   const out = [];
   for (const h of hist) {
-    if (h.provider !== provider || String(h.label || '').toLowerCase() !== wLabel) continue;
+    if (h.provider !== provider || String(h.label || '').toLowerCase() !== targetLabel) continue;
     if (typeof h.used_percent !== 'number' || !h.resets_at || !h.ts) continue;
     const end = Date.parse(h.resets_at), ts = Date.parse(h.ts);
-    const dur = LEARNED_DUR[learnedKey] || 7 * 86400e3;
+    let dur = windowDurMs(h) || (windowTier(h.label) === 2 ? 30 * 86400e3 : 7 * 86400e3);
+    if (end > ts && dur < (end - ts)) {
+      dur = Math.max(dur, end - ts);
+    }
     const start = end - dur;
     const frac = workday.on ? workElapsedFraction(start, end, ts) : (ts - start) / dur;
     if (frac > 0.02 && frac <= 1) out.push({ ts, ritmo: h.used_percent / 100 / frac });
@@ -582,13 +650,13 @@ function group(provider, recs) {
   const pace = paceView(provider, recs);
   const sub = recs.length + (recs.length === 1 ? ' cuota' : ' cuotas') +
     (pcts.length ? ' · máx ' + Math.round(Math.max.apply(null, pcts)) + '%' : '') +
-    (pace ? ' · ritmo ' + Math.min(999, Math.round(pace.pace * 100)) + '%' : '');
+    (pace ? ' · ritmo ' + (pace.tierName === 'mensual' ? 'mes ' : '') + Math.min(999, Math.round(pace.pace * 100)) + '%' : '');
 
   let html = '<section class="group' + (blocked ? ' exhausted' : '') + '">' +
     '<div class="group-head"><span class="group-title">' + esc(name) + '</span>' +
     statusBadge(provider) +
     (blocked ? '<span class="badge state-done">agotada · ' + blocked + '</span>' : '') +
-    sparkline(ritmoSeries(provider, HISTORY)) +
+    sparkline(ritmoSeries(provider, HISTORY, 14, pace ? pace.label : null)) +
     '<span class="group-sub">' + esc(sub) + '</span></div>';
   // Cascade downward: windows FINER than the blocking tier are unusable too.
   const depth = blocked ? TIER_DEPTH[blocked] : null;
@@ -646,6 +714,7 @@ async function load(forceRefresh = false, localOnly = false) {
       if (data.config.capacity && typeof data.config.capacity === 'object') CAPACITY = data.config.capacity;
       if (Array.isArray(data.config.main_labels)) MAIN_LABELS = data.config.main_labels;
       if (data.config.weekly_labels && typeof data.config.weekly_labels === 'object') WEEKLY_LABELS = data.config.weekly_labels;
+      if (data.config.monthly_labels && typeof data.config.monthly_labels === 'object') MONTHLY_LABELS = data.config.monthly_labels;
     }
 
     const groups = new Map();
@@ -678,24 +747,31 @@ async function load(forceRefresh = false, localOnly = false) {
         a.pace - b.pace ||
         b.cap - a.cap);
     document.getElementById('ranking').innerHTML = scored.length
-      ? '<span class="rank-label" title="ritmo = tu % usado / % de ventana transcurrida. Menos de 100% vas atrasado: gástala. Más de 100% vas adelantado: frena. A igual ritmo, antes la de más capacidad.">Ritmo semanal — gasta las más atrasadas:</span>' +
+      ? '<span class="rank-label" title="ritmo = tu % usado / % de ventana transcurrida. Si una sub tiene cuota mensual y semanal, manda la de mayor ritmo. Menos de 100% vas atrasado: gástala. Más de 100% vas adelantado: frena. A igual ritmo, antes la de más capacidad.">Ritmo — gasta las más atrasadas:</span>' +
         scored.map((s, i) => {
           const ritmo = Math.min(999, Math.round(s.pace * 100));
-          const tip = 'llevas ' + Math.round(s.usedPct) + '% · toca ' + Math.round(s.tocaPct) +
-            '% → ritmo ' + ritmo + '% de la velocidad ideal (100% = clavado en la rayita)' +
-            ' · cierre proyectado ' + Math.min(999, Math.round(s.usedPct / s.tocaPct * 100)) + '%' +
-            (s.stale ? ' · dato de hace ' + ago(s.age).replace(/ ago$/, '') : '') +
-            (s.blocked ? ' · bloqueada (' + s.blocked + ')' : '');
+          let tip = 'llevas ' + Math.round(s.usedPct) + '% · toca ' + Math.round(s.tocaPct) +
+            '% (' + (s.tierName || 'semanal') + ') → ritmo ' + ritmo + '% de la velocidad ideal (100% = clavado en la rayita)' +
+            ' · cierre proyectado ' + Math.min(999, Math.round(s.usedPct / Math.max(0.005, s.tocaPct / 100) * 100)) + '%';
+          if (s.weekly && s.monthly) {
+            const other = s.tierName === 'mensual' ? s.weekly : s.monthly;
+            const otherRitmo = Math.min(999, Math.round(other.pace * 100));
+            tip += ' · ' + other.tierName + ': ' + Math.round(other.usedPct) + '% (toca ' +
+              Math.round(other.tocaPct) + '%, ritmo ' + otherRitmo + '%)';
+          }
+          if (s.stale) tip += ' · dato de hace ' + ago(s.age).replace(/ ago$/, '');
+          if (s.blocked) tip += ' · bloqueada (' + s.blocked + ')';
           const mini = '<span class="mini">' +
             '<i class="fill ' + barClass(s.usedPct) + '" style="width:' +
             Math.min(100, Math.max(0, s.usedPct)) + '%"></i>' +
             '<i class="tick" style="left:' + Math.round(Math.min(100, s.tocaPct)) + '%"></i>' +
             '</span>';
+          const tag = s.tierName === 'mensual' ? ' (mes)' : '';
           return '<span class="chip' + (s.blocked ? ' done' : s.pace > 1.15 ? ' ahead' : '') +
             (s.stale ? ' stalemark' : '') +
             (!s.blocked && scored.findIndex(x => !x.blocked) === i ? ' best' : '') +
             '" title="' + esc(tip) + '"><b>' + esc(s.name) + '</b>' + mini +
-            '<span class="w">ritmo ' + ritmo + '% · quedan ' + until(s.left) +
+            '<span class="w">ritmo ' + ritmo + '%' + tag + ' · quedan ' + until(s.left) +
             (s.stale ? ' · visto hace ' + ago(s.age).replace(/ ago$/, '') : '') +
             (s.blocked ? ' · bloqueada (' + s.blocked + ')' : '') + '</span></span>';
         }).join('')

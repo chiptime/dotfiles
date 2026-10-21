@@ -106,15 +106,17 @@ You can customize ordering, placeholders, capacity, and custom window labels pur
 
 ```json
 {
-  "order": ["claude", "zai", "chatgpt", "opencode", "gemini", "gemini-3p", "myai", "deepseek"],
-  "capacity": { "claude": 1.0, "zai": 20.0, "gemini": 1.0, "myai": 2.0 },
+  "order": ["claude", "zai", "chatgpt", "opencode", "gemini", "gemini-argon", "gemini-3p", "myai", "deepseek"],
+  "capacity": { "claude": 1.0, "zai": 20.0, "gemini": 1.0, "gemini-argon": 1.0, "myai": 2.0 },
   "file_providers": [
     { "id": "gemini", "display_name": "Google Gemini" },
+    { "id": "gemini-argon", "display_name": "Gemini 4 Argon" },
     { "id": "gemini-3p", "display_name": "Antigravity (Claude)" },
     { "id": "myai", "display_name": "My Custom AI" }
   ],
   "main_labels": ["5h window", "weekly", "monthly", "daily", "myai 12h"],
-  "weekly_labels": { "myai": "myai weekly" }
+  "weekly_labels": { "myai": "myai weekly" },
+  "monthly_labels": { "myai": "myai monthly" }
 }
 ```
 
@@ -123,6 +125,7 @@ You can customize ordering, placeholders, capacity, and custom window labels pur
 - **`file_providers`**: File-mode providers that should display a `Sin datos` (Missing) card when their file is absent.
 - **`main_labels`**: Labels treated as primary cards (preventing them from falling into *"Otras cuotas"*).
 - **`weekly_labels`**: Per-provider custom weekly label for ritmo sparkline and closes (defaults to `"weekly"`).
+- **`monthly_labels`**: Per-provider custom monthly label for pace ranking (defaults to `"monthly"`). When a provider has both weekly and monthly quotas, the pace calculation is governed by the highest burn rate (bottleneck constraint) to prevent false positives when a monthly quota is heavily consumed.
 - **Path**: Resolved from `$AI_QUOTAS_CONFIG`, else `~/.config/ai-quotas/config.json`. Changes apply immediately on the next page refresh without restarting the service.
 
 > 📖 **Guía en español para no técnicos:** Consulta [docs/CONFIG_GUIDE.md](docs/CONFIG_GUIDE.md) para ver ejemplos ilustrativos y recetas paso a paso.
