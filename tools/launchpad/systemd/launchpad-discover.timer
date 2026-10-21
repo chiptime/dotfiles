@@ -1,0 +1,10 @@
+[Unit]
+Description=Launchpad - local discovery sync every 30 min (2 min after user-session start)
+
+[Timer]
+# Relative to the user manager start, i.e. the first run is a post-boot catch-up.
+OnStartupSec=2min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target

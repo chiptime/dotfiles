@@ -6,7 +6,10 @@
       "icon": "📊",
       "url": "http://127.0.0.1:47623",
       "description": "Cuotas IA locales",
-      "health_url": "http://127.0.0.1:47623/api/health"
+      "health_url": "http://127.0.0.1:47623/api/health",
+      "tags": [
+        "ia"
+      ]
     },
     {
       "id": "opencode",
@@ -27,7 +30,10 @@
       "name": "Herdr Brain",
       "icon": "🧠",
       "url": "http://127.0.0.1:8741",
-      "description": "Voice PWA backend"
+      "description": "Voice PWA backend",
+      "tags": [
+        "voz"
+      ]
     },
     {
       "id": "pi-web",
@@ -80,7 +86,10 @@
       "kind": "script",
       "description": "Instalador idempotente de teams-to-tasks: mapea dotfiles -> mundo real.",
       "command": "~/.dotfiles/scripts/install-teams-to-tasks.sh",
-      "location": "~/.dotfiles/scripts/install-teams-to-tasks.sh"
+      "location": "~/.dotfiles/scripts/install-teams-to-tasks.sh",
+      "tags": [
+        "teams"
+      ]
     },
     {
       "id": "opencode-switch-profile",
@@ -120,7 +129,10 @@
       "kind": "script",
       "description": "Complete source of truth for the sdd-explore router — the LOCAL opencode-ecosystem",
       "docs": "~/.dotfiles/ai/opencode-router/README.md",
-      "location": "~/.dotfiles/ai/opencode-router"
+      "location": "~/.dotfiles/ai/opencode-router",
+      "tags": [
+        "ia"
+      ]
     },
     {
       "id": "projects",
@@ -128,7 +140,10 @@
       "kind": "script",
       "description": "Weekly summary of the global project tracker to the phone via ntfy + standalone web dashb…",
       "docs": "~/.dotfiles/ai/projects/README.md",
-      "location": "~/.dotfiles/ai/projects"
+      "location": "~/.dotfiles/ai/projects",
+      "tags": [
+        "ia"
+      ]
     },
     {
       "id": "teams-to-tasks",
@@ -136,7 +151,11 @@
       "kind": "script",
       "description": "Lee Microsoft Teams web mediante un Chromium con perfil persistente (MCP `playwright_team…",
       "docs": "~/.dotfiles/ai/teams-to-tasks/README.md",
-      "location": "~/.dotfiles/ai/teams-to-tasks"
+      "location": "~/.dotfiles/ai/teams-to-tasks",
+      "tags": [
+        "ia",
+        "teams"
+      ]
     },
     {
       "id": "tiktok-ingest",
@@ -144,7 +163,10 @@
       "kind": "script",
       "description": "network access, zero podman calls, zero GPU work, no installs, no",
       "docs": "~/.dotfiles/ai/tiktok-ingest/README.md",
-      "location": "~/.dotfiles/ai/tiktok-ingest"
+      "location": "~/.dotfiles/ai/tiktok-ingest",
+      "tags": [
+        "ia"
+      ]
     },
     {
       "id": "port-4097",
@@ -163,234 +185,674 @@
     {
       "id": "agent-tts",
       "name": "Agent Tts",
-      "kind": "script",
+      "kind": "project",
       "description": "TTS para salidas de agentes (ANSI/spinners → voz), hosts como herdr-brain",
       "docs": "~/Code/personal/agent-tts/README.md",
-      "location": "~/Code/personal/agent-tts"
+      "location": "~/Code/personal/agent-tts",
+      "tags": [
+        "ia",
+        "personal",
+        "voz"
+      ]
     },
     {
       "id": "agy-bridge",
       "name": "Agy Bridge",
-      "kind": "script",
+      "kind": "project",
       "description": "[![npm version](https://img.shields.io/npm/v/agy-bridge-opencode.svg)](https://www.npmjs.…",
       "docs": "~/Code/personal/agy-bridge/README.md",
-      "location": "~/Code/personal/agy-bridge"
+      "location": "~/Code/personal/agy-bridge",
+      "tags": [
+        "ia",
+        "personal"
+      ]
     },
     {
       "id": "ai-stack",
       "name": "Ai Stack",
-      "kind": "script",
+      "kind": "project",
       "description": "Personal **AI agent stack** and infrastructure. Currently holds the OpenCode Web",
       "docs": "~/Code/personal/ai-stack/README.md",
-      "location": "~/Code/personal/ai-stack"
+      "location": "~/Code/personal/ai-stack",
+      "tags": [
+        "ia",
+        "personal"
+      ]
     },
     {
       "id": "ai_workshop_dist_20251124-161644",
       "name": "Ai Workshop Dist 20251124 161644",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/ai_workshop_dist_20251124-161644"
+      "location": "~/Code/personal/ai_workshop_dist_20251124-161644",
+      "tags": [
+        "ia",
+        "personal"
+      ]
     },
     {
       "id": "amore",
       "name": "Amore",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/amore"
+      "location": "~/Code/personal/amore",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "antigravity-awesome-skills",
       "name": "Antigravity Awesome Skills",
-      "kind": "script",
+      "kind": "project",
       "description": "[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource…",
       "docs": "~/Code/personal/antigravity-awesome-skills/README.md",
-      "location": "~/Code/personal/antigravity-awesome-skills"
+      "location": "~/Code/personal/antigravity-awesome-skills",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "busqueda-vacaciones",
       "name": "Busqueda Vacaciones",
-      "kind": "script",
+      "kind": "project",
       "description": "A CLI tool for searching vacation rentals on Booking.com with complex multi-person, multi…",
       "docs": "~/Code/personal/busqueda-vacaciones/README.md",
-      "location": "~/Code/personal/busqueda-vacaciones"
+      "location": "~/Code/personal/busqueda-vacaciones",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "engram-sync",
       "name": "Engram Sync",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/engram-sync"
+      "location": "~/Code/personal/engram-sync",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "evaluaciones",
       "name": "Evaluaciones",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/evaluaciones"
+      "location": "~/Code/personal/evaluaciones",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "gentle-ai",
       "name": "Gentle Ai",
-      "kind": "script",
+      "kind": "project",
       "description": "---",
       "docs": "~/Code/personal/gentle-ai/README.md",
-      "location": "~/Code/personal/gentle-ai"
+      "location": "~/Code/personal/gentle-ai",
+      "tags": [
+        "ia",
+        "personal"
+      ]
     },
     {
       "id": "hermes-gertru-backups",
       "name": "Hermes Gertru Backups",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/hermes-gertru-backups"
+      "location": "~/Code/personal/hermes-gertru-backups",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "homelab",
       "name": "Homelab",
-      "kind": "script",
+      "kind": "project",
       "description": "Servidor multimedia casero sobre **Raspberry Pi 4**: reproducción con Plex en",
       "docs": "~/Code/personal/homelab/README.md",
-      "location": "~/Code/personal/homelab"
+      "location": "~/Code/personal/homelab",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "hungry",
       "name": "Hungry",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/hungry"
+      "location": "~/Code/personal/hungry",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "lambda-test",
       "name": "Lambda Test",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/lambda-test"
+      "location": "~/Code/personal/lambda-test",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "llm-hub",
       "name": "Llm Hub",
-      "kind": "script",
+      "kind": "project",
       "description": "Hub centralizado de LLMs: llama-chat GPU (gemma), embeddings nomic-embed-text, API OpenAI-compatible :4000",
       "docs": "~/Code/personal/llm-hub/README.md",
-      "location": "~/Code/personal/llm-hub"
+      "location": "~/Code/personal/llm-hub",
+      "tags": [
+        "ia",
+        "personal"
+      ]
     },
     {
       "id": "lucia",
       "name": "Lucia",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/lucia"
+      "location": "~/Code/personal/lucia",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "modular-saas",
       "name": "Modular Saas",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/modular-saas"
+      "location": "~/Code/personal/modular-saas",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "odata-batch",
       "name": "Odata Batch",
-      "kind": "script",
+      "kind": "project",
       "description": "Build and parse **OData V2 `$batch`** requests in TypeScript/JavaScript: turn an",
       "docs": "~/Code/personal/odata-batch/README.md",
-      "location": "~/Code/personal/odata-batch"
+      "location": "~/Code/personal/odata-batch",
+      "tags": [
+        "personal",
+        "sap"
+      ]
     },
     {
       "id": "opencode-infra",
       "name": "Opencode Infra",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/opencode-infra"
+      "location": "~/Code/personal/opencode-infra",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "opencode-plugins",
       "name": "Opencode Plugins",
-      "kind": "script",
+      "kind": "project",
       "description": "A Bun workspace for small OpenCode plugins.",
       "docs": "~/Code/personal/opencode-plugins/README.md",
-      "location": "~/Code/personal/opencode-plugins"
+      "location": "~/Code/personal/opencode-plugins",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "organize-ideas",
       "name": "Organize Ideas",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/organize-ideas"
+      "location": "~/Code/personal/organize-ideas",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "portfolio",
       "name": "Portfolio",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/portfolio"
+      "location": "~/Code/personal/portfolio",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "ssff-mcp",
       "name": "Ssff Mcp",
-      "kind": "script",
+      "kind": "project",
       "description": "[![npm version](https://img.shields.io/npm/v/ssff-mcp.svg)](https://www.npmjs.com/package…",
       "docs": "~/Code/personal/ssff-mcp/README.md",
-      "location": "~/Code/personal/ssff-mcp"
+      "location": "~/Code/personal/ssff-mcp",
+      "tags": [
+        "personal",
+        "sap"
+      ]
     },
     {
       "id": "tanny",
       "name": "Tanny",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/tanny"
+      "location": "~/Code/personal/tanny",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "ts-sap-cap-ddd-example",
       "name": "Ts Sap Cap Ddd Example",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": "~/Code/personal/ts-sap-cap-ddd-example/README.md",
-      "location": "~/Code/personal/ts-sap-cap-ddd-example"
+      "location": "~/Code/personal/ts-sap-cap-ddd-example",
+      "tags": [
+        "personal",
+        "sap"
+      ]
     },
     {
       "id": "voice-assistant",
       "name": "Voice Assistant",
-      "kind": "script",
+      "kind": "project",
       "description": "Asistente de voz de ultra-baja latencia usando `faster-whisper` con GPU (RTX 4090).",
       "docs": "~/Code/personal/voice-assistant/README.md",
-      "location": "~/Code/personal/voice-assistant"
+      "location": "~/Code/personal/voice-assistant",
+      "tags": [
+        "ia",
+        "personal",
+        "voz"
+      ]
     },
     {
       "id": "vps",
       "name": "Vps",
-      "kind": "script",
+      "kind": "project",
       "description": "```",
       "docs": "~/Code/personal/vps/README.md",
-      "location": "~/Code/personal/vps"
+      "location": "~/Code/personal/vps",
+      "tags": [
+        "personal"
+      ]
     },
     {
       "id": "whisper-notes",
       "name": "Whisper Notes",
-      "kind": "script",
+      "kind": "project",
       "description": null,
       "docs": null,
-      "location": "~/Code/personal/whisper-notes"
+      "location": "~/Code/personal/whisper-notes",
+      "tags": [
+        "ia",
+        "personal",
+        "voz"
+      ]
     },
     {
       "id": "wsl-notify-send",
       "name": "Wsl Notify Send",
-      "kind": "script",
+      "kind": "project",
       "description": "`wsl-notify-send` provides a Windows executable that is intended to be a replacement for …",
       "docs": "~/Code/personal/wsl-notify-send/README.md",
-      "location": "~/Code/personal/wsl-notify-send"
+      "location": "~/Code/personal/wsl-notify-send",
+      "tags": [
+        "personal"
+      ]
+    },
+    {
+      "id": "san-valentin",
+      "name": "San Valentin",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/amore/san-valentin",
+      "tags": [
+        "personal"
+      ]
+    },
+    {
+      "id": "valentin-2026",
+      "name": "Valentin 2026",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/amore/valentin-2026",
+      "tags": [
+        "personal"
+      ]
+    },
+    {
+      "id": "compare-prices",
+      "name": "Compare Prices",
+      "kind": "project",
+      "description": "Aplicación full-stack para comparar precios de productos entre múltiples supermercados es…",
+      "docs": "~/Code/personal/hungry/compare-prices/README.md",
+      "location": "~/Code/personal/hungry/compare-prices",
+      "tags": [
+        "personal"
+      ]
+    },
+    {
+      "id": "tmp-compare",
+      "name": "Tmp Compare",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/hungry/tmp-compare",
+      "tags": [
+        "personal"
+      ]
+    },
+    {
+      "id": "adopta_perritos",
+      "name": "Adopta Perritos",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/personal/lucia/adopta_perritos",
+      "tags": [
+        "personal"
+      ]
+    },
+    {
+      "id": "ahorramas",
+      "name": "Ahorramas",
+      "kind": "project",
+      "description": "This project was generated with [Angular CLI](https://github.com/angular/angular-cli) ver…",
+      "docs": "~/Code/Work/Stratesys/Ahorramas/ahorramas/README.md",
+      "location": "~/Code/Work/Stratesys/Ahorramas/ahorramas",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "ahorramas_shop",
+      "name": "Ahorramas Shop",
+      "kind": "project",
+      "description": "This project was generated with [Angular CLI](https://github.com/angular/angular-cli) ver…",
+      "docs": "~/Code/Work/Stratesys/Ahorramas/ahorramas_shop/README.md",
+      "location": "~/Code/Work/Stratesys/Ahorramas/ahorramas_shop",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "movimiento-de-tiendas",
+      "name": "Movimiento De Tiendas",
+      "kind": "project",
+      "description": "This project was generated with [Angular CLI](https://github.com/angular/angular-cli) ver…",
+      "docs": "~/Code/Work/Stratesys/Ahorramas/movimiento-de-tiendas/README.md",
+      "location": "~/Code/Work/Stratesys/Ahorramas/movimiento-de-tiendas",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "planificador-de-horarios",
+      "name": "Planificador De Horarios",
+      "kind": "project",
+      "description": "This project was generated with [Angular CLI](https://github.com/angular/angular-cli) ver…",
+      "docs": "~/Code/Work/Stratesys/Ahorramas/planificador-de-horarios/README.md",
+      "location": "~/Code/Work/Stratesys/Ahorramas/planificador-de-horarios",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "benefits-portal-backend",
+      "name": "Benefits Portal Backend",
+      "kind": "project",
+      "description": "To make it easy for you to get started with GitLab, here's a list of recommended next ste…",
+      "docs": "~/Code/Work/Stratesys/Banco_Galicia/benefits-portal-backend/README.md",
+      "location": "~/Code/Work/Stratesys/Banco_Galicia/benefits-portal-backend",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "associations",
+      "name": "Associations",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Clece/apps-workspaces/associations",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "entities-portal",
+      "name": "Entities Portal",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Clece/apps-workspaces/entities-portal",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "operational-centers",
+      "name": "Operational Centers",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Clece/apps-workspaces/operational-centers",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "oc--test",
+      "name": "Oc  Test",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Clece/sis/apps-workspaces/oc--test",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "apps-workspaces-operational-centers",
+      "name": "Apps Workspaces Operational Centers",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Clece/sis/apps-workspaces/operational-centers",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "recruiting-backend",
+      "name": "Recruiting Backend",
+      "kind": "project",
+      "description": "Go /tools",
+      "docs": "~/Code/Work/Stratesys/Clece/sis/recruiting-backend/README.md",
+      "location": "~/Code/Work/Stratesys/Clece/sis/recruiting-backend",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "recruiting-frontend",
+      "name": "Recruiting Frontend",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Clece/sis/recruiting-frontend",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "gam_sat_app",
+      "name": "Gam Sat App",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/GAM/gam_sat_app",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "zam_etm_app",
+      "name": "Zam Etm App",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/GAM/zam_etm_app",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "zam_etm_app_capacitor",
+      "name": "Zam Etm App Capacitor",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/GAM/zam_etm_app_capacitor",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "str06-bh-mid",
+      "name": "Str06 Bh Mid",
+      "kind": "project",
+      "description": "Aplicación middleware hecha con Spring que controla el acceso a los servicios SAP del pro…",
+      "docs": "~/Code/Work/Stratesys/Products/BeHumans/str06-bh-mid/README.md",
+      "location": "~/Code/Work/Stratesys/Products/BeHumans/str06-bh-mid",
+      "tags": [
+        "sap",
+        "trabajo"
+      ]
+    },
+    {
+      "id": "HyperMonitor",
+      "name": "Hypermonitor",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Products/HyperMonitor",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "Planificador-backend",
+      "name": "Planificador Backend",
+      "kind": "project",
+      "description": "Welcome to your new project.",
+      "docs": "~/Code/Work/Stratesys/Products/Planificador/backend/README.md",
+      "location": "~/Code/Work/Stratesys/Products/Planificador/backend",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "Planificador-frontend",
+      "name": "Planificador Frontend",
+      "kind": "project",
+      "description": "This project was generated with [Angular CLI](https://github.com/angular/angular-cli) ver…",
+      "docs": "~/Code/Work/Stratesys/Products/Planificador/frontend/README.md",
+      "location": "~/Code/Work/Stratesys/Products/Planificador/frontend",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "cap-nodejs-angular-skeleton",
+      "name": "Cap Nodejs Angular Skeleton",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Products/cap-nodejs-angular-skeleton",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "port-8765",
+      "name": "modular-saas",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:8765"
+    },
+    {
+      "id": "port-44312",
+      "name": "Port 44312",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44312"
+    },
+    {
+      "id": "port-44542",
+      "name": "Port 44542",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44542"
+    },
+    {
+      "id": "port-44612",
+      "name": "Port 44612",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44612"
+    },
+    {
+      "id": "port-44206",
+      "name": "Port 44206",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44206"
+    },
+    {
+      "id": "port-45294",
+      "name": "Port 45294",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:45294"
+    },
+    {
+      "id": "port-4004",
+      "name": "main 1.2.1",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:4004"
+    },
+    {
+      "id": "port-44174",
+      "name": "Port 44174",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44174"
+    },
+    {
+      "id": "port-44270",
+      "name": "Port 44270",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44270"
     }
   ]
 }
