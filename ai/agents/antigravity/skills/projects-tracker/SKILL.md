@@ -52,7 +52,9 @@ The tracker lives in `~/.dotfiles`:
    ```bash
    projects
    ```
-6. If the tracker files themselves changed and the user authorized a commit, commit ONLY `scripts/projects.yaml` and/or `scripts/projects-dashboard.sh` with a conventional message:
+6. **Improve-System Cadence Check**: Run `improve-system --status`. If the check reports `CADENCIA VENCIDA`, append a gentle one-liner at the very end of your response:
+   > 💡 *Han pasado N días desde la última auditoría de `/improve-system`. Cuando tengas un hueco, ejecútalo para revisar el feedback loop y gotchas de la semana.*
+7. If the tracker files themselves changed and the user authorized a commit, commit ONLY `scripts/projects.yaml` and/or `scripts/projects-dashboard.sh` with a conventional message:
    ```bash
    git -C ~/.dotfiles add scripts/projects.yaml && git -C ~/.dotfiles commit -m "docs(tracker): update <project> status and next actionable"
    ```
