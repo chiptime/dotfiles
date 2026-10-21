@@ -1,13 +1,13 @@
 {
   "$comment": "Perfil Z.ai Max: Prioridad GLM-5.3 para writers, AGY para explore, balance con Claude/OpenCode-Go para review. models.zai.json",
-  "small_model": "opencode/muse-spark-1.3-contributor-free",
+  "small_model": "opencode/deepseek-v4.1-flash-free",
   "agents": {
     "branch-pr": {
-      "model": "opencode/ling-3.1-flash-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "compaction": {
-      "model": "opencode/muse-spark-1.3-contributor-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "explore": {
@@ -39,7 +39,7 @@
       "variant": ""
     },
     "gentleman-fix": {
-      "model": "opencode/ling-3.1-flash-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "gentleman-judge": {
@@ -47,7 +47,7 @@
       "variant": ""
     },
     "issue-creation": {
-      "model": "opencode/ling-3.1-flash-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "jd-fix-agent": {
@@ -67,7 +67,7 @@
       "variant": ""
     },
     "jd-judge-b": {
-      "model": "openai/gpt-6.1-sol",
+      "model": "opencode-go/deepseek-v4.1-flash",
       "variant": ""
     },
     "jd-judge-b-fallback": {
@@ -87,7 +87,7 @@
       "variant": ""
     },
     "review-refuter": {
-      "model": "openai/gpt-6.1-sol",
+      "model": "opencode-go/deepseek-v4.1-flash",
       "variant": ""
     },
     "review-refuter-fallback": {
@@ -95,7 +95,7 @@
       "variant": ""
     },
     "review-reliability": {
-      "model": "openai/gpt-6.1-sol",
+      "model": "opencode-go/deepseek-v4.1-flash",
       "variant": ""
     },
     "review-reliability-fallback": {
@@ -119,7 +119,7 @@
       "variant": ""
     },
     "summary": {
-      "model": "opencode/muse-spark-1.3-contributor-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "branch-pr-fallback": {

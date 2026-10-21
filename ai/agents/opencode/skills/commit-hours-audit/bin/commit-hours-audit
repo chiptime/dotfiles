@@ -1,0 +1,441 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * commit-hours-audit — find commits that fall inside your working hours and
+ * preview the date rewrite that would move them out.
+ *
+ * Default rule (Mon-Thu 09:00-19:00, Fri 08:00-16:00) is configurable with
+ * --rule. A commit "violates" when its AUTHOR or COMMITTER timestamp falls
+ * inside a configured window.
+ *
+ * The tool is PREVIEW-FIRST: it never rewrites anything. It writes a ready-to-run
+ * plan (backup tag + rebase + per-commit date map) into <gitdir>/commit-hours-audit/
+ * and prints the command that applies it.
+ *
+ * Zero runtime dependencies. Requires Node >= 18 and git on PATH.
+ */
+
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const DEFAULT_RULE = '1-4:09:00-19:00,5:08:00-16:00';
+const FIELD = '\x1f';
+const RECORD = '\x1e';
+
+function fail(message) {
+  process.stderr.write(`commit-hours-audit: ${message}\n`);
+  process.exit(1);
+}
+
+function git(args) {
+  const res = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 });
+  if (res.error) fail(`unable to run git (${res.error.message}). Is git installed and on PATH?`);
+  return res;
+}
+
+function pad(n, width = 2) {
+  return String(n).padStart(width, '0');
+}
+
+// ---------------------------------------------------------------------------
+// Rule parsing
+// ---------------------------------------------------------------------------
+
+// "1-4:09:00-19:00,5:08:00-16:00" -> Map<dow 1..7, {start,end}> in minutes.
+// Days: 1=Mon .. 7=Sun. A missing day means "no working hours that day".
+function parseRule(spec) {
+  const map = new Map();
+  for (const raw of String(spec).split(',')) {
+    const part = raw.trim();
+    if (part === '') continue;
+    const m = part.match(/^(\d)\s*(?:-\s*(\d))?\s*:\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+    if (!m) fail(`invalid --rule segment: "${part}" (expected e.g. 1-4:09:00-19:00)`);
+    const from = Number(m[1]);
+    const to = m[2] === undefined ? from : Number(m[2]);
+    const start = Number(m[3]) * 60 + Number(m[4]);
+    const end = Number(m[5]) * 60 + Number(m[6]);
+    if (from < 1 || to > 7 || from > to) fail(`invalid day range in --rule segment: "${part}"`);
+    if (start >= end) fail(`invalid time range in --rule segment: "${part}"`);
+    for (let d = from; d <= to; d++) map.set(d, { start, end });
+  }
+  if (map.size === 0) fail('--rule produced no rules');
+  return map;
+}
+
+// ---------------------------------------------------------------------------
+// Date parsing (uses git's iso-strict output: 2026-10-15T09:33:00+02:00)
+// ---------------------------------------------------------------------------
+
+const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})([+-]\d{2}:\d{2})$/;
+
+function parseIso(value) {
+  const m = ISO_RE.exec(value);
+  if (!m) fail(`unexpected date format from git: ${value}`);
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const h = Number(m[4]);
+  const mi = Number(m[5]);
+  const s = Number(m[6]);
+  const off = m[7];
+  const sign = off[0] === '-' ? -1 : 1;
+  const offMin = sign * (Number(off.slice(1, 3)) * 60 + Number(off.slice(4, 6)));
+  // Weekday of the LOCAL date (1=Mon..7=Sun), computed in UTC to avoid tz drift.
+  const dow = ((new Date(Date.UTC(y, mo - 1, d)).getUTCDay() + 6) % 7) + 1;
+  const ts = Math.floor(Date.UTC(y, mo - 1, d, h, mi, s) / 1000) - offMin * 60;
+  return { iso: value, y, mo, d, h, mi, s, off, offMin, dow, minutes: h * 60 + mi, ts };
+}
+
+function inside(ruleMap, date) {
+  const r = ruleMap.get(date.dow);
+  return r !== undefined && date.minutes >= r.start && date.minutes < r.end;
+}
+
+function fmtClock(minutes) {
+  return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
+function fmtDate(date) {
+  return `${date.y}-${pad(date.mo)}-${pad(date.d)} ${fmtClock(date.minutes)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Commit collection
+// ---------------------------------------------------------------------------
+
+function collect(ref, range) {
+  const pretty = `%H${FIELD}%ad${FIELD}%cd${FIELD}%P${FIELD}%s${RECORD}`;
+  const targets = range ? [range] : [ref];
+  const res = git(['log', '--reverse', '--date=iso-strict', `--pretty=format:${pretty}`, ...targets]);
+  if (res.status !== 0) fail(`git log failed: ${(res.stderr || '').trim()}`);
+  return res.stdout
+    .split(RECORD)
+    .filter((chunk) => chunk.trim() !== '')
+    .map((chunk) => {
+      const [sha, ad, cd, parents, subject] = chunk.split(FIELD);
+      if (sha === undefined || ad === undefined || cd === undefined) return null;
+      return {
+        sha,
+        author: parseIso(ad),
+        committer: parseIso(cd),
+        parents: (parents || '').trim() === '' ? [] : parents.trim().split(/\s+/),
+        subject: subject || '',
+      };
+    })
+    .filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// Proposal engine
+// ---------------------------------------------------------------------------
+
+// Window of the preferred slot on a given weekday.
+//   evening -> [end of the working day, 23:59]
+//   morning -> [00:00, start of the working day]
+// Days without a rule fall back to a noon split.
+function slotWindow(dow, ruleMap, slot) {
+  const r = ruleMap.get(dow);
+  if (slot === 'evening') {
+    return { start: r === undefined ? 12 * 60 : r.end, end: 23 * 60 + 59 };
+  }
+  return { start: 0, end: r === undefined ? 12 * 60 : r.start };
+}
+
+// Most recent date <= the commit's own date whose slot window is already past.
+// This is what keeps proposals in the evening instead of the small hours.
+function pickDate(base, ruleMap, slot, nowTs) {
+  for (let back = 0; back <= 30; back++) {
+    const dt = new Date(Date.UTC(base.y, base.mo - 1, base.d - back));
+    const y = dt.getUTCFullYear();
+    const mo = dt.getUTCMonth() + 1;
+    const d = dt.getUTCDate();
+    const dow = ((dt.getUTCDay() + 6) % 7) + 1;
+    const window = slotWindow(dow, ruleMap, slot);
+    const endTs = Math.floor(Date.UTC(y, mo - 1, d, Math.floor(window.end / 60), window.end % 60, 0) / 1000)
+      - base.offMin * 60;
+    if (endTs <= nowTs) return { y, mo, d, dow, window, back };
+  }
+  return null;
+}
+
+// Spread a date-group proportionally inside its window, preserving order/gaps.
+function spread(group, window) {
+  const mins = group.map((c) => c.author.minutes);
+  const lo = Math.min(...mins);
+  const hi = Math.max(...mins);
+  const span = hi - lo;
+  return group.map((c) => {
+    if (span === 0) return window.start;
+    return Math.round(window.start + ((c.author.minutes - lo) * (window.end - window.start)) / span);
+  });
+}
+
+function buildProposals(violations, ruleMap, slot, nowTs) {
+  const byDate = new Map();
+  for (const c of violations) {
+    const key = `${c.author.y}-${c.author.mo}-${c.author.d}`;
+    if (!byDate.has(key)) byDate.set(key, []);
+    byDate.get(key).push(c);
+  }
+  const proposals = new Map(); // sha -> { iso, date, minutes, dow }
+  const warnings = [];
+  for (const group of byDate.values()) {
+    const picked = pickDate(group[0].author, ruleMap, slot, nowTs);
+    if (picked === null) {
+      warnings.push(`could not find a past ${slot} slot for ${group[0].author.iso}; leaving those commits untouched`);
+      continue;
+    }
+    const newMinutes = spread(group, picked.window);
+    group.forEach((c, i) => {
+      const m = newMinutes[i];
+      const iso = `${picked.y}-${pad(picked.mo)}-${pad(picked.d)}T${pad(Math.floor(m / 60))}:${pad(m % 60)}:00${c.author.off}`;
+      proposals.set(c.sha, { iso, y: picked.y, mo: picked.mo, d: picked.d, minutes: m, dow: picked.dow });
+    });
+    if (picked.back > 0) {
+      warnings.push(
+        `proposals for ${group[0].author.y}-${pad(group[0].author.mo)}-${pad(group[0].author.d)} moved back ${picked.back} day(s): ` +
+        `the ${slot} window of that day was not in the past yet`
+      );
+    }
+  }
+  return { proposals, warnings };
+}
+
+// ---------------------------------------------------------------------------
+// Plan generation
+// ---------------------------------------------------------------------------
+
+function writePlan(toplevel, gitdir, commits, proposals, base, stamp, auditedHead) {
+  const dir = path.join(gitdir, 'commit-hours-audit');
+  fs.mkdirSync(dir, { recursive: true });
+
+  const mapLines = [];
+  for (const c of commits) {
+    const p = proposals.get(c.sha);
+    if (p !== undefined) mapLines.push(`${c.author.ts} ${p.iso}`);
+  }
+  const mapPath = path.join(dir, 'dates.map');
+  fs.writeFileSync(mapPath, mapLines.join('\n') + '\n');
+
+  const amendPath = path.join(dir, 'amend.sh');
+  fs.writeFileSync(amendPath, `#!/usr/bin/env bash
+set -euo pipefail
+t=$(git log -1 --format=%ad --date=raw | cut -d' ' -f1)
+n=$(awk -v k="$t" '$1==k{print $2; exit}' "$CH_MAP")
+if [ -n "$n" ]; then
+  GIT_COMMITTER_DATE="$n" git commit --amend --no-edit --date="$n"
+fi
+`);
+  fs.chmodSync(amendPath, 0o755);
+
+  const baseArg = base === null ? '--root' : `'${base}'`;
+  const applyPath = path.join(dir, 'apply.sh');
+  fs.writeFileSync(applyPath, `#!/usr/bin/env bash
+set -euo pipefail
+cd '${toplevel}'
+head_now=$(git rev-parse HEAD)
+if [ "$head_now" != '${auditedHead}' ]; then
+  echo "ABORT: HEAD is $head_now but this plan was built for ${auditedHead}." >&2
+  echo "Check out / reset to the audited history first, then re-run apply.sh." >&2
+  exit 1
+fi
+echo "backup tag: backup/pre-datefix-${stamp}"
+git tag -f 'backup/pre-datefix-${stamp}' HEAD
+export CH_MAP='${mapPath}'
+GIT_SEQUENCE_EDITOR=true git rebase -i --force-rebase ${baseArg} --exec '${amendPath}'
+echo
+echo "re-run the audit; the tree hash must be unchanged:"
+echo "  git rev-parse HEAD^{tree}"
+`);
+  fs.chmodSync(applyPath, 0o755);
+
+  return { dir, applyPath, mapPath };
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+function truncate(text, max) {
+  if (text.length <= max) return text;
+  if (max <= 1) return text.slice(0, max);
+  return text.slice(0, max - 1) + '…';
+}
+
+function renderTable(rows, commits, total) {
+  const head = ['COMMIT', 'ACTUAL', 'AHORA', 'PROPUESTA', 'SUBJECT'];
+  const widths = [40, 16, 9, 16, 50];
+  const lines = [];
+  lines.push(
+    ['COMMIT'.padEnd(widths[0]), 'ACTUAL'.padEnd(widths[1]), 'AHORA'.padEnd(widths[2]), 'PROPUESTA'.padEnd(widths[3]), 'SUBJECT'].join('  ')
+  );
+  lines.push('-'.repeat(widths.reduce((a, b) => a + b + 2, -2)));
+  for (const r of rows) {
+    lines.push(
+      [
+        (r.sha.slice(0, 7) + ' ' + r.marks).padEnd(widths[0]),
+        fmtDate(r.commit.author).padEnd(widths[1]),
+        (r.authorBad || r.committerBad ? (r.authorBad ? 'autor' : '') + (r.authorBad && r.committerBad ? '+' : '') + (r.committerBad ? 'comm' : '') : '-').padEnd(widths[2]),
+        (r.proposed === null ? '(sin propuesta)' : `${fmtDate(r.proposed)}`).padEnd(widths[3]),
+        truncate(r.commit.subject, widths[4]),
+      ].join('  ')
+    );
+  }
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
+function parseArgs(argv) {
+  const opts = { ref: 'HEAD', range: null, rule: DEFAULT_RULE, slot: 'evening', json: false, help: false, allowFuture: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--json') opts.json = true;
+    else if (a === '--help' || a === '-h') opts.help = true;
+    else if (a === '--allow-future') opts.allowFuture = true;
+    else if (a === '--ref') { const v = argv[++i]; if (v === undefined) fail('--ref requires a value'); opts.ref = v; }
+    else if (a === '--range') { const v = argv[++i]; if (v === undefined) fail('--range requires a value'); opts.range = v; }
+    else if (a === '--rule') { const v = argv[++i]; if (v === undefined) fail('--rule requires a value'); opts.rule = v; }
+    else if (a === '--slot') {
+      const v = argv[++i];
+      if (v !== 'evening' && v !== 'morning') fail('--slot must be evening or morning');
+      opts.slot = v;
+    } else fail(`unknown argument: ${a} (try --help)`);
+  }
+  return opts;
+}
+
+function printHelp() {
+  process.stdout.write(`commit-hours-audit — report commits made inside your working hours and preview their date rewrite
+
+Usage:
+  commit-hours-audit [options]
+
+Options:
+  --ref <ref>        Ref to audit (default: HEAD, full history).
+  --range <a..b>     Audit only a commit range instead of a full ref.
+  --rule <spec>      Working-hours rule (default: ${DEFAULT_RULE}).
+                     Format: DOW[-DOW]:HH:MM-HH:MM,... with DOW 1=Mon..7=Sun.
+  --slot <s>         Preferred target slot: evening (default) or morning.
+  --allow-future     Allow proposals dated after "now" (default: keep them past).
+  --json             Machine-readable output.
+  --help, -h         Show this help.
+
+A commit violates the rule when its AUTHOR or COMMITTER timestamp is inside a
+working-hours window. Proposals stay in the preferred slot; when that slot of
+the commit's own day is still in the future, the date moves back day by day
+until the slot is in the past (default slot: evening, never the small hours).
+
+Exit codes:
+  0  success (0 or more violations)
+  1  not a git repository or invalid usage
+`);
+}
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  if (opts.help) return printHelp();
+
+  const top = git(['rev-parse', '--show-toplevel']);
+  if (top.status !== 0) fail('not inside a git repository');
+  const toplevel = top.stdout.trim();
+  const gitdirRes = git(['rev-parse', '--absolute-git-dir']);
+  const gitdir = gitdirRes.stdout.trim();
+
+  const ruleMap = parseRule(opts.rule);
+  const commits = collect(opts.ref, opts.range);
+  if (commits.length === 0) fail('no commits found for the requested ref/range');
+
+  const nowTs = Math.floor(Date.now() / 1000);
+  const violations = commits.filter((c) => inside(ruleMap, c.author) || inside(ruleMap, c.committer));
+  const { proposals, warnings } = buildProposals(violations, ruleMap, opts.slot, nowTs);
+
+  if (!opts.allowFuture) {
+    for (const [, p] of proposals) {
+      const ts = Math.floor(Date.UTC(p.y, p.mo - 1, p.d, Math.floor(p.minutes / 60), p.minutes % 60, 0) / 1000);
+      if (ts > nowTs) warnings.push(`proposal ${p.iso} is after "now"; use --allow-future to keep it`);
+    }
+  }
+
+  const rows = violations.map((c) => ({
+    commit: c,
+    sha: c.sha,
+    marks: '',
+    authorBad: inside(ruleMap, c.author),
+    committerBad: inside(ruleMap, c.committer),
+    proposed: proposals.get(c.sha) || null,
+  }));
+  rows.sort((a, b) => a.commit.author.ts - b.commit.author.ts);
+
+  let plan = null;
+  if (violations.length > 0) {
+    const oldest = violations[0];
+    const base = oldest.parents.length > 0 ? oldest.parents[0] : null;
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    const headExpr = opts.range ? opts.range.split('..').pop() : opts.ref;
+    const resolved = git(['rev-parse', headExpr]);
+    const auditedHead = resolved.status === 0 ? resolved.stdout.trim() : commits[commits.length - 1].sha;
+    plan = writePlan(toplevel, gitdir, commits, proposals, base, stamp, auditedHead);
+    if (base !== null) {
+      const parentCommit = commits.find((c) => c.sha === base);
+      const oldestProposal = proposals.get(oldest.sha);
+      if (parentCommit !== undefined && oldestProposal !== undefined) {
+        const ts = Math.floor(Date.UTC(oldestProposal.y, oldestProposal.mo - 1, oldestProposal.d, Math.floor(oldestProposal.minutes / 60), oldestProposal.minutes % 60, 0) / 1000) - oldest.author.offMin * 60;
+        if (ts < parentCommit.committer.ts) {
+          warnings.push(
+            `out-of-order risk: the oldest rewritten commit would be dated before its parent ` +
+            `(${parentCommit.sha.slice(0, 7)} @ ${parentCommit.committer.iso})`
+          );
+        }
+      }
+    }
+  }
+
+  const repo = path.basename(toplevel);
+  if (opts.json) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          repo,
+          ref: opts.range || opts.ref,
+          rule: opts.rule,
+          slot: opts.slot,
+          now: new Date(nowTs * 1000).toISOString(),
+          total: commits.length,
+          violations: rows.map((r) => ({
+            sha: r.sha,
+            subject: r.commit.subject,
+            author: r.commit.author.iso,
+            committer: r.commit.committer.iso,
+            authorInside: r.authorBad,
+            committerInside: r.committerBad,
+            proposed: r.proposed ? r.proposed.iso : null,
+          })),
+          planDir: plan ? plan.dir : null,
+          applyCommand: plan ? plan.applyPath : null,
+          warnings,
+        },
+        null,
+        2
+      ) + '\n'
+    );
+    return;
+  }
+
+  if (violations.length === 0) {
+    process.stdout.write(`✔ ${repo}: 0 commits inside the working-hours rule (${opts.rule}) across ${commits.length} commits.\n`);
+    return;
+  }
+
+  process.stdout.write(renderTable(rows, commits, commits.length) + '\n\n');
+  process.stdout.write(`${violations.length} of ${commits.length} commits fall inside the working-hours rule.\n`);
+  for (const w of warnings) process.stdout.write(`⚠ ${w}\n`);
+  process.stdout.write(`\nPlan written to: ${plan.dir}\n`);
+  process.stdout.write(`Review it, then apply with:\n  bash '${plan.applyPath}'\n`);
+}
+
+main();
