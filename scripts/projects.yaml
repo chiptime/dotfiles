@@ -91,8 +91,8 @@ odata-batch:
 ssff-mcp:
   scope: personal
   status: active
-  desc: MCP SSFF OData v2 read-only; hosting multi-tenant y cache invalidate --tenant integrados en main, sin push; guard de referencias percent-encoded en 92ab3c5. Fase 3 IAS por cliente y roles MCP consolidada en PRD DRAFT, sin implementar; ROADMAP modificado y PRD nuevo sin commit. Claves API independientes y SSFF con cuenta técnica; revisión RDD anterior omitida por decisión del usuario
-  next: revisar docs/PRD-phase3-ias-roles.md y obtener permiso de acceso IAS antes de validar login OpenCode, tokens y grupos; autorizar por separado implementación y commit de documentos. Pendientes de Fase 2: push/release y despliegue Dokploy/TLS con autorización
+  desc: MCP SSFF OData v2 read-only; feature picklists implementada en worktree feat/picklists con Opción C NavLabels, caché L1/L2 lazy granular y paginación (594 tests). Hosting multi-tenant y cache invalidate integrados en main.
+  next: mergear o revisar PR de feat/picklists a main, o continuar con Fase 3 IAS/roles según roadmap. Pendientes de Fase 2: push/release y despliegue Dokploy/TLS con autorización
 
 llm-hub:
   scope: personal
