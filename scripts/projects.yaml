@@ -102,8 +102,8 @@ llm-hub:
 modular-saas:
   scope: personal
   status: active
-  desc: SaaS modular para comercios de barrio (piezas de Lego) — Angular 22+ Hybrid SSR + Bun/Elysia Hexagonal + PostgreSQL 17; 10 módulos con diagramas, MOD_BILLING (Holded), PRD técnico aprobado y guía de arquitectura, estilo visual y UX
-  next: commit de especificaciones y arrancar SDD de S1 (fundación: monorepo, CI, RLS, auth, Meta API)
+  desc: SaaS modular para comercios de barrio (piezas de Lego) — Angular 22+ Hybrid SSR + Bun/Elysia Hexagonal + PostgreSQL 17; 10 módulos con diagramas, MOD_BILLING (Holded), PRD técnico aprobado, visor MkDocs con TTS karaoke y despliegue Dokploy
+  next: commit de especificaciones/TTS y arrancar SDD de S1 (fundación: monorepo, CI, RLS, auth, Meta API)
 
 # ---- Personal: learning / one-offs ----
 
