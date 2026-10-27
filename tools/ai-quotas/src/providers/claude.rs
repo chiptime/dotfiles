@@ -100,6 +100,35 @@ struct ClaudeUsageResponse {
     /// Extra-usage / spend tracking (real money over the plan's cap).
     #[serde(default)]
     spend: Option<ClaudeSpend>,
+    /// Typed limit list; only `weekly_scoped` entries (per-model caps) are used.
+    #[serde(default)]
+    limits: Vec<ClaudeLimit>,
+}
+
+#[derive(Deserialize)]
+struct ClaudeLimit {
+    kind: Option<String>,
+    percent: Option<f64>,
+    resets_at: Option<String>,
+    scope: Option<ClaudeLimitScope>,
+}
+
+#[derive(Deserialize)]
+struct ClaudeLimitScope {
+    model: Option<ClaudeLimitModel>,
+}
+
+#[derive(Deserialize)]
+struct ClaudeLimitModel {
+    display_name: Option<String>,
+}
+
+/// Label prefix of per-model weekly caps (e.g. "Weekly · Fable").
+const SCOPED_LABEL_PREFIX: &str = "Weekly · ";
+
+/// True for per-model weekly windows, which must not gate the whole provider.
+pub fn is_model_scoped_label(label: &str) -> bool {
+    label.starts_with(SCOPED_LABEL_PREFIX)
 }
 
 #[derive(Deserialize)]
@@ -191,6 +220,39 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
             });
             out.push(ok_record(record, None));
         }
+    }
+
+    for limit in &parsed.limits {
+        if limit.kind.as_deref() != Some("weekly_scoped") {
+            continue;
+        }
+        let name = limit
+            .scope
+            .as_ref()
+            .and_then(|s| s.model.as_ref())
+            .and_then(|m| m.display_name.as_deref())
+            .filter(|n| !n.is_empty());
+        let (Some(name), Some(used)) = (name, limit.percent) else {
+            continue;
+        };
+        let mut record = Record::new(
+            PROVIDER_ID.to_string(),
+            Kind::Window,
+            Source::Api,
+            fetched_at,
+            None,
+        );
+        record.label = Some(format!("{SCOPED_LABEL_PREFIX}{name}"));
+        record.display_name = Some(DISPLAY_NAME.to_string());
+        record.used = Some(used);
+        record.limit = Some(100.0);
+        record.unit = Some("percent".to_string());
+        record.resets_at = limit.resets_at.as_deref().and_then(|s| {
+            DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        });
+        out.push(ok_record(record, None));
     }
 
     if let Some(spend) = parsed.spend {
@@ -307,6 +369,38 @@ mod tests {
         assert_eq!(rec.resets_at, None); // balances never reset
         rec.validate().expect("balance without resets_at is valid");
         assert!(spend.detail.as_deref().unwrap().contains("severity: critical"));
+    }
+
+    #[test]
+    fn maps_model_scoped_weekly_limit_into_its_own_window() {
+        let fixture = json!({
+            "seven_day": { "utilization": 7.0, "resets_at": "2026-10-31T16:00:00+00:00" },
+            "limits": [
+                { "kind": "session", "percent": 3, "resets_at": "2026-10-27T23:00:00+00:00", "scope": null },
+                { "kind": "weekly_all", "percent": 7, "resets_at": "2026-10-31T16:00:00+00:00", "scope": null },
+                {
+                    "kind": "weekly_scoped",
+                    "percent": 42,
+                    "resets_at": "2026-10-31T16:00:00+00:00",
+                    "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null }
+                }
+            ]
+        });
+        let records = map_response(&fixture, Utc::now());
+        // Only the scoped limit adds a record; session/weekly_all duplicate five_hour/seven_day.
+        assert_eq!(records.len(), 2);
+        let fable = records
+            .iter()
+            .find(|r| r.record.as_ref().and_then(|rec| rec.label.as_deref()) == Some("Weekly · Fable"))
+            .expect("Fable record present");
+        let rec = fable.record.as_ref().unwrap();
+        assert_eq!(rec.kind, Kind::Window);
+        assert_eq!(rec.used, Some(42.0));
+        assert_eq!(rec.limit, Some(100.0));
+        assert_eq!(rec.unit.as_deref(), Some("percent"));
+        assert!(rec.resets_at.is_some());
+        assert!(is_model_scoped_label("Weekly · Fable"));
+        assert!(!is_model_scoped_label("Weekly"));
     }
 
     #[test]

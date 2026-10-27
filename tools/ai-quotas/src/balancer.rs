@@ -166,6 +166,13 @@ struct ProviderView {
 fn provider_view(statuses: &[Status], provider: &str) -> ProviderView {
     let mut view = ProviderView { present: false, all_ok: true, remaining: None };
     for status in statuses.iter().filter(|s| s.provider == provider) {
+        // Per-model caps (e.g. Claude "Weekly · Fable") do not limit the provider as a whole.
+        let scoped = status
+            .record
+            .as_ref()
+            .and_then(|r| r.label.as_deref())
+            .is_some_and(crate::providers::claude::is_model_scoped_label);
+        if scoped { continue; }
         view.present = true;
         if status.state != State::Ok { view.all_ok = false; }
         if let Some(r) = record_remaining(status) {
@@ -249,6 +256,17 @@ mod tests {
         let advice = advise(Some(&cfg()), REQ, &statuses);
         assert!(advice.switch);
         assert_eq!(advice.recommended_model, "zai/glm-4.7");
+    }
+
+    #[test]
+    fn model_scoped_claude_window_does_not_gate_provider() {
+        // An exhausted Fable-only weekly cap must not hide claude's general capacity.
+        let mut fable = ok("claude", Kind::Window, 0.0);
+        fable.record.as_mut().unwrap().label = Some("Weekly · Fable".into());
+        let statuses = [ok("chatgpt", Kind::Window, 0.05), ok("claude", Kind::Window, 0.85), fable];
+        let advice = advise(Some(&cfg()), REQ, &statuses);
+        assert!(advice.switch);
+        assert_eq!(advice.recommended_model, "anthropic/claude-opus-5");
     }
 
     #[test]

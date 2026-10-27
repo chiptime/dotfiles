@@ -14,8 +14,8 @@
 dotfiles:
   scope: personal
   status: active
-  desc: Infra personal — skills OpenCode/agy-cli, improve-system (meta-auditor dual OpenCode+AGY con time-ledger y Engram), jest-delta (CLI y skill), symlink global sis-hana-trace, opencode-switch, tiktok-ingest, ai-quotas, config modelos, notificaciones ntfy, tools. 19/10: launchpad con buscador+facetas, tags auto, discovery recursivo de ~/Code/Work y portal fase 1
-  next: commitear el trabajo pendiente (jest-delta, symlinks, launchpad+portal fase 1, tiktok-ingest, ai-quotas) tras validación del usuario; portal fase 2 cuando toque; primera pasada semanal con /improve-system en 3-4 días
+  desc: Infra personal — skills OpenCode/agy-cli, improve-system (meta-auditor dual OpenCode+AGY con time-ledger y Engram), jest-delta (CLI y skill), symlink global sis-hana-trace, opencode-switch, tiktok-ingest, ai-quotas, config modelos, notificaciones ntfy, tools. 19/10: launchpad con buscador+facetas, tags auto, discovery recursivo de ~/Code/Work y portal fase 1. 27/10: cuota semanal Fable en Claude desplegada en ai-quotas; 133 tests y clippy correctos
+  next: revisar el resto del trabajo pendiente sin mezclarlo con ai-quotas (Fable desplegado); portal fase 2 cuando toque; ejecutar /improve-system (cadencia vencida)
 
 agy-bridge:
   scope: personal
