@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite) via Dokploy. UI rediseño mergeado + CI verde + 58 tests frontend a 0. Baselines de productos 19/19 verificadas en master (6e24ab15): Alcampo 93845, Eroski 22096 (grocery), El Corte Inglés 19996, Hipercor 19584, Bonarea 13190, Carrefour 12491, Gadis 12075, Consum 9284, BM 8078, DIA 7810, Masymas 7785, Condis 7590, Hiperber 6978, Alimerka 6875, Mercadona 4321, Ahorramas 4519, ALDI 2682, Spar 1707, La Sirena 1432. Fase 2 volume-checks implementada y en master (61cd1bdf).
-  next: Revisar HttpECIFinder (apunta a /api/productos/search que devuelve 404; la vía real es JSON SSR con response_type: json + plp.pagination.count, raíz capada en 10000, sumar L1) y ApiSparCategoryScraper (sitemaps 404, shop en spar.es/wpold/); handoff backend (~559 tests + gate TS) sigue pendiente en Engram
+  desc: Price comparator (Bun+Elysia hexagonal / React+Vite). Fase 2b completada en rama fix/campaign-phase-2b (escalera N0 validada en VPS con fingerprinting, 9 celdas N0 aprobadas, bug stores BonÀrea corregido y SPAR eliminado por completo, catálogo en 18 mercados).
+  next: Re-ejecutar en VPS BonÀrea stores corregido, evaluar Playwright/proxy para Eroski y Carrefour, y subir celdas aprobadas a N1 (CP y cobertura regional)
 
 vps:
   scope: personal
@@ -102,8 +102,8 @@ llm-hub:
 modular-saas:
   scope: personal
   status: active
-  desc: SaaS modular para comercios de barrio (piezas de Lego) — Angular 22+ Hybrid SSR + Bun/Elysia Hexagonal + PostgreSQL 17; 10 módulos con diagramas, MOD_BILLING (Holded), PRD técnico aprobado, visor MkDocs con TTS karaoke y despliegue Dokploy
-  next: commit de especificaciones/TTS y arrancar SDD de S1 (fundación: monorepo, CI, RLS, auth, Meta API)
+  desc: MVP B2B para comercios de barrio en definición documental; Core + WhatsApp opcional, pago local F1 y arquitectura fiscal Go/GOBL/VeriFactu. Sin producto implementado ni aprobación D35 o cumplimiento jurídico acreditados.
+  next: Retomar odd/tasks/definicion-autonoma-mvp.md (Engram 11550); T4 fidelización y T5 integración pendientes. Soporte S-R13 permite exportaciones masivas y Libro Registro con concesión específica. Solo documentación; preservar árbol sin commits.
 
 # ---- Personal: learning / one-offs ----
 
