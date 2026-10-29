@@ -44,8 +44,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 22/10: visor interactivo de diagramas Mermaid en la PWA de herdr-brain con renderizado SVG nativo, toolbar de alternancia código/diagrama, copia de código, sincronización de temas claro/oscuro y visor modal (lightbox) con pan y zoom vectorial nítido hasta 10x; suite completa verde
-  next: Push de commits locales y confirmar en móvil la interacción con diagramas Mermaid; decidir chips de respuesta rápida; sigue abierta la vía de audio (resampler en decode, 429 de edge-tts) y F2/UAT pendientes
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 22/10: visor interactivo de diagramas Mermaid. 29/10: soporte de rutas .jsonl directas y raíces gentle-shell en PiTranscript (herdr-brain) para sincronizar transcripts y TTS con Herdr y Collie; 96 tests pasando en verde
+  next: Push de commits locales y continuar con F2/UAT; decidir chips de respuesta rápida y vías de audio abiertas (resampler en decode, 429 de edge-tts)
 
 compare-prices:
   scope: personal
@@ -85,14 +85,14 @@ busqueda-vacaciones:
 odata-batch:
   scope: personal
   status: active
-  desc: Librería npm OData V2 batch — security hardening completado (CSPRNG, colisiones, CRLF, RFC 9110, parser resiliente); 475 tests, 100% cobertura, mutación 97.19%
-  next: npm audit manual (M-01), peer review (M-02) y publicación minor 3.1.0
+  desc: Librería npm OData V2 batch — 3.1.0 publicada en npm (security hardening: CSPRNG, colisiones, CRLF, RFC 9110, parser resiliente); 475 tests, 100% cobertura, mutación 97.19%
+  next: npm audit --omit=dev pendiente (M-01)
 
 ssff-mcp:
   scope: personal
   status: active
   desc: MCP SSFF OData v2 read-only; feature picklists implementada en worktree feat/picklists con Opción C NavLabels, caché L1/L2 lazy granular y paginación (594 tests). Hosting multi-tenant y cache invalidate integrados en main.
-  next: mergear o revisar PR de feat/picklists a main, o continuar con Fase 3 IAS/roles según roadmap. Pendientes de Fase 2: push/release y despliegue Dokploy/TLS con autorización
+  next: push/PR de chore/odata-batch-3.1 (commit 4b26d9f, worktree ssff-mcp-worktrees/odata-batch-3.1; XML LF->CRLF aceptado); mergear o revisar PR de feat/picklists a main, o continuar con Fase 3 IAS/roles según roadmap. Pendientes de Fase 2: push/release y despliegue Dokploy/TLS con autorización
 
 llm-hub:
   scope: personal
@@ -315,3 +315,9 @@ opencode:
   scope: personal
   status: cold
   desc: Tercero (OpenCode, fork chiptime/opencode) — host/binario externo, no es proyecto propio
+
+operational-centers:
+  scope: work
+  status: active
+  desc: Clece SIS operational centers and recruitment notification integrations
+  next: Validate the FinalistaEstructura scoped User lookup in CPI TEST, then plan a controlled PROD deployment without changing the chief fallback or executionDateFinalistaEstructura
