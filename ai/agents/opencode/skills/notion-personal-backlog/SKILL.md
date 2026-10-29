@@ -19,6 +19,8 @@ Load when the user (or Gertru) wants to capture a personal or cross-project pend
 - One capture = one actionable item. Never merge multiple todos into one page.
 - Only use properties defined in `assets/notion-personal-backlog-schema.md`. Never invent new properties or Proyecto options on the fly; ask the user to add a new option first.
 - Never guess the target data source ID. Resolve it via Bootstrap before creating anything.
+- Reminders ("avísame", "recuérdame", "a las 19:00", "mañana"): set `Recordatorio` (date) on the item. You only WRITE the date; a deterministic VPS cron delivers it by Telegram. Never promise to notify the user yourself.
+- `Recordatorio` must carry an explicit offset for Europe/Madrid (e.g. `2026-10-30T19:00:00+01:00`); a date without time fires at 09:00. Resolve relative times ("mañana", "en 2 horas") against the current date and say the absolute date/time back to the user. If the time is ambiguous, ask once.
 
 ## Decision Gates
 
@@ -33,13 +35,13 @@ Load when the user (or Gertru) wants to capture a personal or cross-project pend
 1. `mem_search(query: "tooling/notion-personal-backlog", scope: "personal", all_projects: true)`. If found, `mem_get_observation` for the `data_source_id` and schema options, then go to step 4.
 2. Not found: probe access with `notion_API-post-search` filtered to `object: page`. If every result parents into a Mantenimiento SIS data source, apply the STOP row above and do not create anything.
 3. Otherwise, ask the user which existing page should hold the database (or accept a pasted URL), then create it with `notion_API-create-a-data-source` using the schema in `assets/notion-personal-backlog-schema.md`. `mem_save` the profile with `scope: "personal"`, `topic_key: "tooling/notion-personal-backlog"`, `capture_prompt: false`, including the new `data_source_id`.
-4. Ask the user only for fields you cannot infer from their text (usually Proyecto, Prioridad). Estado defaults to `📥 Inbox`.
+4. Ask the user only for fields you cannot infer from their text (usually Proyecto, Prioridad). Estado defaults to `📥 Inbox`. If the text asks for a reminder, set `Recordatorio` per the Hard Rules.
 5. Create the item with `notion_API-post-page`, `parent: { data_source_id }`, and the resolved properties.
 6. Confirm success with the created page URL and the properties you set.
 
 ## Output Contract
 
-Return the created page URL and the exact property values set. On STOP, return the reason and the two remediation options from the Decision Gates table — never fall back to writing into Mantenimiento SIS.
+Return the created page URL and the exact property values set (including the absolute `Recordatorio` date/time when set). On STOP, return the reason and the two remediation options from the Decision Gates table — never fall back to writing into Mantenimiento SIS.
 
 ## References
 

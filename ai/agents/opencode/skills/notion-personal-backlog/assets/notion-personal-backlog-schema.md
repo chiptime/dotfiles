@@ -11,6 +11,7 @@ Data source ID: `PENDING` — filled in by whichever session runs the Bootstrap 
 | Prioridad | select | 🔥 Alta, 🟡 Media, 🟢 Baja |
 | Estado | select | 📥 Inbox, 🔨 En curso, ✅ Hecho, 🗑️ Descartado |
 | Notas | rich_text | free text, optional short context |
+| Recordatorio | date | optional; when set, the VPS cron `ai-stack/automations/notion-reminders.py` sends a Telegram reminder at that moment |
 | Creado | created_time | automatic |
 
 ## Explicitly excluded from Proyecto
