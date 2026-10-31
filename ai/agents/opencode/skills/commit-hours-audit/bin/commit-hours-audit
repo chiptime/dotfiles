@@ -3,17 +3,23 @@
 
 /**
  * commit-hours-audit — find commits that fall inside your working hours and
- * preview the date rewrite that would move them out.
+ * move them out without losing history.
+ *
+ *   commit-hours-audit [options]             audit and write a plan (never rewrites)
+ *   commit-hours-audit apply <plan-dir>      rewrite the planned refs with git filter-repo
+ *   commit-hours-audit verify <plan-dir>     check an applied plan commit by commit
+ *   commit-hours-audit remap-docs <plan-dir> preview (or --write) old ids cited in tracked files
  *
  * Default rule (Mon-Thu 09:00-19:00, Fri 08:00-16:00) is configurable with
  * --rule. A commit "violates" when its AUTHOR or COMMITTER timestamp falls
  * inside a configured window.
  *
- * The tool is PREVIEW-FIRST: it never rewrites anything. It writes a ready-to-run
- * plan (backup tag + rebase + per-commit date map) into <gitdir>/commit-hours-audit/
- * and prints the command that applies it.
+ * The audit is PREVIEW-FIRST: it writes plan.json + callback.py into
+ * <gitdir>/commit-hours-audit/<stamp>/ and prints the apply command. Commits are
+ * identified by full commit id; every local branch and tag that contains a
+ * planned commit is rewritten together, so merges and shared commits survive.
  *
- * Zero runtime dependencies. Requires Node >= 18 and git on PATH.
+ * Zero npm dependencies. Requires Node >= 18 and git; apply needs git-filter-repo.
  */
 
 const { spawnSync } = require('node:child_process');
@@ -23,20 +29,57 @@ const path = require('node:path');
 const DEFAULT_RULE = '1-4:09:00-19:00,5:08:00-16:00';
 const FIELD = '\x1f';
 const RECORD = '\x1e';
+const PLAN_VERSION = 2;
+const PLAN_ROOT = 'commit-hours-audit';
+const LEGACY_FILES = ['apply.sh', 'amend.sh', 'dates.map'];
+const FIELDS = ['author', 'committer'];
+const SIGNATURE_HEADERS = ['gpgsig', 'gpgsig-sha256'];
+const ZERO_ID = /^0+$/;
 
-function fail(message) {
-  process.stderr.write(`commit-hours-audit: ${message}\n`);
-  process.exit(1);
+class CliError extends Error {
+  constructor(message, exitCode = 1) {
+    super(message);
+    this.exitCode = exitCode;
+  }
 }
 
-function git(args) {
-  const res = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 });
+function fail(message, exitCode = 1) {
+  throw new CliError(message, exitCode);
+}
+
+let gitCwd;
+
+function git(args, options = {}) {
+  const res = spawnSync('git', args, {
+    cwd: options.cwd || gitCwd,
+    encoding: options.buffer ? 'buffer' : 'utf8',
+    input: options.input === undefined ? undefined : Buffer.from(options.input),
+    maxBuffer: 1024 * 1024 * 1024,
+  });
   if (res.error) fail(`unable to run git (${res.error.message}). Is git installed and on PATH?`);
   return res;
 }
 
+function gitOut(args, what) {
+  const res = git(args);
+  if (res.status !== 0) fail(`${what || `git ${args[0]}`} failed: ${String(res.stderr || '').trim()}`);
+  return res.stdout;
+}
+
+function lines(text) {
+  return String(text).split('\n').filter((line) => line !== '');
+}
+
 function pad(n, width = 2) {
   return String(n).padStart(width, '0');
+}
+
+function short(sha) {
+  return String(sha).slice(0, 7);
+}
+
+function clamp(value, lo, hi) {
+  return Math.min(Math.max(value, lo), hi);
 }
 
 // ---------------------------------------------------------------------------
@@ -65,27 +108,39 @@ function parseRule(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// Date parsing (uses git's iso-strict output: 2026-10-15T09:33:00+02:00)
+// Dates. Git hands us raw dates ("<epoch> <+hhmm>"); every date keeps its own
+// UTC offset so weekdays and clock times are the committer's local ones.
 // ---------------------------------------------------------------------------
 
-const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})([+-]\d{2}:\d{2})$/;
+function offsetString(offMin, colon = true) {
+  const sign = offMin < 0 ? '-' : '+';
+  const abs = Math.abs(offMin);
+  return `${sign}${pad(Math.floor(abs / 60))}${colon ? ':' : ''}${pad(abs % 60)}`;
+}
 
-function parseIso(value) {
-  const m = ISO_RE.exec(value);
-  if (!m) fail(`unexpected date format from git: ${value}`);
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  const h = Number(m[4]);
-  const mi = Number(m[5]);
-  const s = Number(m[6]);
-  const off = m[7];
-  const sign = off[0] === '-' ? -1 : 1;
-  const offMin = sign * (Number(off.slice(1, 3)) * 60 + Number(off.slice(4, 6)));
-  // Weekday of the LOCAL date (1=Mon..7=Sun), computed in UTC to avoid tz drift.
-  const dow = ((new Date(Date.UTC(y, mo - 1, d)).getUTCDay() + 6) % 7) + 1;
-  const ts = Math.floor(Date.UTC(y, mo - 1, d, h, mi, s) / 1000) - offMin * 60;
-  return { iso: value, y, mo, d, h, mi, s, off, offMin, dow, minutes: h * 60 + mi, ts };
+// The local calendar view of an absolute epoch second in a given offset.
+function atOffset(ts, offMin) {
+  const t = new Date((ts + offMin * 60) * 1000);
+  const y = t.getUTCFullYear();
+  const mo = t.getUTCMonth() + 1;
+  const d = t.getUTCDate();
+  const h = t.getUTCHours();
+  const mi = t.getUTCMinutes();
+  const s = t.getUTCSeconds();
+  const dow = ((t.getUTCDay() + 6) % 7) + 1;
+  const iso = `${y}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:${pad(s)}${offsetString(offMin)}`;
+  return { iso, y, mo, d, h, mi, s, offMin, dow, minutes: h * 60 + mi, ts };
+}
+
+function parseRaw(raw) {
+  const m = /^(-?\d+) ([+-])(\d{2})(\d{2})$/.exec(String(raw).trim());
+  if (!m) fail(`unexpected date format from git: ${raw}`);
+  const offMin = (m[2] === '-' ? -1 : 1) * (Number(m[3]) * 60 + Number(m[4]));
+  return atOffset(Number(m[1]), offMin);
+}
+
+function rawDate(date) {
+  return `${date.ts} ${offsetString(date.offMin, false)}`;
 }
 
 function inside(ruleMap, date) {
@@ -101,49 +156,120 @@ function fmtDate(date) {
   return `${date.y}-${pad(date.mo)}-${pad(date.d)} ${fmtClock(date.minutes)}`;
 }
 
+function fmtStamp(ts, offMin) {
+  return atOffset(ts, offMin).iso.replace('T', ' ');
+}
+
+// "Now" can be pinned for reproducible runs (tests, dry rehearsals).
+function resolveNow() {
+  const raw = process.env.COMMIT_HOURS_AUDIT_NOW;
+  if (raw === undefined || raw === '') return Math.floor(Date.now() / 1000);
+  const ms = Date.parse(raw);
+  if (Number.isNaN(ms)) fail(`invalid COMMIT_HOURS_AUDIT_NOW: ${raw}`);
+  return Math.floor(ms / 1000);
+}
+
 // ---------------------------------------------------------------------------
-// Commit collection
+// Repository state
 // ---------------------------------------------------------------------------
 
-function collect(ref, range) {
-  const pretty = `%H${FIELD}%ad${FIELD}%cd${FIELD}%P${FIELD}%s${RECORD}`;
-  const targets = range ? [range] : [ref];
-  const res = git(['log', '--reverse', '--date=iso-strict', `--pretty=format:${pretty}`, ...targets]);
+function openRepo() {
+  const top = git(['rev-parse', '--show-toplevel']);
+  if (top.status !== 0) fail('not inside a git repository');
+  const toplevel = top.stdout.trim();
+  gitCwd = toplevel;
+  const gitdir = gitOut(['rev-parse', '--absolute-git-dir']).trim();
+  return { toplevel, gitdir, name: path.basename(toplevel) };
+}
+
+// Every ref with its direct object id and the commit it peels to (null if none).
+function readRefs() {
+  const format = '--format=%(refname)%09%(objectname)%09%(objecttype)%09%(*objectname)%09%(*objecttype)';
+  const refs = new Map();
+  for (const line of lines(gitOut(['for-each-ref', format]))) {
+    const [ref, oid, type, peeled, peeledType] = line.split('\t');
+    let commit = null;
+    if (type === 'commit') commit = oid;
+    else if (type === 'tag' && peeledType === 'commit') commit = peeled;
+    refs.set(ref, { ref, oid, type, commit });
+  }
+  return refs;
+}
+
+function readHead() {
+  const sym = git(['symbolic-ref', '-q', 'HEAD']);
+  const oid = git(['rev-parse', '-q', '--verify', 'HEAD']);
+  return { ref: sym.status === 0 ? sym.stdout.trim() : null, oid: oid.status === 0 ? oid.stdout.trim() : null };
+}
+
+// Local branches and tags are rewritten; backup tags, remote-tracking refs,
+// the stash and notes never are.
+function isRewritable(ref) {
+  if (ref === undefined || ref.commit === null) return false;
+  if (ref.ref.startsWith('refs/heads/')) return true;
+  return ref.ref.startsWith('refs/tags/') && !ref.ref.startsWith('refs/tags/backup/');
+}
+
+// Refs under `patterns` that contain at least one of `shas`.
+function refsContaining(shas, patterns) {
+  if (shas.length === 0) return [];
+  const args = ['for-each-ref', '--format=%(refname)'];
+  for (const sha of shas) args.push(`--contains=${sha}`);
+  return lines(gitOut([...args, ...patterns]));
+}
+
+// Every commit reachable from `targets`, parents before children.
+function collect(targets) {
+  if (targets.length === 0) return [];
+  const pretty = `%H${FIELD}%P${FIELD}%ad${FIELD}%cd${FIELD}%s${RECORD}`;
+  const res = git(['log', '--topo-order', '--reverse', '--date=raw', `--pretty=format:${pretty}`, ...targets, '--']);
   if (res.status !== 0) fail(`git log failed: ${(res.stderr || '').trim()}`);
   return res.stdout
     .split(RECORD)
-    .filter((chunk) => chunk.trim() !== '')
+    .map((chunk) => chunk.replace(/^\n/, ''))
+    .filter((chunk) => chunk !== '')
     .map((chunk) => {
-      const [sha, ad, cd, parents, subject] = chunk.split(FIELD);
-      if (sha === undefined || ad === undefined || cd === undefined) return null;
+      const [sha, parents, ad, cd, subject] = chunk.split(FIELD);
       return {
         sha,
-        author: parseIso(ad),
-        committer: parseIso(cd),
-        parents: (parents || '').trim() === '' ? [] : parents.trim().split(/\s+/),
+        parents: parents === '' ? [] : parents.split(' '),
+        author: parseRaw(ad),
+        committer: parseRaw(cd),
         subject: subject || '',
       };
-    })
-    .filter(Boolean);
+    });
+}
+
+// Commits reachable from the boundary of a range: they stay out of the plan.
+function excludedByRange(range) {
+  if (!range) return new Set();
+  const boundary = lines(gitOut(['rev-list', '--boundary', range, '--']))
+    .filter((line) => line.startsWith('-'))
+    .map((line) => line.slice(1));
+  if (boundary.length === 0) return new Set();
+  return new Set(lines(gitOut(['rev-list', ...boundary, '--'])));
 }
 
 // ---------------------------------------------------------------------------
 // Proposal engine
 // ---------------------------------------------------------------------------
 
-// Window of the preferred slot on a given weekday.
-//   evening -> [end of the working day, 23:59]
-//   morning -> [00:00, start of the working day]
+// Preferred slot of a weekday, in minutes for spreading and in seconds of the
+// day (inclusive) for clamping:
+//   evening -> [end of the working day, 23:59:59]
+//   morning -> [00:00, one second before the working day starts]
 // Days without a rule fall back to a noon split.
 function slotWindow(dow, ruleMap, slot) {
   const r = ruleMap.get(dow);
   if (slot === 'evening') {
-    return { start: r === undefined ? 12 * 60 : r.end, end: 23 * 60 + 59 };
+    const start = r === undefined ? 12 * 60 : r.end;
+    return { start, end: 23 * 60 + 59, lo: start * 60, hi: (23 * 60 + 59) * 60 + 59 };
   }
-  return { start: 0, end: r === undefined ? 12 * 60 : r.start };
+  const end = r === undefined ? 12 * 60 : r.start;
+  return { start: 0, end, lo: 0, hi: end * 60 - 1 };
 }
 
-// Most recent date <= the commit's own date whose slot window is already past.
+// Most recent date <= the base date whose slot window is already past.
 // This is what keeps proposals in the evening instead of the small hours.
 function pickDate(base, ruleMap, slot, nowTs) {
   for (let back = 0; back <= 30; back++) {
@@ -153,105 +279,276 @@ function pickDate(base, ruleMap, slot, nowTs) {
     const d = dt.getUTCDate();
     const dow = ((dt.getUTCDay() + 6) % 7) + 1;
     const window = slotWindow(dow, ruleMap, slot);
-    const endTs = Math.floor(Date.UTC(y, mo - 1, d, Math.floor(window.end / 60), window.end % 60, 0) / 1000)
-      - base.offMin * 60;
+    const endTs = Date.UTC(y, mo - 1, d) / 1000 + window.hi - base.offMin * 60;
     if (endTs <= nowTs) return { y, mo, d, dow, window, back };
   }
   return null;
 }
 
-// Spread a date-group proportionally inside its window, preserving order/gaps.
-function spread(group, window) {
-  const mins = group.map((c) => c.author.minutes);
-  const lo = Math.min(...mins);
-  const hi = Math.max(...mins);
+// Spread a day's violators proportionally inside the window, keeping order/gaps.
+function spread(minutes, window) {
+  const lo = Math.min(...minutes);
+  const hi = Math.max(...minutes);
   const span = hi - lo;
-  return group.map((c) => {
+  return minutes.map((m) => {
     if (span === 0) return window.start;
-    return Math.round(window.start + ((c.author.minutes - lo) * (window.end - window.start)) / span);
+    return Math.round(window.start + ((m - lo) * (window.end - window.start)) / span);
   });
 }
 
-function buildProposals(violations, ruleMap, slot, nowTs) {
-  const byDate = new Map();
-  for (const c of violations) {
-    const key = `${c.author.y}-${c.author.mo}-${c.author.d}`;
-    if (!byDate.has(key)) byDate.set(key, []);
-    byDate.get(key).push(c);
+// Proposes a new instant for every planned commit. Only the violating field(s)
+// move. Each new date stays >= the final dates of its parents and <= the
+// nearest descendants that keep their dates; when the slot cannot satisfy that
+// the proposal stays in the slot and the plan says which inversion it adds.
+// Inversions already present in the history never constrain anything.
+function buildProposals(graph, planned, ruleMap, slot, nowTs) {
+  const bySha = new Map(graph.map((c) => [c.sha, c]));
+  const children = new Map(graph.map((c) => [c.sha, []]));
+  for (const c of graph) for (const p of c.parents) if (children.has(p)) children.get(p).push(c.sha);
+
+  const moving = new Map();
+  for (const c of graph) {
+    if (planned.has(c.sha)) moving.set(c.sha, FIELDS.filter((f) => inside(ruleMap, c[f])));
   }
-  const proposals = new Map(); // sha -> { iso, date, minutes, dow }
+
   const warnings = [];
-  for (const group of byDate.values()) {
-    const picked = pickDate(group[0].author, ruleMap, slot, nowTs);
+  const unresolved = [];
+  const targets = new Map();
+  const groups = new Map();
+  for (const c of graph) {
+    const fields = moving.get(c.sha);
+    if (fields === undefined) continue;
+    const base = c[fields[0]];
+    const key = `${base.y}-${pad(base.mo)}-${pad(base.d)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ c, base });
+  }
+  for (const [key, group] of groups) {
+    const picked = pickDate(group[0].base, ruleMap, slot, nowTs);
     if (picked === null) {
-      warnings.push(`could not find a past ${slot} slot for ${group[0].author.iso}; leaving those commits untouched`);
+      warnings.push(`could not find a past ${slot} slot for ${group[0].base.iso}; leaving those commits untouched`);
+      for (const { c } of group) unresolved.push(c.sha);
       continue;
     }
-    const newMinutes = spread(group, picked.window);
-    group.forEach((c, i) => {
-      const m = newMinutes[i];
-      const iso = `${picked.y}-${pad(picked.mo)}-${pad(picked.d)}T${pad(Math.floor(m / 60))}:${pad(m % 60)}:00${c.author.off}`;
-      proposals.set(c.sha, { iso, y: picked.y, mo: picked.mo, d: picked.d, minutes: m, dow: picked.dow });
-    });
     if (picked.back > 0) {
-      warnings.push(
-        `proposals for ${group[0].author.y}-${pad(group[0].author.mo)}-${pad(group[0].author.d)} moved back ${picked.back} day(s): ` +
-        `the ${slot} window of that day was not in the past yet`
-      );
+      warnings.push(`proposals for ${key} moved back ${picked.back} day(s): the ${slot} window of that day was not in the past yet`);
+    }
+    const minutes = spread(group.map((g) => g.base.minutes), picked.window);
+    group.forEach(({ c, base }, i) => {
+      const dayStart = Date.UTC(picked.y, picked.mo - 1, picked.d) / 1000 - base.offMin * 60;
+      targets.set(c.sha, {
+        ideal: dayStart + minutes[i] * 60,
+        lo: dayStart + picked.window.lo,
+        hi: dayStart + picked.window.hi,
+        offMin: base.offMin,
+      });
+    });
+  }
+
+  const moves = (sha, field) => targets.has(sha) && moving.get(sha).includes(field);
+
+  // Upper bound per field: the nearest descendants that keep their date.
+  const upper = { author: new Map(), committer: new Map() };
+  for (let i = graph.length - 1; i >= 0; i--) {
+    const c = graph[i];
+    for (const f of FIELDS) {
+      let bound = Infinity;
+      for (const k of children.get(c.sha)) {
+        const kc = bySha.get(k);
+        if (kc[f].ts < c[f].ts) continue; // inversion already present
+        bound = Math.min(bound, moves(k, f) ? upper[f].get(k) : kc[f].ts);
+      }
+      upper[f].set(c.sha, bound);
     }
   }
-  return { proposals, warnings };
+
+  const final = { author: new Map(), committer: new Map() };
+  const proposals = new Map();
+  for (const c of graph) {
+    const target = targets.get(c.sha);
+    const fields = target ? moving.get(c.sha) : [];
+    if (target) {
+      let lo = -Infinity;
+      let hi = Infinity;
+      for (const f of fields) {
+        for (const p of c.parents) {
+          const parent = bySha.get(p);
+          if (parent === undefined || c[f].ts < parent[f].ts) continue; // inversion already present
+          lo = Math.max(lo, final[f].get(p));
+        }
+        hi = Math.min(hi, upper[f].get(c.sha));
+      }
+      const from = Math.max(lo, target.lo);
+      const to = Math.min(hi, target.hi);
+      let ts;
+      let inversion = false;
+      if (from <= to) {
+        ts = clamp(target.ideal, from, to);
+      } else {
+        ts = clamp(target.ideal, target.lo, target.hi);
+        inversion = true;
+        warnings.push(infeasibleMessage(c, slot, target, lo, hi));
+      }
+      const date = atOffset(ts, target.offMin);
+      proposals.set(c.sha, {
+        author: fields.includes('author') ? date : null,
+        committer: fields.includes('committer') ? date : null,
+        date,
+        inversion,
+      });
+    }
+    for (const f of FIELDS) final[f].set(c.sha, fields.includes(f) ? proposals.get(c.sha).date.ts : c[f].ts);
+  }
+  return { proposals, warnings, unresolved };
+}
+
+function infeasibleMessage(c, slot, target, lo, hi) {
+  const at = (ts) => fmtStamp(ts, target.offMin);
+  const reasons = [];
+  if (lo > target.hi) reasons.push(`a parent is dated ${at(lo)}`);
+  if (hi < target.lo) reasons.push(`a descendant is dated ${at(hi)}`);
+  if (reasons.length === 0) reasons.push(`its parents (${at(lo)}) are dated after its descendants (${at(hi)})`);
+  return `cannot keep commit order for ${short(c.sha)}: its ${slot} slot is ${at(target.lo)} .. ${at(target.hi)} ` +
+    `but ${reasons.join(' and ')}; the proposal introduces an inversion`;
 }
 
 // ---------------------------------------------------------------------------
-// Plan generation
+// Scope and publication
 // ---------------------------------------------------------------------------
 
-function writePlan(toplevel, gitdir, commits, proposals, base, stamp, auditedHead) {
-  const dir = path.join(gitdir, 'commit-hours-audit');
-  fs.mkdirSync(dir, { recursive: true });
-
-  const mapLines = [];
-  for (const c of commits) {
-    const p = proposals.get(c.sha);
-    if (p !== undefined) mapLines.push(`${c.author.ts} ${p.iso}`);
+// Commits whose id changes (a changed commit and everything after it) and the
+// frontier just below them. Passing the frontier as negative revisions keeps
+// filter-repo from exporting older history: it would re-create those commits
+// without their signatures, changing ids the dates never required.
+function rewriteFrontier(graph, changed) {
+  const rewritten = new Set();
+  for (const c of graph) {
+    if (changed.has(c.sha) || c.parents.some((p) => rewritten.has(p))) rewritten.add(c.sha);
   }
-  const mapPath = path.join(dir, 'dates.map');
-  fs.writeFileSync(mapPath, mapLines.join('\n') + '\n');
+  const exclude = new Set();
+  for (const c of graph) {
+    if (!rewritten.has(c.sha)) continue;
+    for (const p of c.parents) if (!rewritten.has(p)) exclude.add(p);
+  }
+  return { rewritten, exclude: [...exclude].sort() };
+}
 
-  const amendPath = path.join(dir, 'amend.sh');
-  fs.writeFileSync(amendPath, `#!/usr/bin/env bash
-set -euo pipefail
-t=$(git log -1 --format=%ad --date=raw | cut -d' ' -f1)
-n=$(awk -v k="$t" '$1==k{print $2; exit}' "$CH_MAP")
-if [ -n "$n" ]; then
-  GIT_COMMITTER_DATE="$n" git commit --amend --no-edit --date="$n"
-fi
-`);
-  fs.chmodSync(amendPath, 0o755);
+function signedCommits(shas) {
+  const objs = readObjects(shas);
+  return shas.filter((sha) => {
+    const obj = objs.get(sha);
+    if (!obj) return false;
+    const end = obj.text.indexOf('\n\n');
+    return /^gpgsig(-sha256)? /m.test(end === -1 ? obj.text : obj.text.slice(0, end));
+  });
+}
 
-  const baseArg = base === null ? '--root' : `'${base}'`;
-  const applyPath = path.join(dir, 'apply.sh');
-  fs.writeFileSync(applyPath, `#!/usr/bin/env bash
-set -euo pipefail
-cd '${toplevel}'
-head_now=$(git rev-parse HEAD)
-if [ "$head_now" != '${auditedHead}' ]; then
-  echo "ABORT: HEAD is $head_now but this plan was built for ${auditedHead}." >&2
-  echo "Check out / reset to the audited history first, then re-run apply.sh." >&2
-  exit 1
-fi
-echo "backup tag: backup/pre-datefix-${stamp}"
-git tag -f 'backup/pre-datefix-${stamp}' HEAD
-export CH_MAP='${mapPath}'
-GIT_SEQUENCE_EDITOR=true git rebase -i --force-rebase ${baseArg} --exec '${amendPath}'
-echo
-echo "re-run the audit; the tree hash must be unchanged:"
-echo "  git rev-parse HEAD^{tree}"
-`);
-  fs.chmodSync(applyPath, 0o755);
+function remotes() {
+  return lines(gitOut(['remote']));
+}
 
-  return { dir, applyPath, mapPath };
+// Which rewritten branches are published (a remote-tracking ref already holds
+// planned commits) and which remote-tracking refs hold them with no local
+// branch to rewrite. The CLI never contacts a remote: tags report null.
+function publication(scopeRefs, planned, refs) {
+  const hits = new Set(refsContaining([...planned], ['refs/remotes']).filter((ref) => !ref.endsWith('/HEAD')));
+  const upstreams = new Map(lines(gitOut(['for-each-ref', '--format=%(refname)%09%(upstream)', 'refs/heads']))
+    .map((line) => line.split('\t')));
+  const names = remotes();
+  const claimed = new Set();
+  const rewrite = scopeRefs.map((name) => {
+    const ref = refs.get(name);
+    const kind = name.startsWith('refs/heads/') ? 'branch' : 'tag';
+    const entry = { ref: name, oid: ref.oid, commit: ref.commit, kind, published: null };
+    if (kind === 'tag') return entry;
+    const branch = name.slice('refs/heads/'.length);
+    const tracking = new Set();
+    const upstream = upstreams.get(name);
+    if (upstream && upstream.startsWith('refs/remotes/')) tracking.add(upstream);
+    for (const remote of names) tracking.add(`refs/remotes/${remote}/${branch}`);
+    entry.published = [];
+    for (const t of tracking) {
+      if (!hits.has(t)) continue;
+      const remote = names.find((r) => t.startsWith(`refs/remotes/${r}/`));
+      if (remote === undefined) continue;
+      claimed.add(t);
+      entry.published.push({ remote, tracking: t, remoteBranch: t.slice(`refs/remotes/${remote}/`.length), oid: refs.get(t).oid });
+    }
+    return entry;
+  });
+  const remoteOnly = [...hits].filter((t) => !claimed.has(t)).sort().map((t) => ({ ref: t, oid: refs.get(t).oid }));
+  return { rewrite, remoteOnly, remoteNames: names };
+}
+
+function pushCommands(rewrite, remoteNames) {
+  const out = [];
+  for (const entry of rewrite) {
+    if (entry.kind === 'branch') {
+      const local = entry.ref.slice('refs/heads/'.length);
+      for (const p of entry.published) {
+        out.push(`git push --force-with-lease=${p.remoteBranch}:${p.oid} ${p.remote} ${local}:${p.remoteBranch}`);
+      }
+    } else {
+      for (const remote of remoteNames) {
+        out.push(`git push --force-with-lease=${entry.ref}:${entry.oid} ${remote} ${entry.ref}  # only if this tag was pushed`);
+      }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Plan files
+// ---------------------------------------------------------------------------
+
+function callbackSource(commits) {
+  const value = (raw) => (raw === null ? 'None' : `b"${raw}"`);
+  const out = [
+    '# Generated by commit-hours-audit. Changes author/committer dates only,',
+    '# keyed by the original commit id.',
+    'M = {',
+  ];
+  for (const c of commits) out.push(`    b"${c.sha}": (${value(c.author.new)}, ${value(c.committer.new)}),`);
+  out.push(
+    '}',
+    'd = M.get(commit.original_id)',
+    'if d is not None:',
+    '    if d[0] is not None:',
+    '        commit.author_date = d[0]',
+    '    if d[1] is not None:',
+    '        commit.committer_date = d[1]',
+    ''
+  );
+  return out.join('\n');
+}
+
+function writePlan(repo, plan, callback) {
+  const root = path.join(repo.gitdir, PLAN_ROOT);
+  fs.mkdirSync(root, { recursive: true });
+  const removed = LEGACY_FILES.filter((file) => fs.existsSync(path.join(root, file)));
+  for (const file of removed) fs.rmSync(path.join(root, file));
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  let dir = path.join(root, stamp);
+  for (let n = 1; fs.existsSync(dir); n++) dir = path.join(root, `${stamp}-${n}`);
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'plan.json'), JSON.stringify(plan, null, 2) + '\n');
+  fs.writeFileSync(path.join(dir, 'callback.py'), callback);
+  return { dir, removed };
+}
+
+function loadPlan(planDir) {
+  if (!planDir) fail('missing <plan-dir> (the audit prints it)');
+  const dir = path.resolve(planDir);
+  const file = path.join(dir, 'plan.json');
+  if (!fs.existsSync(file)) fail(`no plan.json in ${dir}`);
+  const plan = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (plan.version !== PLAN_VERSION) fail(`unsupported plan version ${plan.version}; run a new audit`);
+  gitCwd = plan.repo.toplevel;
+  const gitdir = git(['rev-parse', '--absolute-git-dir']);
+  if (gitdir.status !== 0 || gitdir.stdout.trim() !== plan.repo.gitdir) {
+    fail(`the plan belongs to ${plan.repo.toplevel}, which is not available as that repository`);
+  }
+  return { plan, dir };
 }
 
 // ---------------------------------------------------------------------------
@@ -264,178 +561,831 @@ function truncate(text, max) {
   return text.slice(0, max - 1) + '…';
 }
 
-function renderTable(rows, commits, total) {
-  const head = ['COMMIT', 'ACTUAL', 'AHORA', 'PROPUESTA', 'SUBJECT'];
+function renderTable(rows) {
   const widths = [40, 16, 9, 16, 50];
-  const lines = [];
-  lines.push(
-    ['COMMIT'.padEnd(widths[0]), 'ACTUAL'.padEnd(widths[1]), 'AHORA'.padEnd(widths[2]), 'PROPUESTA'.padEnd(widths[3]), 'SUBJECT'].join('  ')
-  );
-  lines.push('-'.repeat(widths.reduce((a, b) => a + b + 2, -2)));
+  const out = [];
+  out.push(['COMMIT'.padEnd(widths[0]), 'ACTUAL'.padEnd(widths[1]), 'AHORA'.padEnd(widths[2]), 'PROPUESTA'.padEnd(widths[3]), 'SUBJECT'].join('  '));
+  out.push('-'.repeat(widths.reduce((a, b) => a + b + 2, -2)));
   for (const r of rows) {
-    lines.push(
-      [
-        (r.sha.slice(0, 7) + ' ' + r.marks).padEnd(widths[0]),
-        fmtDate(r.commit.author).padEnd(widths[1]),
-        (r.authorBad || r.committerBad ? (r.authorBad ? 'autor' : '') + (r.authorBad && r.committerBad ? '+' : '') + (r.committerBad ? 'comm' : '') : '-').padEnd(widths[2]),
-        (r.proposed === null ? '(sin propuesta)' : `${fmtDate(r.proposed)}`).padEnd(widths[3]),
-        truncate(r.commit.subject, widths[4]),
-      ].join('  ')
-    );
+    const field = (r.authorBad ? 'autor' : '') + (r.authorBad && r.committerBad ? '+' : '') + (r.committerBad ? 'comm' : '');
+    out.push([
+      (short(r.sha) + ' ' + r.marks).padEnd(widths[0]),
+      fmtDate(r.commit.author).padEnd(widths[1]),
+      (field || '-').padEnd(widths[2]),
+      (r.proposed === null ? '(sin propuesta)' : fmtDate(r.proposed.date)).padEnd(widths[3]),
+      truncate(r.commit.subject, widths[4]),
+    ].join('  '));
   }
-  return lines.join('\n');
+  return out.join('\n');
+}
+
+function publishedLabel(entry) {
+  if (entry.kind === 'tag') return 'tag: publication unknown';
+  if (entry.published.length === 0) return 'not published';
+  return `published on ${entry.published.map((p) => p.tracking.slice('refs/remotes/'.length)).join(', ')}`;
+}
+
+// ---------------------------------------------------------------------------
+// audit (default command)
+// ---------------------------------------------------------------------------
+
+function cmdAudit(opts) {
+  const repo = openRepo();
+  const ruleMap = parseRule(opts.rule);
+  const nowTs = resolveNow();
+  const refs = readRefs();
+  const rewritable = [...refs.values()].filter(isRewritable).map((r) => r.ref);
+  const targets = opts.all ? rewritable : [opts.range || opts.ref];
+  if (targets.length === 0) fail('no local branches or tags to audit');
+  const audited = collect(targets);
+  if (audited.length === 0) fail('no commits found for the requested ref/range');
+  const label = opts.all ? 'all local branches and tags' : (opts.range || opts.ref);
+  const isViolation = (c) => inside(ruleMap, c.author) || inside(ruleMap, c.committer);
+  const direct = audited.filter(isViolation);
+
+  // Close the scope: every local ref holding a planned commit is rewritten,
+  // so the violators those refs add are planned too (unless a range excludes them).
+  const excluded = excludedByRange(opts.range);
+  const wanted = new Set(direct.map((c) => c.sha));
+  const pulled = new Set();
+  let scopeRefs = [];
+  let graph = [];
+  if (direct.length > 0) {
+    for (;;) {
+      scopeRefs = refsContaining([...wanted], ['refs/heads', 'refs/tags']).filter((name) => isRewritable(refs.get(name)));
+      graph = collect(scopeRefs);
+      const extra = graph.filter((c) => !wanted.has(c.sha) && !excluded.has(c.sha) && isViolation(c));
+      if (extra.length === 0) break;
+      for (const c of extra) {
+        wanted.add(c.sha);
+        pulled.add(c.sha);
+      }
+    }
+  }
+  const inGraph = new Set(graph.map((c) => c.sha));
+  const planned = new Set([...wanted].filter((sha) => inGraph.has(sha)));
+  const { proposals, warnings, unresolved } = buildProposals(graph, planned, ruleMap, opts.slot, nowTs);
+  for (const c of direct) {
+    if (!inGraph.has(c.sha)) warnings.push(`${short(c.sha)} is not in any local branch or tag; it cannot be rewritten`);
+  }
+  if (!opts.allowFuture) {
+    for (const p of proposals.values()) {
+      if (p.date.ts > nowTs) warnings.push(`proposal ${p.date.iso} is after "now"; use --allow-future to keep it`);
+    }
+  }
+
+  const bySha = new Map([...audited, ...graph].map((c) => [c.sha, c]));
+  const rows = [...wanted].map((sha) => {
+    const commit = bySha.get(sha);
+    return {
+      commit,
+      sha,
+      marks: pulled.has(sha) ? '*' : '',
+      pulledIn: pulled.has(sha),
+      authorBad: inside(ruleMap, commit.author),
+      committerBad: inside(ruleMap, commit.committer),
+      proposed: proposals.get(sha) || null,
+    };
+  });
+  rows.sort((a, b) => a.commit.author.ts - b.commit.author.ts);
+
+  let plan = null;
+  let written = null;
+  let scope = { rewrite: [], remoteOnly: [], remoteNames: [] };
+  if (proposals.size > 0) {
+    scope = publication(scopeRefs, planned, refs);
+    const { rewritten, exclude } = rewriteFrontier(graph, new Set(proposals.keys()));
+    const signed = signedCommits(graph.filter((c) => rewritten.has(c.sha)).map((c) => c.sha));
+    if (signed.length > 0) {
+      const listed = signed.slice(0, 5).map(short).join(', ') + (signed.length > 5 ? ', …' : '');
+      warnings.push(`${signed.length} signed commit(s) will lose their signature (they come after a planned commit): ${listed}`);
+    }
+    const commits = graph.filter((c) => proposals.has(c.sha)).map((c) => {
+      const p = proposals.get(c.sha);
+      return {
+        sha: c.sha,
+        subject: c.subject,
+        pulledIn: pulled.has(c.sha),
+        author: { old: rawDate(c.author), new: p.author ? rawDate(p.author) : null },
+        committer: { old: rawDate(c.committer), new: p.committer ? rawDate(p.committer) : null },
+        inversion: p.inversion,
+      };
+    });
+    plan = {
+      version: PLAN_VERSION,
+      createdAt: new Date().toISOString(),
+      now: new Date(nowTs * 1000).toISOString(),
+      repo: { toplevel: repo.toplevel, gitdir: repo.gitdir },
+      rule: opts.rule,
+      slot: opts.slot,
+      audited: label,
+      range: opts.range,
+      head: readHead(),
+      refs: Object.fromEntries([...refs.values()].map((r) => [r.ref, r.oid])),
+      rewrite: scope.rewrite,
+      exclude,
+      remoteOnly: scope.remoteOnly,
+      commits,
+      unresolved,
+      warnings,
+    };
+    written = writePlan(repo, plan, callbackSource(commits));
+  }
+  const push = pushCommands(scope.rewrite, scope.remoteNames);
+  const applyCommand = written ? `commit-hours-audit apply '${written.dir}'` : null;
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({
+      repo: repo.name,
+      ref: label,
+      rule: opts.rule,
+      slot: opts.slot,
+      now: new Date(nowTs * 1000).toISOString(),
+      total: audited.length,
+      violations: rows.map((r) => ({
+        sha: r.sha,
+        subject: r.commit.subject,
+        author: r.commit.author.iso,
+        committer: r.commit.committer.iso,
+        authorInside: r.authorBad,
+        committerInside: r.committerBad,
+        pulledIn: r.pulledIn,
+        proposed: r.proposed ? r.proposed.date.iso : null,
+        proposedAuthor: r.proposed && r.proposed.author ? r.proposed.author.iso : null,
+        proposedCommitter: r.proposed && r.proposed.committer ? r.proposed.committer.iso : null,
+      })),
+      rewriteRefs: scope.rewrite,
+      remoteOnlyRefs: scope.remoteOnly,
+      pushCommands: push,
+      planDir: written ? written.dir : null,
+      applyCommand,
+      warnings,
+    }, null, 2) + '\n');
+    return;
+  }
+
+  if (direct.length === 0) {
+    process.stdout.write(`✔ ${repo.name}: 0 commits inside the working-hours rule (${opts.rule}) across ${audited.length} commits.\n`);
+    return;
+  }
+
+  process.stdout.write(renderTable(rows) + '\n\n');
+  process.stdout.write(`${direct.length} of ${audited.length} commits fall inside the working-hours rule.\n`);
+  if (pulled.size > 0) process.stdout.write(`${pulled.size} more (marked *) come from other refs that are rewritten too.\n`);
+  if (scope.rewrite.length > 0) {
+    process.stdout.write('\nRefs to rewrite:\n');
+    for (const e of scope.rewrite) process.stdout.write(`  ${e.ref.padEnd(32)} ${short(e.oid)}  ${publishedLabel(e)}\n`);
+  }
+  if (scope.remoteOnly.length > 0) {
+    process.stdout.write('Remote-only refs holding planned commits (not rewritten):\n');
+    for (const e of scope.remoteOnly) process.stdout.write(`  ${e.ref}\n`);
+  }
+  if (warnings.length > 0) process.stdout.write('\n');
+  for (const w of warnings) process.stdout.write(`⚠ ${w}\n`);
+  if (written === null) {
+    process.stdout.write('\nNothing can be rewritten, so no plan was written.\n');
+    return;
+  }
+  if (written.removed.length > 0) process.stdout.write(`Removed legacy plan files: ${written.removed.join(', ')}\n`);
+  process.stdout.write(`\nPlan written to: ${written.dir}\n`);
+  process.stdout.write(`Review it, then apply with:\n  ${applyCommand}\n`);
+}
+
+// ---------------------------------------------------------------------------
+// apply
+// ---------------------------------------------------------------------------
+
+function requireFilterRepo() {
+  const res = git(['filter-repo', '--version']);
+  if (res.status !== 0) {
+    fail('git-filter-repo is required for apply. Install it with: uv tool install git-filter-repo (or pipx install git-filter-repo)');
+  }
+}
+
+function guardInProgress(gitdir) {
+  const markers = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG', 'rebase-merge', 'rebase-apply'];
+  const found = markers.filter((name) => fs.existsSync(path.join(gitdir, name)));
+  if (found.length > 0) fail(`a git operation is in progress (${found.join(', ')}); finish or abort it first`);
+}
+
+function guardCleanWorktree() {
+  const status = lines(gitOut(['status', '--porcelain=v1', '--untracked-files=no']));
+  if (status.length > 0) {
+    fail(`tracked files have uncommitted changes; commit or stash them yourself first ` +
+      `(git filter-repo ends with git reset --hard):\n  ${status.slice(0, 10).join('\n  ')}`);
+  }
+}
+
+function guardWorktrees(plan) {
+  const own = fs.realpathSync(plan.repo.toplevel);
+  const branches = new Set(plan.rewrite.filter((r) => r.kind === 'branch').map((r) => r.ref));
+  let wt = null;
+  for (const line of gitOut(['worktree', 'list', '--porcelain']).split('\n')) {
+    if (line.startsWith('worktree ')) wt = line.slice('worktree '.length);
+    else if (line.startsWith('branch ') && wt !== null) {
+      const branch = line.slice('branch '.length);
+      const elsewhere = !fs.existsSync(wt) || fs.realpathSync(wt) !== own;
+      if (elsewhere && branches.has(branch)) {
+        fail(`${branch} is checked out in another worktree (${wt}); check out another branch there first`);
+      }
+    }
+  }
+}
+
+function guardSnapshot(plan) {
+  const now = readRefs();
+  const changed = [];
+  const local = (ref) => ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/');
+  for (const [ref, oid] of Object.entries(plan.refs)) {
+    if (!local(ref)) continue;
+    const cur = now.get(ref);
+    if (cur === undefined) changed.push(`${ref} was deleted`);
+    else if (cur.oid !== oid) changed.push(`${ref} moved`);
+  }
+  for (const ref of now.keys()) if (local(ref) && !(ref in plan.refs)) changed.push(`${ref} is new`);
+  for (const entry of plan.rewrite) {
+    for (const p of entry.published || []) {
+      const cur = now.get(p.tracking);
+      if (cur === undefined || cur.oid !== p.oid) changed.push(`${p.tracking} moved`);
+    }
+  }
+  const head = readHead();
+  if (head.ref !== plan.head.ref || head.oid !== plan.head.oid) changed.push('HEAD moved');
+  if (changed.length > 0) fail(`the repository changed since the plan was written (${changed.join('; ')}); run a new audit`);
+}
+
+function forEachRefRaw() {
+  return gitOut(['for-each-ref', '--format=%(objectname) %(refname)']);
+}
+
+function readRefsFile(file) {
+  const map = new Map();
+  for (const line of lines(fs.readFileSync(file, 'utf8'))) {
+    const [oid, ref] = line.split(' ');
+    map.set(ref, oid);
+  }
+  return map;
+}
+
+// Puts every ref back where it was before the rewrite. Old objects are still in
+// the object store: filter-repo with --refs never expires reflogs nor runs gc.
+function restoreRefs(dir, plan) {
+  const before = readRefsFile(path.join(dir, 'refs-before.txt'));
+  const now = readRefs();
+  for (const [ref, oid] of before) {
+    const cur = now.get(ref);
+    if (cur === undefined || cur.oid !== oid) git(['update-ref', ref, oid]);
+  }
+  const head = readHead();
+  if (head.ref !== null && plan.rewrite.some((r) => r.ref === head.ref)) git(['reset', '--hard', '-q']);
+}
+
+function cmdApply(opts) {
+  const { plan, dir } = loadPlan(opts.planDir);
+  if (fs.existsSync(path.join(dir, 'applied.json'))) fail('this plan was already applied; run a new audit');
+  if (plan.commits.length === 0 || plan.rewrite.length === 0) fail('this plan has nothing to rewrite');
+  requireFilterRepo();
+  guardInProgress(plan.repo.gitdir);
+  guardCleanWorktree();
+  guardWorktrees(plan);
+  guardSnapshot(plan);
+
+  const bundle = path.join(dir, 'backup.bundle');
+  gitOut(['bundle', 'create', bundle, '--all'], 'git bundle create');
+  gitOut(['bundle', 'verify', bundle], 'git bundle verify');
+  fs.writeFileSync(path.join(dir, 'refs-before.txt'), forEachRefRaw());
+
+  // A previous filter-repo run would make this one a "continuation" (chained
+  // commit-map) or, after a day, stop at an interactive prompt.
+  const metadata = path.join(plan.repo.gitdir, 'filter-repo');
+  if (fs.existsSync(metadata)) fs.renameSync(metadata, path.join(dir, 'prior-filter-repo'));
+
+  let callback = fs.readFileSync(path.join(dir, 'callback.py'), 'utf8');
+  // Test-only fault injection: extra Python appended to the callback.
+  if (process.env.COMMIT_HOURS_AUDIT_TEST_EXTRA_CALLBACK) callback += `\n${process.env.COMMIT_HOURS_AUDIT_TEST_EXTRA_CALLBACK}\n`;
+  const args = [
+    'filter-repo', '--force', '--preserve-commit-encoding',
+    '--prune-empty', 'never', '--prune-degenerate', 'never',
+    '--refs', ...plan.rewrite.map((r) => r.ref), ...plan.exclude.map((sha) => `^${sha}`),
+    '--commit-callback', callback,
+  ];
+  const res = spawnSync('git', args, {
+    cwd: plan.repo.toplevel,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (res.error || res.status !== 0) {
+    restoreRefs(dir, plan);
+    const output = `${res.stdout || ''}${res.stderr || ''}`.trim().split('\n').slice(-10).join('\n');
+    fail(`git filter-repo failed; refs restored from the snapshot.\n${res.error ? res.error.message : output}`);
+  }
+  for (const file of ['commit-map', 'ref-map']) {
+    const src = path.join(metadata, file);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dir, file));
+  }
+
+  let report;
+  try {
+    report = verifyPlan(plan, dir);
+  } catch (err) {
+    restoreRefs(dir, plan);
+    fail(`verification could not run; refs restored from the snapshot.\n  ${err.message}`);
+  }
+  fs.writeFileSync(path.join(dir, 'verify-report.json'), JSON.stringify(report, null, 2) + '\n');
+  if (!report.ok) {
+    restoreRefs(dir, plan);
+    fail(`verification failed; refs restored from the snapshot.\n  ${report.errors.slice(0, 20).join('\n  ')}`);
+  }
+
+  const now = readRefs();
+  const changes = plan.rewrite.map((r) => ({ ref: r.ref, old: r.oid, new: now.get(r.ref).oid }));
+  fs.writeFileSync(path.join(dir, 'applied.json'), JSON.stringify({ appliedAt: new Date().toISOString(), refs: changes }, null, 2) + '\n');
+
+  const out = [];
+  out.push(`backup bundle: ${bundle}`);
+  out.push(`rewrote ${changes.length} ref(s):`);
+  for (const c of changes) out.push(`  ${c.ref.padEnd(32)} ${short(c.old)} -> ${short(c.new)}`);
+  out.push(verifySummary(report));
+  for (const w of report.warnings) out.push(`⚠ ${w}`);
+  const push = pushCommands(plan.rewrite, remotes());
+  if (push.length > 0) {
+    out.push('', 'Published history changed. Push only on purpose:');
+    for (const cmd of push) out.push(`  ${cmd}`);
+  }
+  out.push('', 'Old commit ids cited in tracked files can be updated with:', `  commit-hours-audit remap-docs '${dir}'`);
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+// ---------------------------------------------------------------------------
+// verify
+// ---------------------------------------------------------------------------
+
+function readObjects(ids) {
+  const unique = [...new Set(ids)];
+  const result = new Map();
+  if (unique.length === 0) return result;
+  const res = git(['cat-file', '--batch'], { input: unique.join('\n') + '\n', buffer: true });
+  if (res.status !== 0) fail(`git cat-file failed: ${String(res.stderr).trim()}`);
+  const out = res.stdout;
+  let pos = 0;
+  for (const id of unique) {
+    const nl = out.indexOf(0x0a, pos);
+    const header = out.toString('latin1', pos, nl).split(' ');
+    if (header[1] === 'missing') {
+      result.set(id, null);
+      pos = nl + 1;
+      continue;
+    }
+    const size = Number(header[2]);
+    result.set(id, { type: header[1], text: out.toString('latin1', nl + 1, nl + 1 + size) });
+    pos = nl + 1 + size + 1;
+  }
+  return result;
+}
+
+// Commit or tag object text -> headers (continuation lines folded) + message.
+function parseObject(text) {
+  const end = text.indexOf('\n\n');
+  const head = end === -1 ? text.replace(/\n$/, '') : text.slice(0, end);
+  const message = end === -1 ? '' : text.slice(end + 2);
+  const headers = [];
+  for (const line of head.split('\n')) {
+    if (line.startsWith(' ') && headers.length > 0) headers[headers.length - 1].value += `\n${line.slice(1)}`;
+    else {
+      const sp = line.indexOf(' ');
+      headers.push({ key: line.slice(0, sp), value: line.slice(sp + 1) });
+    }
+  }
+  return { headers, message };
+}
+
+function parseCommit(text) {
+  const { headers, message } = parseObject(text);
+  const all = (key) => headers.filter((h) => h.key === key).map((h) => h.value);
+  const ident = (value) => {
+    const m = /^(.*) (-?\d+ [+-]\d{4})$/.exec(value);
+    return { who: m[1], date: m[2] };
+  };
+  return {
+    tree: all('tree')[0],
+    parents: all('parent'),
+    author: ident(all('author')[0]),
+    committer: ident(all('committer')[0]),
+    other: headers.filter((h) => !['tree', 'parent', 'author', 'committer'].includes(h.key)),
+    message,
+  };
+}
+
+function readCommitMap(dir) {
+  const file = path.join(dir, 'commit-map');
+  if (!fs.existsSync(file)) fail(`no commit-map in ${dir}: this plan has not been applied`);
+  const map = new Map();
+  for (const line of lines(fs.readFileSync(file, 'utf8')).slice(1)) {
+    const [oldId, newId] = line.trim().split(/\s+/);
+    map.set(oldId, newId);
+  }
+  return map;
+}
+
+// Mirrors filter-repo's message rewrite: a 7..40 hex token that is a unique
+// prefix of a rewritten commit becomes the same-length prefix of its new id.
+function hashTranslator(oldIds, map) {
+  const index = new Map();
+  for (const id of oldIds) {
+    const key = id.slice(0, 7);
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(id);
+  }
+  return (token) => {
+    const candidates = (index.get(token.slice(0, 7)) || []).filter((id) => id.startsWith(token));
+    if (candidates.length !== 1) return token;
+    const next = map.get(candidates[0]);
+    return next === undefined || ZERO_ID.test(next) ? token : next.slice(0, token.length);
+  };
+}
+
+// The new message must equal the old one except hash tokens, each kept or
+// translated. Returns the translated tokens, or null when anything else changed.
+function compareMessages(oldMsg, newMsg, translate) {
+  if (oldMsg.length !== newMsg.length) return null;
+  const remapped = [];
+  let last = 0;
+  for (const m of oldMsg.matchAll(/\b[0-9a-f]{7,40}\b/g)) {
+    if (oldMsg.slice(last, m.index) !== newMsg.slice(last, m.index)) return null;
+    const got = newMsg.slice(m.index, m.index + m[0].length);
+    if (got !== m[0]) {
+      if (got !== translate(m[0])) return null;
+      remapped.push({ old: m[0], new: got });
+    }
+    last = m.index + m[0].length;
+  }
+  return oldMsg.slice(last) === newMsg.slice(last) ? remapped : null;
+}
+
+function ensureOldObjects(dir, tips) {
+  if (git(['rev-list', '--quiet', ...tips, '--']).status === 0) return;
+  gitOut(['bundle', 'unbundle', path.join(dir, 'backup.bundle')], 'git bundle unbundle');
+}
+
+function verifyPlan(plan, dir) {
+  const errors = [];
+  const warnings = [];
+  const remapped = [];
+  const dedup = [];
+  const map = readCommitMap(dir);
+  const ruleMap = parseRule(plan.rule);
+  const oldTips = plan.rewrite.map((r) => r.commit);
+  ensureOldObjects(dir, oldTips);
+  const olds = lines(gitOut(['rev-list', ...oldTips, '--']));
+  // Only commits below no frontier commit were exported; the others keep their id.
+  const exported = new Set(lines(gitOut(['rev-list', ...oldTips, ...plan.exclude.map((sha) => `^${sha}`), '--'])));
+  for (const o of olds) if (!exported.has(o) && !map.has(o)) map.set(o, o);
+  const planned = new Map(plan.commits.map((c) => [c.sha, c]));
+  for (const sha of planned.keys()) if (!exported.has(sha)) errors.push(`${short(sha)}: planned but not in the rewritten history`);
+
+  const owners = new Map();
+  for (const o of olds) {
+    const n = map.get(o);
+    if (n === undefined) errors.push(`${short(o)}: missing from commit-map`);
+    else if (ZERO_ID.test(n)) errors.push(`${short(o)}: pruned by the rewrite`);
+    else {
+      if (owners.has(n)) dedup.push({ old: [owners.get(n), o], new: n });
+      else owners.set(n, o);
+    }
+  }
+  const oldObjs = readObjects(olds);
+  const newObjs = readObjects([...owners.keys()]);
+  const translate = hashTranslator([...exported], map);
+  const oldCommits = new Map();
+  const newCommits = new Map();
+  let datesChanged = 0;
+
+  for (const o of olds) {
+    const n = map.get(o);
+    if (n === undefined || ZERO_ID.test(n)) continue;
+    const oldObj = oldObjs.get(o);
+    const newObj = newObjs.get(n);
+    if (!oldObj || !newObj) {
+      errors.push(`${short(o)}: commit object missing (${!oldObj ? 'old' : 'new'})`);
+      continue;
+    }
+    const oc = parseCommit(oldObj.text);
+    const nc = parseCommit(newObj.text);
+    oldCommits.set(o, oc);
+    newCommits.set(o, nc);
+    if (oc.tree !== nc.tree) errors.push(`${short(o)}: tree changed`);
+    const parents = oc.parents.map((p) => map.get(p) || p);
+    if (parents.join(' ') !== nc.parents.join(' ')) errors.push(`${short(o)}: parents are not the mapped original parents`);
+    let moved = false;
+    for (const f of FIELDS) {
+      if (oc[f].who !== nc[f].who) errors.push(`${short(o)}: ${f} identity changed`);
+      const p = planned.get(o);
+      const want = p && p[f].new !== null ? p[f].new : oc[f].date;
+      if (nc[f].date !== want) {
+        errors.push(`${short(o)}: ${f} date is ${nc[f].date}, expected ${want} (${p && p[f].new !== null ? 'planned' : 'unchanged'})`);
+      } else if (want !== oc[f].date) moved = true;
+    }
+    if (moved) datesChanged++;
+    const keep = (hs) => hs.filter((h) => !SIGNATURE_HEADERS.includes(h.key)).map((h) => `${h.key} ${h.value}`).join('\n');
+    if (keep(oc.other) !== keep(nc.other)) errors.push(`${short(o)}: commit headers changed`);
+    else if (oc.other.length !== nc.other.length) warnings.push(`${short(o)}: signature dropped by the rewrite`);
+    const tokens = compareMessages(oc.message, nc.message, translate);
+    if (tokens === null) errors.push(`${short(o)}: message changed beyond remapped commit ids`);
+    else for (const t of tokens) remapped.push({ commit: o, ...t });
+  }
+  for (const d of dedup) warnings.push(`${short(d.old[0])} and ${short(d.old[1])} became the same commit ${short(d.new)}`);
+
+  // Refs: rewritten ones point to the mapped commit, every other ref is untouched.
+  const beforeFile = path.join(dir, 'refs-before.txt');
+  const before = fs.existsSync(beforeFile) ? readRefsFile(beforeFile) : new Map(Object.entries(plan.refs));
+  const now = readRefs();
+  const rewrite = new Map(plan.rewrite.map((r) => [r.ref, r]));
+  const newTips = [];
+  for (const [ref, oid] of before) {
+    const cur = now.get(ref);
+    if (cur === undefined) {
+      errors.push(`${ref}: missing after the rewrite`);
+      continue;
+    }
+    const entry = rewrite.get(ref);
+    if (entry === undefined) {
+      if (cur.oid !== oid) errors.push(`${ref}: changed although it was not in the rewrite list`);
+      continue;
+    }
+    const expected = map.get(entry.commit) || entry.commit;
+    newTips.push(cur.commit || cur.oid);
+    if (cur.commit !== expected) errors.push(`${ref}: points to ${short(cur.commit || cur.oid)}, expected ${short(expected)}`);
+    if (entry.oid !== entry.commit) checkTag(ref, entry.oid, cur.oid, errors, warnings);
+  }
+
+  // Count: every reachable commit is the image of exactly one old commit (or a dedup).
+  if (newTips.length > 0) {
+    const reachable = Number(gitOut(['rev-list', '--count', ...newTips, '--']).trim());
+    if (reachable !== owners.size) errors.push(`commit count: ${reachable} reachable after the rewrite, ${owners.size} expected`);
+  }
+
+  // Re-audit and order, on the rewritten commits.
+  const excluded = excludedByRange(plan.range);
+  const leftOut = new Set([...plan.unresolved, ...excluded]);
+  const announced = new Set(plan.commits.filter((c) => c.inversion).map((c) => c.sha));
+  let violations = 0;
+  for (const [o, nc] of newCommits) {
+    const author = parseRaw(nc.author.date);
+    const committer = parseRaw(nc.committer.date);
+    if (!inside(ruleMap, author) && !inside(ruleMap, committer)) continue;
+    violations++;
+    const msg = `${short(map.get(o))} (was ${short(o)}) is still inside working hours`;
+    if (leftOut.has(o)) warnings.push(`${msg}; it was left out of the plan`);
+    else errors.push(msg);
+  }
+  for (const [o, oc] of oldCommits) {
+    for (const p of oc.parents) {
+      if (!oldCommits.has(p)) continue;
+      for (const f of FIELDS) {
+        const ts = (c) => Number(c[f].date.split(' ')[0]);
+        const was = ts(oc) < ts(oldCommits.get(p));
+        const is = ts(newCommits.get(o)) < ts(newCommits.get(p));
+        if (!is || was) continue;
+        const msg = `${short(o)}: ${f} date now precedes its parent ${short(p)}`;
+        if (announced.has(o) || announced.has(p)) warnings.push(`${msg} (announced in the plan)`);
+        else errors.push(msg);
+      }
+    }
+  }
+
+  return { ok: errors.length === 0, checked: newCommits.size, datesChanged, violations, remapped, dedup, errors, warnings };
+}
+
+function checkTag(ref, oldOid, newOid, errors, warnings) {
+  const objs = readObjects([oldOid, newOid]);
+  const oldTag = objs.get(oldOid);
+  const newTag = objs.get(newOid);
+  if (!oldTag || !newTag || newTag.type !== 'tag') {
+    errors.push(`${ref}: annotated tag lost`);
+    return;
+  }
+  const strip = (text) => {
+    const { headers, message } = parseObject(text);
+    const body = message.replace(/-----BEGIN (PGP|SSH) SIGNATURE-----[\s\S]*$/, '');
+    return { rest: headers.filter((h) => h.key !== 'object').map((h) => `${h.key} ${h.value}`).join('\n') + '\n\n' + body, signed: body !== message };
+  };
+  const a = strip(oldTag.text);
+  const b = strip(newTag.text);
+  if (a.rest !== b.rest) errors.push(`${ref}: tag fields or message changed`);
+  else if (a.signed && !b.signed) warnings.push(`${ref}: tag signature dropped by the rewrite`);
+}
+
+function verifySummary(report) {
+  if (!report.ok) return 'verify: FAILED';
+  return `verify: OK (${report.checked} commits checked, ${report.datesChanged} with planned dates, ` +
+    `${report.remapped.length} commit ids remapped in messages, ${report.violations} still inside working hours)`;
+}
+
+function cmdVerify(opts) {
+  const { plan, dir } = loadPlan(opts.planDir);
+  const report = verifyPlan(plan, dir);
+  if (opts.json) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+  else {
+    const out = [verifySummary(report)];
+    for (const e of report.errors) out.push(`✖ ${e}`);
+    for (const w of report.warnings) out.push(`⚠ ${w}`);
+    process.stdout.write(out.join('\n') + '\n');
+  }
+  if (!report.ok) process.exitCode = 1;
+}
+
+// ---------------------------------------------------------------------------
+// remap-docs
+// ---------------------------------------------------------------------------
+
+const SKIP_PATHS = [
+  /(^|\/)(fixtures?|testdata|__snapshots__|snapshots)\//,
+  /\.snap$/,
+  /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|Pipfile\.lock|composer\.lock|Gemfile\.lock|flake\.lock|mix\.lock)$/,
+];
+
+// old -> newest id across every applied plan of this repository, in order.
+function chainedMap(plan) {
+  const root = path.join(plan.repo.gitdir, PLAN_ROOT);
+  const dirs = fs.readdirSync(root)
+    .filter((name) => fs.existsSync(path.join(root, name, 'applied.json')) && fs.existsSync(path.join(root, name, 'commit-map')))
+    .sort();
+  const chain = new Map();
+  for (const name of dirs) {
+    const map = readCommitMap(path.join(root, name));
+    for (const [k, v] of chain) if (map.has(v)) chain.set(k, map.get(v));
+    for (const [o, n] of map) if (!chain.has(o) && o !== n && !ZERO_ID.test(n)) chain.set(o, n);
+  }
+  for (const [k, v] of chain) if (k === v || ZERO_ID.test(v)) chain.delete(k);
+  return chain;
+}
+
+function isWordChar(ch) {
+  return ch !== undefined && /\w/.test(ch);
+}
+
+function cmdRemapDocs(opts) {
+  const { plan, dir } = loadPlan(opts.planDir);
+  readCommitMap(dir);
+  const chain = chainedMap(plan);
+  const oldIds = [...chain.keys()];
+  const newIds = [...chain.values()];
+  const resolve = (token) => {
+    const hits = oldIds.filter((id) => id.startsWith(token));
+    if (hits.length !== 1 || newIds.some((id) => id.startsWith(token))) return null;
+    return chain.get(hits[0]).slice(0, token.length);
+  };
+  const grep = git(['grep', '-l', '-I', '--full-name', '-E', '[0-9a-f]{7,40}']);
+  if (grep.status > 1) fail(`git grep failed: ${grep.stderr.trim()}`);
+  const replacements = [];
+  const skipped = [];
+  const edits = new Map();
+  for (const file of lines(grep.stdout)) {
+    const full = path.join(plan.repo.toplevel, file);
+    if (!fs.existsSync(full)) continue;
+    const text = fs.readFileSync(full, 'latin1');
+    const fixture = SKIP_PATHS.some((re) => re.test(file));
+    const lineAt = (index) => text.slice(0, index).split('\n').length;
+    for (const m of text.matchAll(/[0-9a-f]{7,40}/g)) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (isWordChar(text[start - 1]) || isWordChar(text[end])) continue;
+      const next = resolve(m[0]);
+      if (next === null) continue;
+      const where = { file, line: lineAt(start) };
+      const prev = text[start - 1];
+      const after = text[end];
+      if (fixture) skipped.push({ ...where, token: m[0], reason: 'fixture or lockfile' });
+      else if ('-_.'.includes(prev || ' ') || ('-_.'.includes(after || ' ') && isWordChar(text[end + 1]))) {
+        skipped.push({ ...where, token: m[0], reason: 'embedded in a name' });
+      } else {
+        replacements.push({ ...where, old: m[0], new: next });
+        if (!edits.has(full)) edits.set(full, { text, spots: [] });
+        edits.get(full).spots.push({ start, end, value: next });
+      }
+    }
+  }
+  if (opts.write) {
+    for (const [full, { text, spots }] of edits) {
+      let out = text;
+      for (const s of [...spots].sort((a, b) => b.start - a.start)) out = out.slice(0, s.start) + s.value + out.slice(s.end);
+      fs.writeFileSync(full, out, 'latin1');
+    }
+  }
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ replacements, skipped, written: Boolean(opts.write) }, null, 2) + '\n');
+    return;
+  }
+  const out = [];
+  const files = new Set(replacements.map((r) => r.file)).size;
+  out.push(`${opts.write ? 'wrote' : 'would replace'} ${replacements.length} commit id(s) in ${files} file(s)${opts.write ? '' : ' (preview; nothing written)'}`);
+  for (const r of replacements) out.push(`  ${r.file}:${r.line}  ${r.old} -> ${r.new}`);
+  if (skipped.length > 0) {
+    out.push('skipped:');
+    for (const s of skipped) out.push(`  ${s.file}:${s.line}  ${s.token}  ${s.reason}`);
+  }
+  if (!opts.write && replacements.length > 0) out.push(`Write them with:\n  commit-hours-audit remap-docs '${dir}' --write`);
+  if (opts.write && replacements.length > 0) out.push('Nothing was committed. Review with git diff and commit outside working hours.');
+  process.stdout.write(out.join('\n') + '\n');
 }
 
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
+const COMMANDS = new Set(['apply', 'verify', 'remap-docs']);
+
 function parseArgs(argv) {
-  const opts = { ref: 'HEAD', range: null, rule: DEFAULT_RULE, slot: 'evening', json: false, help: false, allowFuture: false };
-  for (let i = 0; i < argv.length; i++) {
+  const opts = {
+    command: 'audit', planDir: null, ref: 'HEAD', refGiven: false, range: null, all: false,
+    rule: DEFAULT_RULE, slot: 'evening', json: false, help: false, allowFuture: false, write: false,
+  };
+  let i = 0;
+  if (argv.length > 0 && COMMANDS.has(argv[0])) {
+    opts.command = argv[0];
+    i = 1;
+  }
+  for (; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') opts.json = true;
     else if (a === '--help' || a === '-h') opts.help = true;
     else if (a === '--allow-future') opts.allowFuture = true;
-    else if (a === '--ref') { const v = argv[++i]; if (v === undefined) fail('--ref requires a value'); opts.ref = v; }
+    else if (a === '--all') opts.all = true;
+    else if (a === '--write') opts.write = true;
+    else if (a === '--ref') { const v = argv[++i]; if (v === undefined) fail('--ref requires a value'); opts.ref = v; opts.refGiven = true; }
     else if (a === '--range') { const v = argv[++i]; if (v === undefined) fail('--range requires a value'); opts.range = v; }
     else if (a === '--rule') { const v = argv[++i]; if (v === undefined) fail('--rule requires a value'); opts.rule = v; }
     else if (a === '--slot') {
       const v = argv[++i];
       if (v !== 'evening' && v !== 'morning') fail('--slot must be evening or morning');
       opts.slot = v;
-    } else fail(`unknown argument: ${a} (try --help)`);
+    } else if (opts.command !== 'audit' && opts.planDir === null && !a.startsWith('-')) opts.planDir = a;
+    else fail(`unknown argument: ${a} (try --help)`);
   }
+  if (opts.all && (opts.refGiven || opts.range)) fail('--all cannot be combined with --ref or --range');
+  if (opts.write && opts.command !== 'remap-docs') fail('--write only applies to remap-docs');
   return opts;
 }
 
 function printHelp() {
-  process.stdout.write(`commit-hours-audit — report commits made inside your working hours and preview their date rewrite
+  process.stdout.write(`commit-hours-audit — report commits made inside your working hours and move them out safely
 
 Usage:
-  commit-hours-audit [options]
+  commit-hours-audit [options]                audit and write a plan (never rewrites)
+  commit-hours-audit apply <plan-dir>         rewrite the planned refs (needs git-filter-repo)
+  commit-hours-audit verify <plan-dir>        check an applied plan commit by commit
+  commit-hours-audit remap-docs <plan-dir>    preview old->new commit ids cited in tracked files
 
 Options:
   --ref <ref>        Ref to audit (default: HEAD, full history).
   --range <a..b>     Audit only a commit range instead of a full ref.
+  --all              Audit every local branch and tag (except refs/tags/backup/*).
   --rule <spec>      Working-hours rule (default: ${DEFAULT_RULE}).
                      Format: DOW[-DOW]:HH:MM-HH:MM,... with DOW 1=Mon..7=Sun.
   --slot <s>         Preferred target slot: evening (default) or morning.
   --allow-future     Allow proposals dated after "now" (default: keep them past).
-  --json             Machine-readable output.
+  --write            remap-docs only: write the replacements (never commits).
+  --json             Machine-readable output (audit, verify, remap-docs).
   --help, -h         Show this help.
 
 A commit violates the rule when its AUTHOR or COMMITTER timestamp is inside a
-working-hours window. Proposals stay in the preferred slot; when that slot of
-the commit's own day is still in the future, the date moves back day by day
-until the slot is in the past (default slot: evening, never the small hours).
+working-hours window. Only the violating date moves. Proposals stay in the
+preferred slot; when that slot of the commit's own day is still in the future,
+the date moves back day by day until the slot is in the past (default slot:
+evening, never the small hours). Each new date stays between its parents' and
+its descendants' dates; when the slot makes that impossible, the plan says so.
+
+The plan rewrites every local branch and tag that contains a planned commit
+(never remote-tracking refs or refs/tags/backup/*), keyed by commit id. apply
+refuses on uncommitted tracked changes, a git operation in progress, a
+rewritten branch checked out in another worktree, or refs that moved since the
+plan; it writes a full bundle backup first, verifies every commit, and restores
+the refs if verification fails. Push commands are printed, never run.
+
+Environment:
+  COMMIT_HOURS_AUDIT_NOW   Treat this ISO date as "now" (reproducible runs).
 
 Exit codes:
-  0  success (0 or more violations)
-  1  not a git repository or invalid usage
+  0  success (0 or more violations; verify passed)
+  1  not a git repository, invalid usage, apply refused or failed, verify failed
 `);
 }
 
 function main() {
-  const opts = parseArgs(process.argv.slice(2));
-  if (opts.help) return printHelp();
-
-  const top = git(['rev-parse', '--show-toplevel']);
-  if (top.status !== 0) fail('not inside a git repository');
-  const toplevel = top.stdout.trim();
-  const gitdirRes = git(['rev-parse', '--absolute-git-dir']);
-  const gitdir = gitdirRes.stdout.trim();
-
-  const ruleMap = parseRule(opts.rule);
-  const commits = collect(opts.ref, opts.range);
-  if (commits.length === 0) fail('no commits found for the requested ref/range');
-
-  const nowTs = Math.floor(Date.now() / 1000);
-  const violations = commits.filter((c) => inside(ruleMap, c.author) || inside(ruleMap, c.committer));
-  const { proposals, warnings } = buildProposals(violations, ruleMap, opts.slot, nowTs);
-
-  if (!opts.allowFuture) {
-    for (const [, p] of proposals) {
-      const ts = Math.floor(Date.UTC(p.y, p.mo - 1, p.d, Math.floor(p.minutes / 60), p.minutes % 60, 0) / 1000);
-      if (ts > nowTs) warnings.push(`proposal ${p.iso} is after "now"; use --allow-future to keep it`);
-    }
+  try {
+    const opts = parseArgs(process.argv.slice(2));
+    if (opts.help) return printHelp();
+    if (opts.command === 'apply') return cmdApply(opts);
+    if (opts.command === 'verify') return cmdVerify(opts);
+    if (opts.command === 'remap-docs') return cmdRemapDocs(opts);
+    return cmdAudit(opts);
+  } catch (err) {
+    if (!(err instanceof CliError)) throw err;
+    process.stderr.write(`commit-hours-audit: ${err.message}\n`);
+    process.exitCode = err.exitCode;
   }
-
-  const rows = violations.map((c) => ({
-    commit: c,
-    sha: c.sha,
-    marks: '',
-    authorBad: inside(ruleMap, c.author),
-    committerBad: inside(ruleMap, c.committer),
-    proposed: proposals.get(c.sha) || null,
-  }));
-  rows.sort((a, b) => a.commit.author.ts - b.commit.author.ts);
-
-  let plan = null;
-  if (violations.length > 0) {
-    const oldest = violations[0];
-    const base = oldest.parents.length > 0 ? oldest.parents[0] : null;
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-    const headExpr = opts.range ? opts.range.split('..').pop() : opts.ref;
-    const resolved = git(['rev-parse', headExpr]);
-    const auditedHead = resolved.status === 0 ? resolved.stdout.trim() : commits[commits.length - 1].sha;
-    plan = writePlan(toplevel, gitdir, commits, proposals, base, stamp, auditedHead);
-    if (base !== null) {
-      const parentCommit = commits.find((c) => c.sha === base);
-      const oldestProposal = proposals.get(oldest.sha);
-      if (parentCommit !== undefined && oldestProposal !== undefined) {
-        const ts = Math.floor(Date.UTC(oldestProposal.y, oldestProposal.mo - 1, oldestProposal.d, Math.floor(oldestProposal.minutes / 60), oldestProposal.minutes % 60, 0) / 1000) - oldest.author.offMin * 60;
-        if (ts < parentCommit.committer.ts) {
-          warnings.push(
-            `out-of-order risk: the oldest rewritten commit would be dated before its parent ` +
-            `(${parentCommit.sha.slice(0, 7)} @ ${parentCommit.committer.iso})`
-          );
-        }
-      }
-    }
-  }
-
-  const repo = path.basename(toplevel);
-  if (opts.json) {
-    process.stdout.write(
-      JSON.stringify(
-        {
-          repo,
-          ref: opts.range || opts.ref,
-          rule: opts.rule,
-          slot: opts.slot,
-          now: new Date(nowTs * 1000).toISOString(),
-          total: commits.length,
-          violations: rows.map((r) => ({
-            sha: r.sha,
-            subject: r.commit.subject,
-            author: r.commit.author.iso,
-            committer: r.commit.committer.iso,
-            authorInside: r.authorBad,
-            committerInside: r.committerBad,
-            proposed: r.proposed ? r.proposed.iso : null,
-          })),
-          planDir: plan ? plan.dir : null,
-          applyCommand: plan ? plan.applyPath : null,
-          warnings,
-        },
-        null,
-        2
-      ) + '\n'
-    );
-    return;
-  }
-
-  if (violations.length === 0) {
-    process.stdout.write(`✔ ${repo}: 0 commits inside the working-hours rule (${opts.rule}) across ${commits.length} commits.\n`);
-    return;
-  }
-
-  process.stdout.write(renderTable(rows, commits, commits.length) + '\n\n');
-  process.stdout.write(`${violations.length} of ${commits.length} commits fall inside the working-hours rule.\n`);
-  for (const w of warnings) process.stdout.write(`⚠ ${w}\n`);
-  process.stdout.write(`\nPlan written to: ${plan.dir}\n`);
-  process.stdout.write(`Review it, then apply with:\n  bash '${plan.applyPath}'\n`);
+  return undefined;
 }
 
 main();

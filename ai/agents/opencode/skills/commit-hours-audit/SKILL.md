@@ -1,10 +1,10 @@
 ---
 name: commit-hours-audit
-description: "Trigger: commits en horario laboral, fuera de horario laboral, auditar fechas de commits, reescribir fechas de commits, commit dates, working hours, madrugada, tarde noche. Find commits made inside the user's working hours and preview/apply the date rewrite that moves them out."
+description: "Trigger: commits en horario laboral, fuera de horario laboral, auditar fechas de commits, reescribir fechas de commits, commit dates, working hours, madrugada, tarde noche. Find commits made inside the user's working hours and preview/apply/verify the date rewrite that moves them out."
 license: Apache-2.0
 metadata:
   author: "bruno"
-  version: "1.0"
+  version: "2.0"
 ---
 
 # commit-hours-audit
@@ -17,12 +17,17 @@ Default rule: **Mon–Thu 09:00–19:00, Fri 08:00–16:00**. Days with no rule 
 
 ## Hard Rules
 
-- A commit violates when its **author OR committer** timestamp is inside a window. Weekends are outside working hours, so a weekend commit is NOT a violation.
-- The CLI is **preview-first**: it never rewrites. It writes a plan into `<gitdir>/commit-hours-audit/` and prints the apply command. Apply only after an explicit confirmation.
-- Preferred slot is **evening, never the small hours** (madrugada). When the evening of the commit's own day is still in the future, the proposal moves back day by day until the slot is past — it does not fall back to 02:00–09:00 unless asked (`--slot morning`).
+- A commit violates when its **author OR committer** timestamp is inside a window. Weekends have no window.
+- Preview-first: the audit never moves refs. It writes `plan.json`, `callback.py` and a ref snapshot into `<gitdir>/commit-hours-audit/<stamp>/`. Apply only after explicit confirmation of that exact plan.
+- Commits are identified by **full commit id**, never by timestamp.
+- Only the violating field moves. Proposals stay in the preferred slot (evening by default, never the small hours) AND keep dates monotonic: new date ≥ every parent, ≤ every child that keeps its date. When that is impossible inside the slot, the plan names the commit and the inversion; never hide it.
+- Rewrite scope = every local branch and tag that contains a planned commit. Never rewrite `refs/remotes/*`, `refs/stash`, `refs/tags/backup/*`. Show the ref list, which refs are published, and the violators pulled in from those refs before asking for confirmation.
+- Apply engine: `git filter-repo --force --refs <list> ^<frontier>… --commit-callback` keyed by `commit.original_id`, so history before the first planned commit keeps its ids and signatures. **Never use `git rebase` for this**: it drops merges and resets every replayed committer date to "now". If git-filter-repo is missing, stop and say so.
+- Apply refuses on: uncommitted tracked changes, a git operation in progress, a rewritten branch checked out in another worktree, any ref differing from the plan snapshot. Never auto-stash.
+- Apply writes and verifies `git bundle create --all` first, and archives any previous `.git/filter-repo/` (filter-repo would chain its maps or stop at a prompt).
+- Success = `commit-hours-audit verify` passes per commit against the pre-rewrite history (tree, mapped parents, identities, dates only where planned, messages except remapped ids, refs, count) AND the re-audit of every rewritten commit reports 0. Tip-tree equality is **NOT** proof.
 - **Never call a timestamp "future" or "past" without checking the real clock** (`date`). Session time markers are not the system date.
-- Applying always creates a backup tag `backup/pre-datefix-<stamp>` first (`apply.sh` does it). After applying, verify: re-run the audit (expect 0 violations) AND `git rev-parse HEAD^{tree}` must equal the value taken before.
-- Rewriting published history requires a force-push; that is the human's decision. If the push is rejected for `workflow` scope (workflow files), push over the SSH alias of the CORRECT GitHub account — never weaken the token.
+- Rewriting published history requires a force-push; that is the human's decision. Print the `--force-with-lease=<ref>:<old-sha>` commands, never run them. If a push is rejected for `workflow` scope, push over the SSH alias of the CORRECT GitHub account — never weaken the token.
 - The rule is configurable; never silently narrow or widen it. State the rule used.
 
 ## Decision Gates
@@ -34,23 +39,29 @@ Default rule: **Mon–Thu 09:00–19:00, Fri 08:00–16:00**. Days with no rule 
 | User explicitly wants same-day early morning | `--slot morning` |
 | Only part of the history matters | `--range <base>..HEAD` |
 | Another ref (e.g. the remote) | `--ref origin/main` |
+| Every local branch and tag | `--all` |
+| Plan warns "cannot keep commit order" | Show it; the user decides (other slot, `--range`, or accept the inversion) |
+| Signed commits will lose their signature | Show the warning; the user decides |
+| Tracked files cite old commit ids after apply | `commit-hours-audit remap-docs <plan-dir>` (preview), `--write` only on request |
 | Machine-readable hand-off | `--json` |
 
 ## Execution Steps
 
-1. Run the audit from the target repo: `commit-hours-audit` (defaults: `--ref HEAD`, default rule).
-2. If it reports 0 violations, report clean and stop. Also check the remote the user cares about: `commit-hours-audit --ref origin/main`.
-3. If there are violations, present a compact table: SHA, actual date/time, proposed date/time, subject — plus every warning. State the rule and the slot used.
+1. Check `date`, then run the audit from the target repo: `commit-hours-audit [--ref <ref> | --all]`.
+2. 0 violations: report clean (also check the remote-tracking ref the user cares about, e.g. `--ref origin/main`) and stop.
+3. Present: rule and slot; table (id, field, actual, proposed, subject); refs to rewrite with their published flag; violators pulled in from other refs (`*`); remote-only refs; every warning (inversions, moved-back days, signed commits).
 4. Ask for explicit confirmation. Do NOT apply, force-push, or tag without it.
-5. On confirmation, apply: `bash <gitdir>/commit-hours-audit/apply.sh`.
-6. Verify: re-run the audit (expect 0) and compare `git rev-parse HEAD^{tree}` with the recorded value. Report both.
-7. If the branch is published, say plainly that a force-push is required and that hashes change; push only on explicit request.
+5. Apply: `commit-hours-audit apply <plan-dir>` (guards → bundle → filter-repo → verify; refs are restored automatically if verification fails).
+6. Report the verify line and the re-audit. On failure report the errors as printed; do not retry.
+7. If tracked files cite old ids, offer `commit-hours-audit remap-docs <plan-dir>` (preview; `--write` only on request; it never commits — any follow-up commit must itself be outside working hours).
+8. Print the push commands for published refs; push only on explicit request.
 
 ## Output Contract
 
-Return: rule used, ref audited, violations count, the proposal table, warnings (date shift / out-of-order risk), plan path, apply command, and the post-apply verification (violations = 0 and tree hash unchanged).
+Return: rule used, ref audited, violations count, the proposal table, refs to rewrite (published or not), warnings, plan path, apply command; after apply: rewritten refs (old → new), the verify line, the re-audit result, bundle path, push commands.
 
 ## References
 
-- `bin/commit-hours-audit` — the CLI (Node, zero deps, on PATH via `~/.local/bin`).
-- Requires `git` and Node >= 18.
+- `bin/commit-hours-audit` — the CLI (Node, zero npm deps, on PATH via `~/.local/bin`). `--help` documents every subcommand.
+- `test/commit-hours-audit.test.js` — behavior tests: `node --test ai/agents/opencode/skills/commit-hours-audit/test/`.
+- Requires `git` and Node >= 18; `apply` requires **git-filter-repo** (`uv tool install git-filter-repo`, tested with 2.47.0).
