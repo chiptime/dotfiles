@@ -545,6 +545,22 @@ test('verify counts rewritten commits only and lists what --range left out', () 
   assert.ok(report.leftOut.every((l) => l.reason === 'outside --range'));
 });
 
+test('a commit with no past slot keeps its dates and is listed as left out', () => {
+  const { repo, shas } = smallRepo('left-out', [
+    ['root', '2026-10-04T20:00:00+02:00'],
+    ['v', '2026-10-05T10:00:00+02:00'],
+    ['future', '2027-01-05T10:00:00+01:00'],
+  ]);
+  const dates = rawDates(repo, shas[2]);
+  const { json, dir } = planOf(repo);
+  assert.ok(json.warnings.some((w) => /could not find a past evening slot/.test(w)), json.warnings.join('\n'));
+  assert.equal(cli(repo, ['apply', dir]).status, 0);
+  assert.deepEqual(rawDates(repo, 'main'), dates, 'dates unchanged');
+  assert.notEqual(git(repo, 'rev-parse', 'main'), shas[2], 'its id changes because its parent was rewritten');
+  const report = cliJson(repo, ['verify', dir]);
+  assert.deepEqual(report.leftOut, [{ commit: shas[2], reason: 'no past slot' }]);
+});
+
 test('apply warns when a detached HEAD stays on rewritten history', () => {
   const repo = freshRepo();
   git(repo, 'checkout', '-q', '--detach', 'main~1');
