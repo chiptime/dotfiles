@@ -186,12 +186,24 @@ function openRepo() {
 function readRefs() {
   const format = '--format=%(refname)%09%(objectname)%09%(objecttype)%09%(*objectname)%09%(*objecttype)';
   const refs = new Map();
+  const nested = [];
   for (const line of lines(gitOut(['for-each-ref', format]))) {
     const [ref, oid, type, peeled, peeledType] = line.split('\t');
     let commit = null;
     if (type === 'commit') commit = oid;
     else if (type === 'tag' && peeledType === 'commit') commit = peeled;
     refs.set(ref, { ref, oid, type, commit });
+    if (type === 'tag' && peeledType === 'tag') nested.push(refs.get(ref));
+  }
+  // for-each-ref peels one level only; a tag of a tag needs a full peel.
+  if (nested.length > 0) {
+    const input = nested.map((r) => `${r.oid}^{commit}`).join('\n') + '\n';
+    const res = git(['cat-file', '--batch-check=%(objectname) %(objecttype)'], { input });
+    if (res.status !== 0) fail(`git cat-file failed: ${res.stderr.trim()}`);
+    lines(res.stdout).forEach((line, i) => {
+      const [oid, type] = line.split(' ');
+      if (type === 'commit') nested[i].commit = oid;
+    });
   }
   return refs;
 }
@@ -448,10 +460,12 @@ function remotes() {
 }
 
 // Which rewritten branches are published (a remote-tracking ref already holds
-// planned commits) and which remote-tracking refs hold them with no local
+// planned commits) and which remote-tracking refs hold violators with no local
 // branch to rewrite. The CLI never contacts a remote: tags report null.
-function publication(scopeRefs, planned, refs) {
-  const hits = new Set(refsContaining([...planned], ['refs/remotes']).filter((ref) => !ref.endsWith('/HEAD')));
+function publication(scopeRefs, planned, violators, refs) {
+  const remoteRefs = (shas) => new Set(refsContaining(shas, ['refs/remotes']).filter((ref) => !ref.endsWith('/HEAD')));
+  const hits = remoteRefs([...planned]);
+  const holding = remoteRefs([...violators]);
   const upstreams = new Map(lines(gitOut(['for-each-ref', '--format=%(refname)%09%(upstream)', 'refs/heads']))
     .map((line) => line.split('\t')));
   const names = remotes();
@@ -476,7 +490,7 @@ function publication(scopeRefs, planned, refs) {
     }
     return entry;
   });
-  const remoteOnly = [...hits].filter((t) => !claimed.has(t)).sort().map((t) => ({ ref: t, oid: refs.get(t).oid }));
+  const remoteOnly = [...holding].filter((t) => !claimed.has(t)).sort().map((t) => ({ ref: t, oid: refs.get(t).oid }));
   return { rewrite, remoteOnly, remoteNames: names };
 }
 
@@ -652,8 +666,8 @@ function cmdAudit(opts) {
   let plan = null;
   let written = null;
   let scope = { rewrite: [], remoteOnly: [], remoteNames: [] };
+  if (wanted.size > 0) scope = publication(proposals.size > 0 ? scopeRefs : [], planned, wanted, refs);
   if (proposals.size > 0) {
-    scope = publication(scopeRefs, planned, refs);
     const { rewritten, exclude } = rewriteFrontier(graph, new Set(proposals.keys()));
     const signed = signedCommits(graph.filter((c) => rewritten.has(c.sha)).map((c) => c.sha));
     if (signed.length > 0) {
@@ -792,23 +806,17 @@ function guardWorktrees(plan) {
   }
 }
 
+// Any ref that moved, appeared or vanished (remote-tracking ones included) can
+// make the scope or the publication report stale: the plan must be redone.
 function guardSnapshot(plan) {
   const now = readRefs();
   const changed = [];
-  const local = (ref) => ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/');
   for (const [ref, oid] of Object.entries(plan.refs)) {
-    if (!local(ref)) continue;
     const cur = now.get(ref);
     if (cur === undefined) changed.push(`${ref} was deleted`);
     else if (cur.oid !== oid) changed.push(`${ref} moved`);
   }
-  for (const ref of now.keys()) if (local(ref) && !(ref in plan.refs)) changed.push(`${ref} is new`);
-  for (const entry of plan.rewrite) {
-    for (const p of entry.published || []) {
-      const cur = now.get(p.tracking);
-      if (cur === undefined || cur.oid !== p.oid) changed.push(`${p.tracking} moved`);
-    }
-  }
+  for (const ref of now.keys()) if (!(ref in plan.refs)) changed.push(`${ref} is new`);
   const head = readHead();
   if (head.ref !== plan.head.ref || head.oid !== plan.head.oid) changed.push('HEAD moved');
   if (changed.length > 0) fail(`the repository changed since the plan was written (${changed.join('; ')}); run a new audit`);
@@ -908,6 +916,11 @@ function cmdApply(opts) {
   for (const c of changes) out.push(`  ${c.ref.padEnd(32)} ${short(c.old)} -> ${short(c.new)}`);
   out.push(verifySummary(report));
   for (const w of report.warnings) out.push(`⚠ ${w}`);
+  const head = readHead();
+  const headMap = readCommitMap(dir);
+  if (head.ref === null && head.oid && headMap.has(head.oid) && headMap.get(head.oid) !== head.oid) {
+    out.push(`⚠ HEAD is detached at ${short(head.oid)}, which was rewritten to ${short(headMap.get(head.oid))}; check out a rewritten branch`);
+  }
   const push = pushCommands(plan.rewrite, remotes());
   if (push.length > 0) {
     out.push('', 'Published history changed. Push only on purpose:');
@@ -1125,19 +1138,27 @@ function verifyPlan(plan, dir) {
     if (reachable !== owners.size) errors.push(`commit count: ${reachable} reachable after the rewrite, ${owners.size} expected`);
   }
 
-  // Re-audit and order, on the rewritten commits.
+  // Re-audit: nothing may stay inside working hours except what the plan left
+  // out on purpose (outside --range, or no past slot), which is listed apart.
   const excluded = excludedByRange(plan.range);
-  const leftOut = new Set([...plan.unresolved, ...excluded]);
+  const unresolved = new Set(plan.unresolved);
   const announced = new Set(plan.commits.filter((c) => c.inversion).map((c) => c.sha));
+  const leftOut = [];
   let violations = 0;
   for (const [o, nc] of newCommits) {
     const author = parseRaw(nc.author.date);
     const committer = parseRaw(nc.committer.date);
     if (!inside(ruleMap, author) && !inside(ruleMap, committer)) continue;
-    violations++;
-    const msg = `${short(map.get(o))} (was ${short(o)}) is still inside working hours`;
-    if (leftOut.has(o)) warnings.push(`${msg}; it was left out of the plan`);
-    else errors.push(msg);
+    if (excluded.has(o)) leftOut.push({ commit: o, reason: 'outside --range' });
+    else if (unresolved.has(o)) leftOut.push({ commit: o, reason: 'no past slot' });
+    else {
+      violations++;
+      errors.push(`${short(map.get(o))} (was ${short(o)}) is still inside working hours`);
+    }
+  }
+  if (leftOut.length > 0) {
+    const reasons = [...new Set(leftOut.map((l) => l.reason))].map((r) => `${leftOut.filter((l) => l.reason === r).length} ${r}`);
+    warnings.push(`${leftOut.length} commit(s) left out of the plan stay inside working hours (${reasons.join(', ')})`);
   }
   for (const [o, oc] of oldCommits) {
     for (const p of oc.parents) {
@@ -1154,7 +1175,7 @@ function verifyPlan(plan, dir) {
     }
   }
 
-  return { ok: errors.length === 0, checked: newCommits.size, datesChanged, violations, remapped, dedup, errors, warnings };
+  return { ok: errors.length === 0, checked: newCommits.size, datesChanged, violations, leftOut, remapped, dedup, errors, warnings };
 }
 
 function checkTag(ref, oldOid, newOid, errors, warnings) {
@@ -1179,7 +1200,8 @@ function checkTag(ref, oldOid, newOid, errors, warnings) {
 function verifySummary(report) {
   if (!report.ok) return 'verify: FAILED';
   return `verify: OK (${report.checked} commits checked, ${report.datesChanged} with planned dates, ` +
-    `${report.remapped.length} commit ids remapped in messages, ${report.violations} still inside working hours)`;
+    `${report.remapped.length} commit ids remapped in messages, ${report.violations} still inside working hours` +
+    `${report.leftOut.length > 0 ? `, ${report.leftOut.length} left out of the plan` : ''})`;
 }
 
 function cmdVerify(opts) {
@@ -1236,12 +1258,13 @@ function cmdRemapDocs(opts) {
     if (hits.length !== 1 || newIds.some((id) => id.startsWith(token))) return null;
     return chain.get(hits[0]).slice(0, token.length);
   };
-  const grep = git(['grep', '-l', '-I', '--full-name', '-E', '[0-9a-f]{7,40}']);
+  // -z: NUL-separated, unquoted paths (non-ASCII names would be quoted otherwise).
+  const grep = git(['grep', '-z', '-l', '-I', '--full-name', '-E', '[0-9a-f]{7,40}']);
   if (grep.status > 1) fail(`git grep failed: ${grep.stderr.trim()}`);
   const replacements = [];
   const skipped = [];
   const edits = new Map();
-  for (const file of lines(grep.stdout)) {
+  for (const file of grep.stdout.split('\0').filter((name) => name !== '')) {
     const full = path.join(plan.repo.toplevel, file);
     if (!fs.existsSync(full)) continue;
     const text = fs.readFileSync(full, 'latin1');
@@ -1295,6 +1318,7 @@ function cmdRemapDocs(opts) {
 // ---------------------------------------------------------------------------
 
 const COMMANDS = new Set(['apply', 'verify', 'remap-docs']);
+const AUDIT_ONLY = new Set(['--ref', '--range', '--all', '--rule', '--slot', '--allow-future']);
 
 function parseArgs(argv) {
   const opts = {
@@ -1308,6 +1332,8 @@ function parseArgs(argv) {
   }
   for (; i < argv.length; i++) {
     const a = argv[i];
+    // The plan already fixes rule, slot and scope: never accept and ignore them.
+    if (opts.command !== 'audit' && AUDIT_ONLY.has(a)) fail(`${a} only applies to the audit, not to ${opts.command}`);
     if (a === '--json') opts.json = true;
     else if (a === '--help' || a === '-h') opts.help = true;
     else if (a === '--allow-future') opts.allowFuture = true;
@@ -1325,6 +1351,7 @@ function parseArgs(argv) {
   }
   if (opts.all && (opts.refGiven || opts.range)) fail('--all cannot be combined with --ref or --range');
   if (opts.write && opts.command !== 'remap-docs') fail('--write only applies to remap-docs');
+  if (opts.json && opts.command === 'apply') fail('--json is not available for apply');
   return opts;
 }
 
@@ -1357,11 +1384,13 @@ evening, never the small hours). Each new date stays between its parents' and
 its descendants' dates; when the slot makes that impossible, the plan says so.
 
 The plan rewrites every local branch and tag that contains a planned commit
-(never remote-tracking refs or refs/tags/backup/*), keyed by commit id. apply
-refuses on uncommitted tracked changes, a git operation in progress, a
-rewritten branch checked out in another worktree, or refs that moved since the
+(never remote-tracking refs or refs/tags/backup/*), keyed by commit id; history
+before the first planned commit keeps its ids. apply refuses on uncommitted
+tracked changes, a git operation in progress, a rewritten branch checked out in
+another worktree, or any ref (remote-tracking included) that moved since the
 plan; it writes a full bundle backup first, verifies every commit, and restores
-the refs if verification fails. Push commands are printed, never run.
+the refs if verification fails. Push commands are printed, never run. apply,
+verify and remap-docs take no audit options: the plan already fixes them.
 
 Environment:
   COMMIT_HOURS_AUDIT_NOW   Treat this ISO date as "now" (reproducible runs).

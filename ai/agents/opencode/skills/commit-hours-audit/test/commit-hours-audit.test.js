@@ -468,6 +468,90 @@ test('only history after a planned commit is rewritten, so earlier signed commit
   assert.notEqual(git(repo, 'rev-parse', 'main~1'), violator);
 });
 
+// Regressions from the independent verification (T8) -----------------------
+
+for (const [command, args] of [['apply', ['--ref', 'does-not-exist']], ['verify', ['--rule', 'bogus', '--json']], ['remap-docs', ['--slot', 'morning']]]) {
+  test(`${command} rejects audit-only options instead of ignoring them`, () => {
+    const repo = freshRepo();
+    const { dir } = command === 'apply' ? planOf(repo) : applied(repo);
+    const refs = refsSnapshot(repo);
+    const res = cli(repo, [command, dir, ...args]);
+    assert.equal(res.status, 1, res.stdout);
+    assert.match(res.stderr, /only applies to the audit/);
+    assert.equal(refsSnapshot(repo), refs);
+  });
+}
+
+test('a violation reachable only through a nested annotated tag is audited and rewritten', () => {
+  const { repo, shas } = smallRepo('nested', [
+    ['root', '2026-10-04T12:00:00+02:00'],
+    ['v', '2026-10-05T10:00:00+02:00'],
+  ]);
+  git(repo, 'tag', '-a', 'inner', '-m', 'inner');
+  git(repo, 'tag', '-a', 'outer', 'inner', '-m', 'outer');
+  git(repo, 'tag', '-d', 'inner');
+  git(repo, 'reset', '-q', '--hard', shas[0]);
+  const json = cliJson(repo, ['--all']);
+  assert.ok(json.violations.some((v) => v.sha === shas[1]), JSON.stringify(json.violations));
+  assert.ok(json.rewriteRefs.some((r) => r.ref === 'refs/tags/outer'));
+  const res = cli(repo, ['apply', json.planDir]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(repo, 'cat-file', '-t', 'outer'), 'tag');
+  assert.notEqual(git(repo, 'rev-parse', 'outer^{commit}'), shas[1]);
+  assert.equal(cliJson(repo, ['--all']).violations.length, 0);
+});
+
+test('a remote-only violation lists its remote-tracking ref', () => {
+  const { repo, shas } = smallRepo('remote-only', [
+    ['root', '2026-10-04T12:00:00+02:00'],
+    ['v', '2026-10-05T10:00:00+02:00'],
+  ]);
+  git(repo, 'update-ref', 'refs/remotes/origin/only', shas[1]);
+  git(repo, 'reset', '-q', '--hard', shas[0]);
+  const json = cliJson(repo, ['--ref', 'origin/only']);
+  assert.deepEqual(json.remoteOnlyRefs.map((r) => r.ref), ['refs/remotes/origin/only']);
+  assert.equal(json.planDir, null);
+});
+
+test('apply refuses when any ref moved since the plan, remote-tracking ones included', () => {
+  const repo = freshRepo();
+  const { dir } = planOf(repo);
+  git(repo, 'update-ref', 'refs/remotes/origin/feat-old', ids.root);
+  const refs = refsSnapshot(repo);
+  const res = cli(repo, ['apply', dir]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /changed since the plan/);
+  assert.equal(refsSnapshot(repo), refs);
+});
+
+test('remap-docs handles non-ASCII file names', () => {
+  const repo = freshRepo();
+  commit(repo, 'unicode docs', '2026-10-10T21:00:00+02:00', undefined, { 'docs/référence.md': `${ids.a.slice(0, 7)}\n` });
+  const { dir } = applied(repo);
+  const json = cliJson(repo, ['remap-docs', dir]);
+  assert.ok(json.replacements.some((r) => r.file === 'docs/référence.md'), JSON.stringify(json.replacements));
+});
+
+test('verify counts rewritten commits only and lists what --range left out', () => {
+  const repo = freshRepo();
+  const { dir } = planOf(repo, ['--range', `${ids.b}..main`]);
+  const res = cli(repo, ['apply', dir]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(repo, 'rev-parse', 'main~6'), ids.b, 'history before the range keeps its ids');
+  const report = cliJson(repo, ['verify', dir]);
+  assert.equal(report.ok, true);
+  assert.equal(report.violations, 0);
+  assert.deepEqual(report.leftOut.map((l) => l.commit).sort(), [ids.a, ids.b].sort());
+  assert.ok(report.leftOut.every((l) => l.reason === 'outside --range'));
+});
+
+test('apply warns when a detached HEAD stays on rewritten history', () => {
+  const repo = freshRepo();
+  git(repo, 'checkout', '-q', '--detach', 'main~1');
+  const { res } = applied(repo);
+  assert.match(res.stdout, /HEAD is detached at .* which was rewritten/);
+});
+
 test('apply stops when git-filter-repo is missing', () => {
   const gitDir = path.dirname(run('sh', ['-c', 'command -v git'], scratch).stdout.trim());
   const probe = run('git', ['filter-repo', '--version'], scratch, { PATH: gitDir });
