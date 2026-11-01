@@ -31,19 +31,20 @@ The tracker lives in `~/.dotfiles`:
 
 ## Execution Steps
 
-1. Identify the repo the session worked on (basename under `~/Code`).
-2. **Time ledger**: if the session did real work, append AI hours — `time-ledger add-ai <D/M/YYYY> <project-basename> <hours> "<short note>" <ses_id>`. Take `ses_id` from the current session (it appears in every mem_save response as `Session: ses_...`); it deep-links the dashboard to this conversation. Approximate hours confidently from session window; Bruno corrects at Excel time. Never log hours for read-only/conversational sessions.
+Use the `session-close` CLI (`scripts/session-close.py`, symlinked in `~/bin`). It does the mechanical part; the agent only writes `desc`/`next`.
+
+1. From the session's working directory, run `session-close` with no arguments. It prints the detected OpenCode session id, active hours (message gaps over 30 min are idle), the repos with commits since the session started, and the current tracker block of this project. Never log hours for read-only/conversational sessions: skip the close entirely for those.
+2. Pick the tracker key: the repo **basename** the work landed in (a worktree `<repo>-worktrees/<name>` belongs to `<repo>`).
+3. Run `session-close <project> --next "<concrete next action>"`, adding `--desc "<one-liner>"` only if it is stale and `--status <s>` only if the lifecycle changed. `next` must be actionable, not a wish. Use `--hours` only to correct the estimate, `--note` for a better ledger note than the session title. Several projects touched: run it once per project with `--hours` split between them.
 > **Precedencia del hub (2026-09-15):** si el repo ya tiene nota en el hub
 >(`hub/proyectos/<slug>.md`), el `status` del YAML es SOLO caché de fallback —
-> el dashboard pinta el estado del hub. No lo actualices para repos con nota;
+> el dashboard pinta el estado del hub. No pases `--status` para repos con nota;
 > el estado vive en el hub vía Telegram/clerk.
-
-3. Update only that project's block: `status` if the lifecycle changed, `desc` if the one-liner is stale, `next` with the concrete next action (or drop `next` if none). `next` must be actionable, not a wish.
-4. If the sweep would show new repos (a project was cloned/created), add blocks for them or leave them for the "Unclassified" triage section — never leave work repos silently unclassified after a triage round.
-5. Rerun `projects` so the snapshot regenerates.
-6. **Improve-System Cadence Check**: Run `improve-system --status`. If the check reports `CADENCIA VENCIDA`, append a gentle one-liner at the very end of your response:
+4. The CLI then appends `time-ledger add-ai` with the session id, regenerates the snapshot (`projects`), prints the section counts and the `improve-system --status` line, and commits ONLY `scripts/projects.yaml` when the current time is outside working hours (Mon–Thu 09:00–19:00, Fri 08:00–16:00; weekends are outside). Inside working hours it skips the commit and says so. It never pushes. Use `--no-commit` to skip it always, `--dry-run` to preview.
+5. If the cadence line reports `CADENCIA VENCIDA`, append a gentle one-liner at the very end of your response:
    > 💡 *Han pasado N días desde la última auditoría de `/improve-system`. Cuando tengas un hueco, ejecútalo para revisar el feedback loop y gotchas de la semana.*
-7. If the tracker files themselves changed and the user authorized a commit, commit ONLY `scripts/projects.yaml` and/or `scripts/projects-dashboard.sh` with a conventional message.
+6. If the sweep shows new repos (a project was cloned/created), create their blocks with `session-close <repo> --desc "..." [--scope work]` or leave them for the "Unclassified" triage section — never leave work repos silently unclassified after a triage round.
+7. Changes to `scripts/projects-dashboard.sh` itself are never committed by the CLI; commit them only when the user asks.
 
 ## Status Vocabulary
 
@@ -57,4 +58,4 @@ The tracker lives in `~/.dotfiles`:
 
 ## Output Contract
 
-Return: the YAML blocks changed (before → after), the regenerated snapshot path, and the new section counts (active/proposal/paused/closed/cold/unclassified).
+Return what `session-close` printed: the YAML blocks changed (before → after), the ledger entry, the regenerated snapshot path, the section counts (active/proposal/paused/closed/cold/unclassified), and whether the tracker was committed or why not.

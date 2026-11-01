@@ -13,5 +13,8 @@ bash "$HERE/test_time_ledger.sh" || rc=1
 echo "== test_projects_html (python) =="
 ( cd "$HERE/.." && python3 -m unittest scripts.test_projects_html -q 2>&1 | tail -1 ) || rc=1
 
+echo "== test_session_close (python) =="
+( cd "$HERE/.." && python3 -m unittest scripts.test_session_close -q 2>&1 | tail -1 ) || rc=1
+
 [ "$rc" -eq 0 ] && echo "ALL SUITES GREEN" || echo "SOME SUITE FAILED"
 exit "$rc"
