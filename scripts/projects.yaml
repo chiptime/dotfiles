@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun+Elysia hexagonal / React+Vite). Campaña de validación: matriz N0 de 18 mercados en master, handlers de página abortan con blockedbyclient (ALCAMPO revalidado en N0, aceptación con Chromium real).
-  next: Cerrar la cobertura de huella de ScraperFinder (chat fingerprint-coverage), evaluar Playwright/proxy para Eroski y Carrefour, y subir celdas aprobadas a N1
+  desc: Price comparator (Bun/Elysia + React/Vite). Fingerprint coverage complete on a local branch; VPS N0 evidence collected and 47 approvals refreshed.
+  next: Decide commit and publication of fix/fingerprint-coverage (75 evidence files and 47 N0 approvals); investigate GADIS stores HTTP 404 and reconcile concurrent scraper changes before another campaign.
 
 vps:
   scope: personal
