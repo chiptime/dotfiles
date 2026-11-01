@@ -1,0 +1,36 @@
+{
+  "permission": {
+    "external_directory": {
+      "/tmp/**": "allow",
+      "$HOME/Code/**": "allow",
+      "$HOME/.config/opencode/**": "allow",
+      "$HOME/.cache/**": "allow",
+      "$HOME/.local/share/opencode/**": "allow",
+      "$HOME/.local/bin/**": "allow",
+      "$HOME/.npm/**": "allow",
+      "$HOME/.local/share/time-ledger/**": "allow",
+      "$HOME/.dotfiles/**": "allow",
+      "$HOME/hub/**": "allow",
+      "$HOME/.pi/**": "allow",
+      "$HOME/.gentle-ai/**": "allow",
+      "$HOME/bin/**": "allow",
+      "$HOME/go/**": "allow",
+      "$HOME/.nvm/**": "allow",
+      "$HOME/.bun/**": "allow",
+      "$HOME/*-worktrees/**": "allow",
+      "$HOME/.local/state/**": "allow",
+      "$HOME/.local/share/projects-dashboard/**": "allow",
+      "$HOME/.local/share/herdr-tts/**": "allow",
+      "$HOME/.local/share/tiktok-ingest/**": "allow",
+      "$HOME/.local/share/tiktok-ingest-design/**": "allow",
+      "$HOME/.local/share/nvim/**": "allow",
+      "$HOME/.config/systemd/user/**": "allow",
+      "$HOME/.config/herdr/**": "allow",
+      "$HOME/.config/herdr-tts/**": "allow",
+      "$HOME/.config/gertru-voice/**": "allow",
+      "$HOME/.config/ai-stack/**": "allow",
+      "/home/linuxbrew/.linuxbrew/**": "allow",
+      "/proc/**": "allow"
+    }
+  }
+}

@@ -9,6 +9,7 @@ configuración real mediante `jq`. El fragmento del repo **siempre gana**.
 | Fragmento | Claves que fija | Para qué |
 | --- | --- | --- |
 | `agy-models.fragment.json` | `provider.agy.models` + `provider.agy.options.models` | Catálogo agy materializado (generado — no editar a mano). opencode no consulta el hook `provider.models` del plugin para providers npm, así que el picker y el runtime necesitan esto en config. Regenerable desde `agy models`. |
+| `external-directory.fragment.json` | `permission.external_directory` | Rutas de usuario fuera del proyecto que se usan a diario (derivadas de los `ask` reales de los logs). Como `bash` está en `allow`, esta es la única barrera fuera del proyecto: quedan en `ask` a propósito `~/.ssh`, `~/.gemini`, `~/.ollama` (credenciales), `~/backups`, `~/*` y `/etc`, `/sys`, `/dev`, `/usr`, `/`. Rutas propias de una máquina (p. ej. `/mnt/c/...` en WSL) van al fragmento local. |
 | `git-permissions.fragment.json` | `permission.bash` (reglas git) | Permite `git add/diff/commit/log` sin preguntar; deniega `git merge/pull/push/rebase`. |
 | `side-tasks.fragment.json` | `small_model` + `agent.summary/compaction.model` | Default CERO-CONFIG para tareas laterales: `agy/default` (universal para usuarios del bridge). Sobrescribir por máquina en el fragmento local. |
 
