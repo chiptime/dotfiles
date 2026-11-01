@@ -853,6 +853,190 @@
       "kind": "web",
       "description": null,
       "url": "http://127.0.0.1:44270"
+    },
+    {
+      "id": "port-44212",
+      "name": "Port 44212",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44212"
+    },
+    {
+      "id": "port-44338",
+      "name": "Port 44338",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44338"
+    },
+    {
+      "id": "sis",
+      "name": "Sis",
+      "kind": "project",
+      "description": null,
+      "docs": null,
+      "location": "~/Code/Work/Stratesys/Clece/sis",
+      "tags": [
+        "trabajo"
+      ]
+    },
+    {
+      "id": "port-44370",
+      "name": "Port 44370",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44370"
+    },
+    {
+      "id": "port-45068",
+      "name": "Port 45068",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:45068"
+    },
+    {
+      "id": "port-43922",
+      "name": "Port 43922",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:43922"
+    },
+    {
+      "id": "port-44744",
+      "name": "Port 44744",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44744"
+    },
+    {
+      "id": "port-45078",
+      "name": "Port 45078",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:45078"
+    },
+    {
+      "id": "port-44204",
+      "name": "Port 44204",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44204"
+    },
+    {
+      "id": "port-44068",
+      "name": "Port 44068",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44068"
+    },
+    {
+      "id": "port-45084",
+      "name": "Port 45084",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:45084"
+    },
+    {
+      "id": "port-45112",
+      "name": "Port 45112",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:45112"
+    },
+    {
+      "id": "ssff-mcp-dokploy",
+      "name": "Ssff Mcp Dokploy",
+      "kind": "project",
+      "description": "Run the [ssff-mcp](https://github.com/chiptime/ssff-mcp) HTTP server on a stock",
+      "docs": "~/Code/personal/ssff-mcp-dokploy/README.md",
+      "location": "~/Code/personal/ssff-mcp-dokploy",
+      "tags": [
+        "personal",
+        "sap"
+      ]
+    },
+    {
+      "id": "port-44394",
+      "name": "Antigravity",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44394"
+    },
+    {
+      "id": "port-45134",
+      "name": "Port 45134",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:45134"
+    },
+    {
+      "id": "port-43280",
+      "name": "Port 43280",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:43280"
+    },
+    {
+      "id": "port-43996",
+      "name": "Antigravity",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:43996"
+    },
+    {
+      "id": "port-44488",
+      "name": "Antigravity",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44488"
+    },
+    {
+      "id": "port-44748",
+      "name": "Port 44748",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44748"
+    },
+    {
+      "id": "port-44464",
+      "name": "Port 44464",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44464"
+    },
+    {
+      "id": "port-44600",
+      "name": "Antigravity",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:44600"
+    },
+    {
+      "id": "port-45035",
+      "name": "Port 45035",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:45035"
+    },
+    {
+      "id": "port-46433",
+      "name": "Antigravity",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:46433"
+    },
+    {
+      "id": "port-45045",
+      "name": "Antigravity",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:45045"
+    },
+    {
+      "id": "port-8000",
+      "name": "modular-saas",
+      "kind": "web",
+      "description": null,
+      "url": "http://127.0.0.1:8000"
     }
   ]
 }
