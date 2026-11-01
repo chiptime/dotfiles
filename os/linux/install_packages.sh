@@ -105,3 +105,8 @@ pip install huggingface_hub
 # huggingface-cli login
 
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# git-filter-repo (required by `commit-hours-audit apply`), installed as a uv tool.
+if ! command -v git-filter-repo >/dev/null 2>&1; then
+  command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+  "${HOME}/.local/bin/uv" tool install git-filter-repo 2>/dev/null || uv tool install git-filter-repo
+fi
