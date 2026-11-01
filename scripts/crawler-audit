@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-exec bun /home/bruno/Code/personal/hungry/compare-prices/scripts/crawler-audit.ts "$@"
