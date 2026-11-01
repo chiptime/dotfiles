@@ -16,6 +16,7 @@ use crate::schema::{Kind, Record, Source};
 pub const PROVIDER_ID: &str = "claude";
 pub const DISPLAY_NAME: &str = "Claude Pro";
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 
 /// HTTP-backed Claude source; `access_token: None` means: fall back to ~/.claude/.credentials.json.
 pub struct ClaudeSource {
@@ -57,6 +58,34 @@ impl ClaudeSource {
     pub fn has_credentials(&self) -> bool {
         self.resolve_token().is_some()
     }
+
+    /// Resolve the dynamic display name (e.g. "Claude Max (5x)", "Claude Pro").
+    /// Checks declarative file_providers config first, then live profile endpoint,
+    /// then local ~/.claude/.credentials.json, falling back to static DISPLAY_NAME.
+    pub fn resolve_display_name(&self, agent: &ureq::Agent, token: &str) -> String {
+        let config = crate::config::AppConfig::load();
+        if let Some(fp) = config.file_providers.iter().find(|p| p.id == PROVIDER_ID) {
+            return fp.display_name.clone();
+        }
+
+        // 1. Try querying profile endpoint
+        if let Ok(profile) = http_get_profile(agent, token) {
+            if let Some(name) = extract_tier_from_profile(&profile) {
+                return name;
+            }
+        }
+
+        // 2. Try credentials file fallback
+        if let Ok(text) = fs::read_to_string(&self.creds_path) {
+            if let Ok(json) = serde_json::from_str::<Value>(&text) {
+                if let Some(name) = extract_tier_from_creds(&json) {
+                    return name;
+                }
+            }
+        }
+
+        DISPLAY_NAME.to_string()
+    }
 }
 
 impl QuotaSource for ClaudeSource {
@@ -65,9 +94,10 @@ impl QuotaSource for ClaudeSource {
             return vec![missing_record(PROVIDER_ID, DISPLAY_NAME, "no credentials")];
         };
         let agent = &self.agent;
+        let display_name = self.resolve_display_name(agent, &token);
         match super::fetch_with_retry(|| http_get_usage(agent, &token)) {
-            Ok(json) => map_response(&json, Utc::now()),
-            Err(detail) => vec![error_record(PROVIDER_ID, DISPLAY_NAME, detail)],
+            Ok(json) => map_response_with_display_name(&json, &display_name, Utc::now()),
+            Err(detail) => vec![error_record(PROVIDER_ID, &display_name, detail)],
         }
     }
 }
@@ -77,12 +107,25 @@ fn http_get_usage(agent: &ureq::Agent, token: &str) -> Result<Value, String> {
         .get(USAGE_URL)
         .set("Authorization", &format!("Bearer {token}"))
         .set("anthropic-version", "2023-06-01")
-        .set("User-Agent", "claude-code/2.1.224")
+        .set("User-Agent", "claude-code/2.1.280")
         .set("Accept", "application/json")
         .call()
         .map_err(|e| format!("usage request failed: {e}"))?
         .into_json::<Value>()
         .map_err(|e| format!("failed to decode usage response: {e}"))
+}
+
+fn http_get_profile(agent: &ureq::Agent, token: &str) -> Result<Value, String> {
+    agent
+        .get(PROFILE_URL)
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("anthropic-version", "2023-06-01")
+        .set("User-Agent", "claude-code/2.1.280")
+        .set("Accept", "application/json")
+        .call()
+        .map_err(|e| format!("profile request failed: {e}"))?
+        .into_json::<Value>()
+        .map_err(|e| format!("failed to decode profile response: {e}"))
 }
 
 pub fn extract_claude_token(json: &Value) -> Option<String> {
@@ -91,6 +134,80 @@ pub fn extract_claude_token(json: &Value) -> Option<String> {
         .and_then(|t| t.as_str())
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+pub fn extract_tier_from_profile(profile: &Value) -> Option<String> {
+    let org = profile.get("organization");
+    let rate_limit_tier = org.and_then(|o| o.get("rate_limit_tier")).and_then(|v| v.as_str());
+    let org_type = org.and_then(|o| o.get("organization_type")).and_then(|v| v.as_str());
+    let has_max = profile
+        .get("account")
+        .and_then(|a| a.get("has_claude_max"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let sub = if has_max || org_type == Some("claude_max") {
+        Some("max")
+    } else {
+        org_type
+    };
+    derive_display_name(sub, rate_limit_tier)
+}
+
+pub fn extract_tier_from_creds(json: &Value) -> Option<String> {
+    let oauth = json.get("claudeAiOauth")?;
+    let tier = oauth.get("rateLimitTier").and_then(|v| v.as_str());
+    let sub = oauth.get("subscriptionType").and_then(|v| v.as_str());
+    derive_display_name(sub, tier)
+}
+
+pub fn derive_display_name(sub: Option<&str>, tier: Option<&str>) -> Option<String> {
+    let sub = sub.map(|s| s.to_lowercase());
+    let tier = tier.map(|t| t.to_lowercase());
+
+    // Check multiplier in tier first (e.g. 5x, 20x)
+    if let Some(t) = &tier {
+        if t.contains("5x") {
+            return Some("Claude Max (5x)".to_string());
+        }
+        if t.contains("20x") {
+            return Some("Claude Max (20x)".to_string());
+        }
+        for part in t.split('_') {
+            if part.ends_with('x')
+                && part.len() > 1
+                && part[..part.len() - 1].chars().all(|c| c.is_ascii_digit())
+            {
+                return Some(format!("Claude Max ({part})"));
+            }
+        }
+    }
+
+    if let Some(s) = &sub {
+        if s == "max" || s == "claude_max" {
+            return Some("Claude Max".to_string());
+        }
+        if s == "pro" || s == "claude_pro" {
+            return Some("Claude Pro".to_string());
+        }
+        if s.contains("team") {
+            return Some("Claude Team".to_string());
+        }
+        if s.contains("enterprise") {
+            return Some("Claude Enterprise".to_string());
+        }
+    }
+
+    if let Some(t) = &tier {
+        if t.contains("max") {
+            return Some("Claude Max".to_string());
+        }
+        if t.contains("claude_ai") {
+            return Some("Claude Pro".to_string());
+        }
+    }
+
+    None
 }
 
 #[derive(Deserialize)]
@@ -162,13 +279,22 @@ fn money_value(m: &ClaudeMoney) -> f64 {
     m.amount_minor as f64 / 10f64.powi(exp as i32)
 }
 
+#[allow(dead_code)]
 pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderRecord> {
+    map_response_with_display_name(json, DISPLAY_NAME, fetched_at)
+}
+
+pub fn map_response_with_display_name(
+    json: &Value,
+    display_name: &str,
+    fetched_at: DateTime<Utc>,
+) -> Vec<ProviderRecord> {
     let parsed: ClaudeUsageResponse = match serde_json::from_value(json.clone()) {
         Ok(parsed) => parsed,
         Err(e) => {
             return vec![error_record(
                 PROVIDER_ID,
-                DISPLAY_NAME,
+                display_name,
                 format!("invalid usage response: {e}"),
             )]
         }
@@ -186,7 +312,7 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
                 None,
             );
             record.label = Some("5h window".to_string());
-            record.display_name = Some(DISPLAY_NAME.to_string());
+            record.display_name = Some(display_name.to_string());
             record.used = Some(used);
             record.limit = Some(100.0);
             record.unit = Some("percent".to_string());
@@ -209,7 +335,7 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
                 None,
             );
             record.label = Some("Weekly".to_string());
-            record.display_name = Some(DISPLAY_NAME.to_string());
+            record.display_name = Some(display_name.to_string());
             record.used = Some(used);
             record.limit = Some(100.0);
             record.unit = Some("percent".to_string());
@@ -243,7 +369,7 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
             None,
         );
         record.label = Some(format!("{SCOPED_LABEL_PREFIX}{name}"));
-        record.display_name = Some(DISPLAY_NAME.to_string());
+        record.display_name = Some(display_name.to_string());
         record.used = Some(used);
         record.limit = Some(100.0);
         record.unit = Some("percent".to_string());
@@ -276,7 +402,7 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
                 None,
             );
             record.label = Some("Extra usage".to_string());
-            record.display_name = Some(DISPLAY_NAME.to_string());
+            record.display_name = Some(display_name.to_string());
             record.used = Some(money_value(used));
             record.limit = Some(money_value(limit));
             record.currency = used.currency.clone().or_else(|| Some("EUR".to_string()));
@@ -291,7 +417,7 @@ pub fn map_response(json: &Value, fetched_at: DateTime<Utc>) -> Vec<ProviderReco
     if out.is_empty() {
         vec![error_record(
             PROVIDER_ID,
-            DISPLAY_NAME,
+            display_name,
             "usage response contained no recognizable windows".to_string(),
         )]
     } else {
@@ -415,5 +541,82 @@ mod tests {
             Some("sk-ant-test-token-12345".to_string())
         );
         assert_eq!(extract_claude_token(&json!({})), None);
+    }
+
+    #[test]
+    fn derive_display_name_works() {
+        assert_eq!(
+            derive_display_name(Some("claude_max"), Some("default_claude_max_5x")),
+            Some("Claude Max (5x)".to_string())
+        );
+        assert_eq!(
+            derive_display_name(Some("max"), Some("default_claude_max_20x")),
+            Some("Claude Max (20x)".to_string())
+        );
+        assert_eq!(
+            derive_display_name(Some("max"), None),
+            Some("Claude Max".to_string())
+        );
+        assert_eq!(
+            derive_display_name(Some("pro"), Some("default_claude_ai")),
+            Some("Claude Pro".to_string())
+        );
+        assert_eq!(
+            derive_display_name(Some("team"), None),
+            Some("Claude Team".to_string())
+        );
+        assert_eq!(
+            derive_display_name(Some("enterprise"), None),
+            Some("Claude Enterprise".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_tier_from_profile_works() {
+        let fixture = json!({
+            "account": {
+                "has_claude_max": true,
+                "has_claude_pro": false
+            },
+            "organization": {
+                "organization_type": "claude_max",
+                "rate_limit_tier": "default_claude_max_5x"
+            }
+        });
+        assert_eq!(
+            extract_tier_from_profile(&fixture),
+            Some("Claude Max (5x)".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_tier_from_creds_works() {
+        let fixture = json!({
+            "claudeAiOauth": {
+                "subscriptionType": "max",
+                "rateLimitTier": "default_claude_max_5x"
+            }
+        });
+        assert_eq!(
+            extract_tier_from_creds(&fixture),
+            Some("Claude Max (5x)".to_string())
+        );
+    }
+
+    #[test]
+    fn map_response_with_display_name_applies_custom_name() {
+        let fixture = json!({
+            "five_hour": {
+                "utilization": 50.0,
+                "resets_at": "2026-10-29T18:00:00Z"
+            }
+        });
+        let records = map_response_with_display_name(&fixture, "Claude Max (5x)", Utc::now());
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].display_name.as_deref(), Some("Claude Max (5x)"));
+        assert_eq!(
+            records[0].record.as_ref().unwrap().display_name.as_deref(),
+            Some("Claude Max (5x)")
+        );
     }
 }
