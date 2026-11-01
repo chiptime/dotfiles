@@ -1,5 +1,5 @@
 {
-  "$comment": "Perfil Z.ai Max: Prioridad GLM-5.3 para writers, AGY para explore, balance con Claude/OpenCode-Go para review. models.zai.json",
+  "$comment": "Perfil default para horas pico de Z.ai: orquestador, writers y verify fuera de GLM (Claude Opus, AGY, OpenAI); GLM queda en revisores y fallbacks ligeros. models.default-peak-hours.json",
   "small_model": "opencode/deepseek-v4.1-flash-free",
   "agents": {
     "branch-pr": {
