@@ -195,7 +195,7 @@ EOF
   cat > "$SB/bin-ok/opencode" <<'EOF'
 #!/usr/bin/env bash
 echo call >> "$OC_MARK"
-printf 'fake/model-a\nfake/model-b\n'
+printf 'fake/model-a\nfake/model-b\nfake/small\n'
 EOF
   cat > "$SB/bin-broken/opencode" <<'EOF'
 #!/usr/bin/env bash
@@ -358,11 +358,12 @@ test_no_apply_flag_active() {
 }
 
 test_apply_command() {
-  echo "apply subcommand: runs installer on active profile"
+  echo "apply subcommand: validates the active profile, then runs installer"
   make_sandbox
-  run_switch_cmd bin-broken '' apply
+  run_switch_cmd bin-ok '' apply
   assert_eq "exit code" 0 "$RUN_RC"
   assert_eq "installer ran exactly once" 1 "$(installer_runs)"
+  assert_eq "catalogue consulted exactly once" 1 "$(marker_calls)"
   cleanup_sandbox
 }
 

@@ -70,6 +70,69 @@ modelos y variantes de la config viva). Para ver el par de un perfil concreto,
 abre `opencode-switch edit <perfil>` y observa la lista, o lee directamente el
 `models.<perfil>.json`.
 
+## Crear o copiar un perfil (`opencode-switch copy` / `add`)
+
+Puedes duplicar perfiles existentes o crear perfiles personalizados directamente desde el CLI:
+
+- **Copiar perfil existente**:
+  ```bash
+  opencode-switch copy <origen> <nuevo>
+  # Ej: opencode-switch copy default mi-perfil
+  ```
+  Duplica `models.<origen>.json` a `models.<nuevo>.json` con validación previa de integridad JSON.
+
+- **Crear nuevo perfil**:
+  ```bash
+  opencode-switch add <nuevo> [base]
+  # Ej: opencode-switch add mi-perfil default
+  ```
+  Clona el perfil base (por defecto `default`) y ofrece abrir de inmediato el editor interactivo para personalizar los subagentes.
+
+- **Conmutar a perfiles personalizados**:
+  El conmutador detecta dinámicamente cualquier archivo `models.<perfil>.json` en este directorio:
+  ```bash
+  opencode-switch mi-perfil
+  ```
+  Además, cualquier perfil añadido aparece automáticamente en el menú interactivo (`opencode-switch` o `opencode-switch menu`) y en la selección de `opencode-switch edit`.
+
+## Cuando un modelo deja de aparecer
+
+Al seleccionar un perfil o ejecutar `opencode-switch apply`, el selector consulta
+`opencode models` **antes de sobrescribir el mapa activo**. No requiere IA ni un
+comando de diagnóstico separado.
+
+1. Detecta los modelos ausentes del perfil elegido y muestra sus apariciones en
+   todos los perfiles guardados, incluido `small_model`.
+2. Permite seleccionar un reemplazo del catálogo con `fzf`; sin `fzf`, muestra los
+   IDs disponibles y pide escribir el ID exacto. Un modelo `*-free` solo ofrece
+   reemplazos `*-free`; no se transforma en un modelo de pago.
+3. Elige el reemplazo **una sola vez por ID**: se usa en todas sus asignaciones en
+   `models.*.json`, incluidos perfiles inactivos y entradas legacy. Los otros IDs
+   y metadatos no cambian. Cambiar de modelo restablece su variante a default.
+4. Pide confirmación global antes de guardar los perfiles afectados, activar el
+   perfil elegido y ejecutar el instalador. Los perfiles sin ese ID quedan intactos.
+
+Por ejemplo, si eliges OpenAI y le falta `opencode/muse-spark-1.3-contributor-free`,
+seleccionas un sustituto gratuito una vez. Se reemplaza también donde aparezca en
+Claude, Z.ai, Default y los demás perfiles: no volverá a pedirlo al cambiar a ellos.
+
+Cancelar, pulsar Esc, introducir un ID inválido o cerrar la entrada aborta sin
+guardar los reemplazos ni cambiar el mapa activo o la configuración aplicada.
+`--apply/-y` no omite esta confirmación. Si el catálogo falla, está vacío o falta
+todo un proveedor, el selector no deduce que hayan retirado sus modelos: informa
+del problema y termina sin modificar perfiles. Tampoco interpreta la ausencia de
+un modelo como agotamiento de cuota.
+
+Antes de guardar reemplazos conserva las copias originales de todos los perfiles
+afectados y del mapa activo en
+`${XDG_STATE_HOME:-~/.local/state}/opencode-switch/backups/`. Si algún perfil cambia
+mientras eliges los reemplazos, aborta para no sobrescribir esa edición. El instalador
+mantiene además su respaldo habitual de `opencode.json`. Si no hay modelos
+ausentes, se aplica el perfil sin preguntas adicionales ni respaldos de perfiles.
+
+Esta selección ocurre en el conmutador; ejecutar directamente
+`install-opencode-settings-v2.sh` conserva su validación estricta y no abre el editor.
+
 ## Después de `gentle-ai sync`
 
 `gentle-ai sync` reescribe `opencode.json` y puede devolver modelos antiguos o añadir

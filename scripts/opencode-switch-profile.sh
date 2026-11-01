@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Selector de perfiles de modelos para OpenCode
-# Uso: opencode-switch-profile.sh [--fallback | -f] [--no-apply | -n] [--apply | -y] [default | zai | claude | openai | opencode-go | status | edit | apply | menu]
+# Uso: opencode-switch-profile.sh [--fallback | -f] [--no-apply | -n] [--apply | -y] [default | zai | claude | openai | opencode-go | <perfil> | status | edit | copy | add | apply | menu]
 #
 # Cada perfil (models.*.json) guarda por agente un par {"model", "variant"}
 # propio: el mismo modelo puede usar variantes distintas por agente y por
@@ -209,26 +209,322 @@ write_agent_pair() { # file agent model variant — writes ONLY {model, variant}
   ' "$1" "$2" "$3" "$4"
 }
 
+profile_model_entries() { # file -> kind/name/model TSV; globals and agents cannot collide
+  jq -er '[("global\tsmall_model\t" + .small_model),
+    (.agents | to_entries[] | "agent\t\(.key)\t\(.value | if type == "string" then . else .model end)")] | .[]' "$1"
+}
+
+# The selected profile triggers repair, but a retired ID is replaced across all
+# presets. Stage the whole plan before confirmation, never one profile at a time.
+install_profile() (
+  set -euo pipefail
+  local source="$1" work catalogue entries missing old provider selected answer backup
+  local profile name kind agent model
+  local -a profiles=("$MODELS_DIR"/models.*.json)
+  work="$(mktemp -d "${TMPDIR:-/tmp}/opencode-switch.XXXXXX")"
+  trap 'rm -rf "$work"' EXIT
+  catalogue="$work/catalogue"
+  if [ -n "${OPENCODE_MODELS_LIST:-}" ]; then
+    cp "$OPENCODE_MODELS_LIST" "$work/raw"
+  elif command -v timeout >/dev/null 2>&1; then
+    if ! timeout 90 opencode models > "$work/raw"; then
+      echo "No se pudo consultar el catálogo; no se modifica ningún perfil." >&2
+      return 1
+    fi
+  elif ! opencode models > "$work/raw"; then
+    echo "No se pudo consultar el catálogo; no se modifica ningún perfil." >&2
+    return 1
+  fi
+  grep -E '^[^ /[:space:]]+/[^[:space:]]+$' "$work/raw" | sort -u > "$catalogue" || true
+  if [ ! -s "$catalogue" ]; then
+    echo "Catálogo vacío; no se modifica ningún perfil." >&2
+    return 1
+  fi
+  entries="$(profile_model_entries "$source")"
+  missing="$(printf '%s\n' "$entries" | cut -f3 | sort -u | while IFS= read -r old; do
+    grep -qxF -- "$old" "$catalogue" || printf '%s\n' "$old"
+  done)"
+  # A whole missing provider is not evidence of model retirement. Check every
+  # provider before asking questions, so a partial catalogue cannot yield edits.
+  while IFS= read -r old; do
+    [ -n "$old" ] || continue
+    provider="${old%%/*}"
+    if ! cut -d/ -f1 "$catalogue" | grep -qxF -- "$provider"; then
+      echo "No aparece el proveedor $provider en el catálogo; comprueba su disponibilidad. No se modifica nada." >&2
+      return 1
+    fi
+  done <<< "$missing"
+
+  if [ -n "$missing" ]; then
+    mkdir "$work/originals" "$work/profiles" "$work/entries"
+    for profile in "${profiles[@]}"; do
+      name="$(basename "$profile")"
+      cp -p "$profile" "$work/originals/$name"
+      cp -p "$profile" "$work/profiles/$name"
+      profile_model_entries "$profile" > "$work/entries/$name"
+    done
+  fi
+  while IFS= read -r old <&3; do
+    [ -n "$old" ] || continue
+    echo "Modelo no disponible: $old"
+    echo "Asignaciones afectadas en todos los perfiles:"
+    for profile in "${profiles[@]}"; do
+      name="$(basename "$profile")"
+      while IFS=$'\t' read -r kind agent model; do
+        [ "$model" != "$old" ] || printf '  - %s: %s.%s\n' "$name" "$kind" "$agent"
+      done < "$work/entries/$name"
+    done
+    if [[ "$old" == *-free ]]; then
+      grep -E -- '-free$' "$catalogue" > "$work/choices" || true
+    else
+      cp "$catalogue" "$work/choices"
+    fi
+    if [ ! -s "$work/choices" ]; then
+      echo "No hay reemplazos gratuitos disponibles; no se modifica nada." >&2
+      return 1
+    fi
+    selected=""
+    if command -v fzf >/dev/null 2>&1 && [ -t 0 ]; then
+      selected="$(fzf --height 60% --reverse --header="Reemplazar $old (Esc: cancelar)" < "$work/choices")" || true
+    else
+      echo "Modelos disponibles para el reemplazo:"
+      cat "$work/choices"
+      read -rp "Modelo de reemplazo (provider/id; vacío cancela): " selected || selected=""
+    fi
+    if [ -z "$selected" ]; then
+      echo "Operación cancelada; no se modifica nada."
+      return 1
+    fi
+    if ! grep -qxF -- "$selected" "$work/choices"; then
+      echo "Reemplazo no válido: $selected; no se modifica nada." >&2
+      return 1
+    fi
+    for profile in "${profiles[@]}"; do
+      name="$(basename "$profile")"
+      while IFS=$'\t' read -r kind agent model; do
+        [ "$model" = "$old" ] || continue
+        if [ "$kind" = global ]; then
+          write_small_model "$work/profiles/$name" "$selected" > /dev/null
+        else
+          write_agent_pair "$work/profiles/$name" "$agent" "$selected" "" > /dev/null
+        fi
+      done < "$work/entries/$name"
+    done
+    echo "  $old -> $selected (variante: default)"
+  done 3<<< "$missing"
+  if [ -n "$missing" ]; then
+    answer=""
+    read -rp "¿Reemplazar estos modelos en todos los perfiles y aplicar el elegido? [s/N]: " answer || answer=""
+    case "$answer" in
+      s|S|y|Y) ;;
+      *) echo "Operación cancelada; no se modifica nada."; return 1 ;;
+    esac
+    # Do not overwrite a profile edited while the replacement menu was open.
+    for profile in "${profiles[@]}"; do
+      if ! cmp -s "$profile" "$work/originals/$(basename "$profile")"; then
+        echo "El perfil cambió durante la selección: $profile; no se modifica nada." >&2
+        return 1
+      fi
+    done
+    backup="${XDG_STATE_HOME:-$HOME/.local/state}/opencode-switch/backups"
+    mkdir -p "$backup"
+    backup="$(mktemp -d "$backup/replacement.XXXXXX")"
+    for profile in "${profiles[@]}"; do
+      name="$(basename "$profile")"
+      if ! cmp -s "$work/originals/$name" "$work/profiles/$name" || [ "$profile" = "$ACTIVE_MAP" ]; then
+        cp -p "$work/originals/$name" "$backup/$name"
+      fi
+    done
+    for profile in "${profiles[@]}"; do
+      name="$(basename "$profile")"
+      if ! cmp -s "$work/originals/$name" "$work/profiles/$name"; then
+        cp -p "$work/profiles/$name" "$profile"
+      fi
+    done
+    echo "Respaldo de perfiles: $backup"
+  fi
+  if [ "$source" != "$ACTIVE_MAP" ]; then
+    cp "$source" "$ACTIVE_MAP"
+  fi
+  # The installer validates the very same successful catalogue snapshot.
+  OPENCODE_MODELS_LIST="$catalogue" OPENCODE_MODELS_FILE="$ACTIVE_MAP" "$INSTALLER"
+)
+
+resolve_profile_file() {
+  local name="${1:-}"
+  [ -n "$name" ] || return 1
+
+  name="$(basename "$name")"
+  name="${name#models.}"
+  name="${name%.json}"
+
+  case "$name" in
+    active|current)
+      echo "$ACTIVE_MAP"
+      ;;
+    default)
+      echo "$MODELS_DIR/models.default.json"
+      ;;
+    zai)
+      echo "$MODELS_DIR/models.zai.json"
+      ;;
+    claude)
+      echo "$MODELS_DIR/models.claude.json"
+      ;;
+    subs)
+      if [ -f "$MODELS_DIR/models.subs.json" ]; then
+        echo "$MODELS_DIR/models.subs.json"
+      else
+        echo "$MODELS_DIR/models.claude.json"
+      fi
+      ;;
+    openai|sol)
+      echo "$MODELS_DIR/models.openai.json"
+      ;;
+    subs-openai|subs-sol)
+      if [ -f "$MODELS_DIR/models.subs-openai.json" ]; then
+        echo "$MODELS_DIR/models.subs-openai.json"
+      else
+        echo "$MODELS_DIR/models.openai.json"
+      fi
+      ;;
+    opencode-go|zen|go)
+      echo "$MODELS_DIR/models.opencode-go.json"
+      ;;
+    *)
+      if [ -f "$MODELS_DIR/models.${name}.json" ]; then
+        echo "$MODELS_DIR/models.${name}.json"
+      elif [ -f "$MODELS_DIR/${name}" ]; then
+        echo "$MODELS_DIR/${name}"
+      else
+        return 1
+      fi
+      ;;
+  esac
+}
+
+copy_profile() {
+  local src="${1:-}"
+  local dst="${2:-}"
+
+  if [ -z "$src" ] || [ -z "$dst" ]; then
+    echo "Uso: opencode-switch copy <perfil_origen> <nuevo_nombre>" >&2
+    echo "Ejemplo: opencode-switch copy default mi-perfil" >&2
+    return 1
+  fi
+
+  src="$(basename "$src")"
+  src="${src#models.}"
+  src="${src%.json}"
+
+  dst="$(basename "$dst")"
+  dst="${dst#models.}"
+  dst="${dst%.json}"
+
+  if [[ ! "$dst" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    echo "Error: El nombre del nuevo perfil contiene caracteres inválidos: '$dst'" >&2
+    echo "Usa solo letras, números, guiones y guiones bajos." >&2
+    return 1
+  fi
+
+  if [ "$dst" = "v2" ] || [ "$dst" = "active" ] || [ "$dst" = "current" ]; then
+    echo "Error: El nombre '$dst' está reservado para la configuración activa." >&2
+    return 1
+  fi
+
+  local src_file
+  if ! src_file="$(resolve_profile_file "$src")" || [ ! -f "$src_file" ]; then
+    echo "Error: Perfil de origen no encontrado: '$src'" >&2
+    return 1
+  fi
+
+  local dst_file="$MODELS_DIR/models.${dst}.json"
+  if [ -f "$dst_file" ]; then
+    local confirm=""
+    if [ -t 0 ]; then
+      read -rp "El perfil '$dst' ya existe ($(basename "$dst_file")). ¿Sobrescribirlo? [s/N]: " confirm || true
+    else
+      echo "Error: El perfil de destino ya existe: $dst_file" >&2
+      return 1
+    fi
+    case "$confirm" in
+      s|S|y|Y) ;;
+      *) echo "Operación cancelada."; return 1 ;;
+    esac
+  fi
+
+  if ! jq empty "$src_file" 2>/dev/null; then
+    echo "Error: El archivo de origen no es un JSON válido: $src_file" >&2
+    return 1
+  fi
+
+  cp -p "$src_file" "$dst_file"
+  echo -e "\033[1;32m✔\033[0m Perfil '\033[1;36m$dst\033[0m' creado exitosamente a partir de '\033[1;33m$src\033[0m'."
+  echo "  Archivo: $dst_file"
+  echo "  Para editarlo:  opencode-switch edit $dst"
+  echo "  Para activarlo: opencode-switch $dst"
+}
+
+add_profile() {
+  local new_name="${1:-}"
+  local base_profile="${2:-}"
+
+  if [ -z "$new_name" ]; then
+    if [ -t 0 ]; then
+      read -rp "Nombre para el nuevo perfil: " new_name || true
+    fi
+    if [ -z "$new_name" ]; then
+      echo "Uso: opencode-switch add <nombre> [perfil_base]" >&2
+      echo "Ejemplo: opencode-switch add mi-perfil default" >&2
+      return 1
+    fi
+  fi
+
+  if [ -z "$base_profile" ]; then
+    if [ -t 0 ]; then
+      local available_bases=()
+      for p_path in "$MODELS_DIR"/models.*.json; do
+        [ -f "$p_path" ] || continue
+        local p_base="$(basename "$p_path")"
+        local p_name="${p_base#models.}"
+        p_name="${p_name%.json}"
+        [ "$p_name" = "v2" ] && continue
+        available_bases+=("$p_name")
+      done
+
+      if command -v fzf >/dev/null 2>&1; then
+        base_profile=$(printf "%s\n" "${available_bases[@]}" | fzf --height 40% --reverse --prompt="Selecciona perfil base [default] > " | awk '{print $1}')
+      else
+        read -rp "Perfil base a clonar [default]: " base_profile || true
+      fi
+    fi
+    [ -z "$base_profile" ] && base_profile="default"
+  fi
+
+  copy_profile "$base_profile" "$new_name" || return 1
+
+  if [ -t 0 ]; then
+    local answer=""
+    read -rp "¿Quieres editar los subagentes de '$new_name' ahora? [S/n]: " answer || true
+    case "$answer" in
+      n|N) ;;
+      *)
+        edit_subagent_in_profile "$new_name"
+        ;;
+    esac
+  fi
+}
+
 edit_subagent_in_profile() {
   local target_profile="${1:-default}"
   local target_file=""
 
-  case "$target_profile" in
-    default) target_file="$MODELS_DIR/models.default.json" ;;
-    zai) target_file="$MODELS_DIR/models.zai.json" ;;
-    claude) target_file="$MODELS_DIR/models.claude.json" ;;
-    openai) target_file="$MODELS_DIR/models.openai.json" ;;
-    opencode-go) target_file="$MODELS_DIR/models.opencode-go.json" ;;
-    active|current|"") target_file="$ACTIVE_MAP" ;;
-    *)
-      if [ -f "$MODELS_DIR/models.${target_profile}.json" ]; then
-        target_file="$MODELS_DIR/models.${target_profile}.json"
-      else
-        echo "Perfil no encontrado: $target_profile" >&2
-        exit 1
-      fi
-      ;;
-  esac
+  if [ "$target_profile" = "active" ] || [ "$target_profile" = "current" ] || [ -z "$target_profile" ]; then
+    target_file="$ACTIVE_MAP"
+  elif ! target_file="$(resolve_profile_file "$target_profile")" || [ ! -f "$target_file" ]; then
+    echo "Perfil no encontrado: $target_profile" >&2
+    exit 1
+  fi
 
   local is_active=0
   if [ "$target_file" = "$ACTIVE_MAP" ] || [ "$(readlink -f "$target_file")" = "$(readlink -f "$ACTIVE_MAP")" ]; then
@@ -646,12 +942,49 @@ EOF
 }
 
 interactive_menu() {
-  local options=(
-    "default          - Opción A Primaria (GLM-5.3-flash, GLM-5.3 max, Sol verify, Gemini explore)"
-    "claude           - Prioridad Anthropic Directa (Sonnet 5.5 worker, Opus 5.5 riesgo)"
-    "openai           - Prioridad ChatGPT Plus (GPT-6.1 Sol worker/verify/reviewers)"
-    "opencode-go      - Prioridad OpenCode Go / Zen (Qwen 3.8 Max worker/verify)"
+  local options=()
+  local known_main=("default" "claude" "openai" "opencode-go" "zai")
+
+  for p in "${known_main[@]}"; do
+    local desc=""
+    case "$p" in
+      default) desc="Opción A Primaria (GLM-5.3-flash, GLM-5.3 max, Sol verify, Gemini explore)" ;;
+      claude) desc="Prioridad Anthropic Directa (Sonnet 5.5 worker, Opus 5.5 riesgo)" ;;
+      openai) desc="Prioridad ChatGPT Plus (GPT-6.1 Sol worker/verify/reviewers)" ;;
+      opencode-go) desc="Prioridad OpenCode Go / Zen (Qwen 3.8 Max worker/verify)" ;;
+      zai) desc="Prioridad Z.ai Max (AGY en explore/readability, resto default)" ;;
+    esac
+    if [ -f "$MODELS_DIR/models.${p}.json" ]; then
+      options+=("$(printf "%-16s - %s" "$p" "$desc")")
+    fi
+  done
+
+  # Otros perfiles encontrados en MODELS_DIR
+  for pf in "$MODELS_DIR"/models.*.json; do
+    [ -f "$pf" ] || continue
+    local bname="$(basename "$pf")"
+    local pname="${bname#models.}"
+    pname="${pname%.json}"
+    [ "$pname" = "v2" ] && continue
+
+    local already=0
+    for km in "${known_main[@]}"; do
+      if [ "$km" = "$pname" ]; then already=1; break; fi
+    done
+    [ "$already" -eq 1 ] && continue
+
+    local comment=""
+    comment="$(jq -r '."$comment" // empty' "$pf" 2>/dev/null || true)"
+    if [ -z "$comment" ]; then
+      comment="Perfil ($bname)"
+    fi
+    options+=("$(printf "%-16s - %s" "$pname" "$comment")")
+  done
+
+  options+=(
     "edit             - Seleccionar y cambiar modelo/variante de subagentes en un perfil"
+    "copy             - Copiar/duplicar un perfil existente"
+    "add              - Crear un nuevo perfil a partir de una base"
     "apply            - Aplicar perfil activo actual a OpenCode e instalar"
     "status           - Mostrar tabla detallada del estado de todos los subagentes"
   )
@@ -674,15 +1007,19 @@ interactive_menu() {
     echo "3) openai      (Prioridad ChatGPT Plus)"
     echo "4) opencode-go (Prioridad OpenCode Go / Zen)"
     echo "e) edit        (Editar modelo/variante de subagentes en un perfil)"
+    echo "c) copy        (Copiar perfil existente)"
+    echo "n) add         (Crear nuevo perfil)"
     echo "a) apply       (Aplicar perfil activo a OpenCode)"
     echo "s) status      (Ver estado actual)"
-    read -rp "Elige una opción [1-4, e, a, s]: " opt
+    read -rp "Elige una opción [1-4, e, c, n, a, s]: " opt
     case "$opt" in
       1) choice="default" ;;
       2) choice="claude" ;;
       3) choice="openai" ;;
       4) choice="opencode-go" ;;
       e|E|5) choice="edit" ;;
+      c|C) choice="copy" ;;
+      n|N) choice="add" ;;
       a|A) choice="apply" ;;
       s|S|6) choice="status" ;;
       *) echo "Cancelado." ; exit 0 ;;
@@ -692,7 +1029,7 @@ interactive_menu() {
   # Si pulsó 'e' o 'ctrl-e' sobre cualquier perfil en la lista de fzf
   if [ "$key" = "e" ] || [ "$key" = "ctrl-e" ]; then
     local target_p="${choice:-active}"
-    if [ "$target_p" = "edit" ] || [ "$target_p" = "status" ] || [ "$target_p" = "apply" ]; then
+    if [ "$target_p" = "edit" ] || [ "$target_p" = "status" ] || [ "$target_p" = "apply" ] || [ "$target_p" = "copy" ] || [ "$target_p" = "add" ]; then
       target_p="active"
     fi
     edit_subagent_in_profile "$target_p"
@@ -704,9 +1041,42 @@ interactive_menu() {
       edit)
         local prof_choice="active"
         if command -v fzf >/dev/null 2>&1 && [ -t 0 ]; then
-          prof_choice=$(printf "%s\n" "active (perfil actualmente en uso)" "default" "claude" "openai" "opencode-go" "zai" | fzf --height 40% --reverse --prompt="¿En qué perfil quieres modificar el subagente? > " | awk '{print $1}')
+          local available_profiles=("active (perfil actualmente en uso)")
+          for p_path in "$MODELS_DIR"/models.*.json; do
+            [ -f "$p_path" ] || continue
+            local p_base="$(basename "$p_path")"
+            local p_name="${p_base#models.}"
+            p_name="${p_name%.json}"
+            [ "$p_name" = "v2" ] && continue
+            available_profiles+=("$p_name")
+          done
+          prof_choice=$(printf "%s\n" "${available_profiles[@]}" | fzf --height 40% --reverse --prompt="¿En qué perfil quieres modificar el subagente? > " | awk '{print $1}')
         fi
         edit_subagent_in_profile "${prof_choice:-active}"
+        ;;
+      copy)
+        local src_p="default" dst_p=""
+        if command -v fzf >/dev/null 2>&1 && [ -t 0 ]; then
+          local available_profiles=()
+          for p_path in "$MODELS_DIR"/models.*.json; do
+            [ -f "$p_path" ] || continue
+            local p_base="$(basename "$p_path")"
+            local p_name="${p_base#models.}"
+            p_name="${p_name%.json}"
+            [ "$p_name" = "v2" ] && continue
+            available_profiles+=("$p_name")
+          done
+          src_p=$(printf "%s\n" "${available_profiles[@]}" | fzf --height 40% --reverse --prompt="Perfil origen a copiar > " | awk '{print $1}')
+        else
+          read -rp "Perfil origen [default]: " src_p || true
+          [ -z "$src_p" ] && src_p="default"
+        fi
+        [ -z "$src_p" ] && exit 0
+        read -rp "Nombre del nuevo perfil: " dst_p || true
+        copy_profile "$src_p" "$dst_p"
+        ;;
+      add)
+        add_profile
         ;;
       apply)
         "$SCRIPT_PATH" apply
@@ -763,9 +1133,15 @@ case "$PROFILE" in
   edit|subagent)
     edit_subagent_in_profile "${ARGS[1]:-active}"
     ;;
+  copy|clone|cp)
+    copy_profile "${ARGS[1]:-}" "${ARGS[2]:-}"
+    ;;
+  add|new|create)
+    add_profile "${ARGS[1]:-}" "${ARGS[2]:-}"
+    ;;
   apply)
     echo "Aplicando configuración activa a OpenCode..."
-    "$INSTALLER"
+    install_profile "$ACTIVE_MAP"
     echo ""
     show_status
     ;;
@@ -776,16 +1152,16 @@ case "$PROFILE" in
     if [ "$FALLBACK_MODE" -eq 1 ]; then
       echo "Cambiando a perfil: DEFAULT (con fallback) (Orquestador en Sol, Worker en Sonnet 5.5, Verify en Sol)..."
       # Si se pide flag -f en default, carga directamente Sol/Sonnet como contingencia
-      cp "$MODELS_DIR/models.openai.json" "$ACTIVE_MAP"
+      selected_profile="$MODELS_DIR/models.openai.json"
     else
       if command -v ai-quotas >/dev/null 2>&1; then
         echo "Verificando cuota de Z.ai..."
         ai-quotas check || true
       fi
       echo "Cambiando a perfil: DEFAULT (Opción A Primaria — Orquestador GLM-5.3-flash, Worker GLM-5.3, Verify Sol)..."
-      cp "$MODELS_DIR/models.default.json" "$ACTIVE_MAP"
+      selected_profile="$MODELS_DIR/models.default.json"
     fi
-    "$INSTALLER"
+    install_profile "$selected_profile"
     echo ""
     show_status
     ;;
@@ -795,40 +1171,48 @@ case "$PROFILE" in
       ai-quotas check || true
     fi
     echo "Cambiando a perfil: ZAI (Prioridad Z.ai Max — Worker en GLM-5.3, Orquestador GLM-5.3-flash)..."
-    cp "$MODELS_DIR/models.zai.json" "$ACTIVE_MAP"
-    "$INSTALLER"
+    install_profile "$MODELS_DIR/models.zai.json"
     echo ""
     show_status
     ;;
   claude|subs)
     echo "Cambiando a perfil: CLAUDE (Prioridad Anthropic Directa — Worker/Verify en Sonnet 5.5, Riesgo en Opus 5.5)..."
-    cp "$MODELS_DIR/models.claude.json" "$ACTIVE_MAP"
-    "$INSTALLER"
+    install_profile "$MODELS_DIR/models.claude.json"
     echo ""
     show_status
     ;;
   openai|sol|subs-sol|subs-openai)
     echo "Cambiando a perfil: OPENAI (Prioridad ChatGPT Plus — Worker/Verify/Review en GPT-6.1 Sol)..."
-    cp "$MODELS_DIR/models.openai.json" "$ACTIVE_MAP"
-    "$INSTALLER"
+    install_profile "$MODELS_DIR/models.openai.json"
     echo ""
     show_status
     ;;
   opencode-go|zen|go)
     echo "Cambiando a perfil: OPENCODE-GO (Prioridad OpenCode Go / Zen — Worker/Verify en Qwen 3.8 Max)..."
-    cp "$MODELS_DIR/models.opencode-go.json" "$ACTIVE_MAP"
-    "$INSTALLER"
+    install_profile "$MODELS_DIR/models.opencode-go.json"
     echo ""
     show_status
     ;;
   status)
     show_status
     echo ""
-    echo "Uso: opencode-switch [--fallback | -f] [--no-apply | -n] [--apply | -y] [default | zai | claude | openai | opencode-go | edit | apply | status | menu]"
+    echo "Uso: opencode-switch [--fallback | -f] [--no-apply | -n] [--apply | -y] [<perfil> | edit | copy | add | apply | status | menu]"
+    echo "Al cambiar o aplicar un perfil, puedes reemplazar sus modelos ausentes en todos los perfiles (confirmación obligatoria)."
     ;;
   *)
-    echo "Perfil desconocido: $PROFILE" >&2
-    echo "Uso: opencode-switch [--fallback | -f] [--no-apply | -n] [--apply | -y] [default | zai | claude | openai | opencode-go | edit | apply | status | menu]" >&2
-    exit 1
+    matched_profile=""
+    if matched_profile="$(resolve_profile_file "$PROFILE" 2>/dev/null)" && [ -f "$matched_profile" ]; then
+      prof_display_name="$(basename "$matched_profile")"
+      prof_display_name="${prof_display_name#models.}"
+      prof_display_name="${prof_display_name%.json}"
+      echo "Cambiando a perfil: ${prof_display_name^^} ($(basename "$matched_profile"))..."
+      install_profile "$matched_profile"
+      echo ""
+      show_status
+    else
+      echo "Perfil desconocido: $PROFILE" >&2
+      echo "Uso: opencode-switch [--fallback | -f] [--no-apply | -n] [--apply | -y] [default | zai | claude | openai | opencode-go | <perfil> | edit | copy | add | apply | status | menu]" >&2
+      exit 1
+    fi
     ;;
 esac
