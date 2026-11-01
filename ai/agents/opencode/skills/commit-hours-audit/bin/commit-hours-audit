@@ -638,7 +638,9 @@ function cmdAudit(opts) {
   }
   const inGraph = new Set(graph.map((c) => c.sha));
   const planned = new Set([...wanted].filter((sha) => inGraph.has(sha)));
-  const { proposals, warnings, unresolved } = buildProposals(graph, planned, ruleMap, opts.slot, nowTs);
+  // --allow-future: the commit's own day is always eligible, even before its slot.
+  const slotLimit = opts.allowFuture ? Infinity : nowTs;
+  const { proposals, warnings, unresolved } = buildProposals(graph, planned, ruleMap, opts.slot, slotLimit);
   for (const c of direct) {
     if (!inGraph.has(c.sha)) warnings.push(`${short(c.sha)} is not in any local branch or tag; it cannot be rewritten`);
   }

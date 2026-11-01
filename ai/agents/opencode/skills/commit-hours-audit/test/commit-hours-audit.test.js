@@ -648,6 +648,17 @@ test('lookup finds old and new ids across chained rewrites, even after the clone
   assert.match(none.stderr, /no commit matching deadbeef/);
 });
 
+test('--allow-future keeps the proposal on the commit day even when its slot has not come yet', () => {
+  const { repo, shas } = smallRepo('future', [['today', '2026-10-27T10:00:00+01:00']]);
+  const now = { COMMIT_HOURS_AUDIT_NOW: '2026-10-27T15:00:00+01:00' };
+  const past = cliJson(repo, [], now);
+  assert.equal(past.violations[0].proposed, '2026-10-26T19:00:00+01:00');
+  const future = cliJson(repo, ['--allow-future'], now);
+  assert.equal(future.violations.find((v) => v.sha === shas[0]).proposed, '2026-10-27T19:00:00+01:00');
+  assert.ok(!future.warnings.some((w) => /moved back/.test(w)), future.warnings.join('\n'));
+  assert.ok(!future.warnings.some((w) => /after "now"/.test(w)), future.warnings.join('\n'));
+});
+
 test('apply stops when git-filter-repo is missing', () => {
   const gitDir = path.dirname(run('sh', ['-c', 'command -v git'], scratch).stdout.trim());
   const probe = run('git', ['filter-repo', '--version'], scratch, { PATH: gitDir });
