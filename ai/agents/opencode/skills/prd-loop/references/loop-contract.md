@@ -155,6 +155,14 @@ was never verified — is a gap that blocks readiness and is listed as such.
   milestone stops and reports — no renames, resets or unbounded retries.
 - The budget is a technical proposal until the user actually launches with the launch
   prompt.
+- Scope containment & Stop Gate:
+  1. The executor's active scope is strictly bounded to the tasks and gates specified in the pack.
+     Implementing unrequested refactorings, optimizations, or speculative features is forbidden.
+  2. Escalation channel: If the executor uncovers a critical defect, regression risk, or broken dependency
+     outside the pack scope, it MUST NOT implement a fix unilaterally. It MUST document the finding in the
+     summary under "Blocked / Escalated Issues" and immediately stop calling tools.
+  3. Binary stop: Once all milestone gates pass, the executor reports completion and immediately yields control.
+     No unprompted iterative loops or spontaneous improvements.
 - Stop conditions for the future executor: crash, unknown error class, wrong source
   (identity hash mismatch), unavailable gate, any need for native human consent, budget
   exhaustion. On stop, report state losslessly and resume only via Section 10.
