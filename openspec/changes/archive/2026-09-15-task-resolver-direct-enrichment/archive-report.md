@@ -12,15 +12,15 @@ This report describes the change AT CLOSE. It supersedes any "pending/blocked" c
 | Fact | Final state | Source rank |
 |------|-------------|-------------|
 | Tasks | 8/8 complete (checkboxes reconciled at archive — see below) | Persisted tasks artifact |
-| Implementation slice | `66b3531` "feat(resolver): direct informational enrichment replaces approval flow" — 496 changed lines (455+/41−), maintainer-accepted size:exception | Launch handoff (final-state facts) |
-| Planning artifacts | Committed `244b772` | Launch handoff |
-| Verify report | Committed `cdda890`; `bun test` 249 pass / 0 fail, `bunx tsc --noEmit` exit 0; validator `valid:true` (Engram obs #8832) | Persisted verify-report |
+| Implementation slice | `1b73bfe` "feat(resolver): direct informational enrichment replaces approval flow" — 496 changed lines (455+/41−), maintainer-accepted size:exception | Launch handoff (final-state facts) |
+| Planning artifacts | Committed `343cde3` | Launch handoff |
+| Verify report | Committed `891d7ba`; `bun test` 249 pass / 0 fail, `bunx tsc --noEmit` exit 0; validator `valid:true` (Engram obs #8832) | Persisted verify-report |
 | v1 executor/detector | Dormant, not deleted — `DEPRECATED (v1, dormant)` docblocks in `execute.ts` + `detector.ts` | Slice commit + handoff |
 | Cron | NOT installed and NOT wanted (v2 is on-demand) | Launch handoff |
 | TEST task | Trashed (not part of the delivered work) | Launch handoff |
 | Delivery | NOT pushed, no branches, no PRs (user-owned) | Launch handoff |
 
-Per-task completion evidence: apply-progress obs #8821 records all 8 tasks `[x]` with attempt-2 commit gates (full suite 249 pass, tsc exit 0, secret-scan clean, staged-paths audit via `git show --stat`); verify-report independently confirms 8/8 substantive with all 6 delta paths landed in `66b3531`.
+Per-task completion evidence: apply-progress obs #8821 records all 8 tasks `[x]` with attempt-2 commit gates (full suite 249 pass, tsc exit 0, secret-scan clean, staged-paths audit via `git show --stat`); verify-report independently confirms 8/8 substantive with all 6 delta paths landed in `1b73bfe`.
 
 ### Intermediate-snapshot claims superseded at close
 
@@ -42,7 +42,7 @@ Per-task completion evidence: apply-progress obs #8821 records all 8 tasks `[x]`
 
 ## Sanctioned Archive-Time Actions
 
-1. **tasks.md checkbox reconciliation.** Apply never edits `openspec/**` checkboxes (repo policy), so `tasks.md` still showed `- [ ]` on all 8 tasks even though the work was landed and green. The orchestrator explicitly authorized archive-time reconciliation backed by proof: apply-progress obs #8821 records all 8 tasks complete with commit evidence (`66b3531`), and the persisted verify-report confirms 8/8 substantive, 0 CRITICAL, green gates. All 8 checkboxes were toggled mechanically; the dispatcher was then re-queried and reported `taskProgress 8/8`, `dependencies.archive: ready`, `nextRecommended: archive` before any spec sync or move.
+1. **tasks.md checkbox reconciliation.** Apply never edits `openspec/**` checkboxes (repo policy), so `tasks.md` still showed `- [ ]` on all 8 tasks even though the work was landed and green. The orchestrator explicitly authorized archive-time reconciliation backed by proof: apply-progress obs #8821 records all 8 tasks complete with commit evidence (`1b73bfe`), and the persisted verify-report confirms 8/8 substantive, 0 CRITICAL, green gates. All 8 checkboxes were toggled mechanically; the dispatcher was then re-queried and reported `taskProgress 8/8`, `dependencies.archive: ready`, `nextRecommended: archive` before any spec sync or move.
 2. **SKILL.md reference re-point (verify SUGGESTION 1).** The References section cited the change-scoped path `openspec/changes/task-resolver-direct-enrichment/specs/notion-task-hitl-resolver/spec.md`, which stopped existing at archive. Re-pointed to the established capability spec `openspec/specs/notion-task-hitl-resolver/spec.md`.
 
 ## Archive Verification Evidence

@@ -19,7 +19,7 @@ build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca49599
 **Change**: task-resolver-direct-enrichment
 **Version**: v2 (SKILL.md 2.0)
 **Mode**: Standard (strict_tdd: false per openspec/config.yaml)
-**Verified revision**: 66b3531 (`feat(resolver): direct informational enrichment replaces approval flow`); HEAD 244b772.
+**Verified revision**: 1b73bfe (`feat(resolver): direct informational enrichment replaces approval flow`); HEAD 343cde3.
 
 ### Completeness
 
@@ -28,7 +28,7 @@ build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca49599
 | Requirements (delta headings) | 6 (3 implemented, 2 removed, 1 renamed) |
 | Scenarios | 5 |
 | Tasks total | 8 (across 4 phases) |
-| Tasks complete (substantive) | 8 — all 6 paths landed in 66b3531 |
+| Tasks complete (substantive) | 8 — all 6 paths landed in 1b73bfe |
 | Tasks incomplete | 0 (substantive) |
 
 Note: `tasks.md` checklist boxes remain untoggled (`- [ ]`). The work is demonstrably landed and passing; this is apply-phase bookkeeping hygiene, not missing work.

@@ -135,9 +135,9 @@ Diff review e histórico (diffview):
 
 1. Anotá el item, el error exacto y `:messages` + `:LspInfo` si aplica
 2. Rollback por slice (cada uno es independiente):
-   - P0: `git revert 25697a9` (vuelve a ts_ls)
-   - P1: `git revert 40de1fb 0c6f697` (vuelve a las terminales de usar-y-tirar)
-   - P2: `git revert 182fe21` (quita `<leader>gc`)
+   - P0: `git revert 75e936b` (vuelve a ts_ls)
+   - P1: `git revert 511c05b d746a90` (vuelve a las terminales de usar-y-tirar)
+   - P2: `git revert ecb8199` (quita `<leader>gc`)
 3. Los perfiles `.nvim/terminals.json` no guardan estado — borrarlos no rompe nada
 
 ## Referencia rápida — keymaps nuevos de este cambio

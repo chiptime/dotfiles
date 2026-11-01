@@ -6,7 +6,7 @@
 | Mode | Standard verify (Strict TDD: inactive) |
 | Verifier | sdd-verify (independent re-verification) |
 | Date | 2026-09-03 |
-| Commits verified | `25697a9` (P0), `0c6f697`+`40de1fb`+`b253265` (P1), `182fe21` (P2) |
+| Commits verified | `75e936b` (P0), `d746a90`+`511c05b`+`74bccab` (P1), `ecb8199` (P2) |
 | Artifacts consumed | 4 specs, design.md, tasks.md, apply-progress.md |
 
 ## Summary

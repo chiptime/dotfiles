@@ -92,20 +92,20 @@ with a proportional, deterministic handoff for a future authorized execution loo
 - [x] PL-05 Publish the authorized unit from an isolated worktree on `feat/prd-loop`.
   Verify the exact staged allowlist, secret checks, commit identity and remote SHA.
   Record the implementation commit in this document; do not amend or force-push.
-  Delivery evidence: primary commit `3b6ae623c4e5d9d722f86f102bac8330d9b16dca`
+  Delivery evidence: primary commit `42c9940a01944eb2777c1adb6d62d45c877dd2d0`
   (`feat(skills): add prd-loop execution preparation`) pushed with a normal
   non-force `git push -u origin feat/prd-loop`; remote `refs/heads/feat/prd-loop`
   VERIFIED equal to that SHA by post-push `ls-remote`. Staged scope was exactly
   the 10 authorized files (9 skill files plus this book), 642 insertions, under
   the user-accepted `size:exception` (`delivery_strategy: exception-ok`).
   Pre-push state: clean worktree, empty index, single local commit over base
-  `a8f4ba4f…`, remote branch previously absent (pure new-branch push, no
+  `2f623018…`, remote branch previously absent (pure new-branch push, no
   rewrite). Checks rerun for delivery: allowlist/diff identity and SHA256
   equality of all 9 skill files between source root and worktree
   (`SKILL.md` `70670eff…`); structural/YAML/eval and secret scans were NOT
   rerun because source bytes are identical to the verified preparation — no
   production PASS is claimed from this delivery. Root `/home/bruno/.dotfiles`
-  was guarded read-only: kept on `master` @ `a8f4ba4f…`, empty index, all
+  was guarded read-only: kept on `master` @ `2f623018…`, empty index, all
   pre-existing WIP intact, no root writes. No PR (GitHub's automatic
   suggestion URL ignored), no merge, no amend, no force-push.
 
@@ -145,10 +145,10 @@ with a proportional, deterministic handoff for a future authorized execution loo
   this document that no commit existed described the preparation phase only
   and are retained as history. Current delivery record: from isolated
   worktree `/home/bruno/.dotfiles-worktrees/prd-loop-publish`, branch
-  `feat/prd-loop` cut from published `origin/master` base `a8f4ba4f…`
+  `feat/prd-loop` cut from published `origin/master` base `2f623018…`
   (verified by fetch plus `ls-remote` identity match; branch previously
   absent local and remote), the single work-unit commit
-  `3b6ae623c4e5d9d722f86f102bac8330d9b16dca` holding exactly the 10-file
+  `42c9940a01944eb2777c1adb6d62d45c877dd2d0` holding exactly the 10-file
   allowlist (642 insertions) was pushed normally and the remote SHA verified
   equal — PL-05 closed on that verification. This close-out metadata edit is
   a follow-up book-only commit on the same branch; its own SHA is

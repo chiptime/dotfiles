@@ -1,6 +1,6 @@
 # Ecosystem portal — phase 1
 Objective: coherent catalogue/tracking UX with separate data ownership, plus safe periodic local discovery. Working branch: master (pre-existing dirty work preserved; no commits or publishing authorized). Delivery: ask-on-risk; forecast approximately 550 authored lines across two independent units; no PR planned.
-Runners: Python unittest (isolated HOME/state), Node built-in tests, cargo test, shell syntax/systemd verification, browser desktop/mobile checks. Pre-change baseline: 64e924c plus existing working-tree Launchpad features described in odd/tasks/launchpad.md.
+Runners: Python unittest (isolated HOME/state), Node built-in tests, cargo test, shell syntax/systemd verification, browser desktop/mobile checks. Pre-change baseline: e3f05f6 plus existing working-tree Launchpad features described in odd/tasks/launchpad.md.
 
 ## Specs
 - S1: User: "dale, aunque antes te dire que casi casi me parece buena idea juntar este launchpad con el \"Global project tracker\" http://127.0.0.1:47624/PROJECTS.html#compare-prices". Preserve tracker sources, anchors and session links; no remote synchronization or notification calls added.

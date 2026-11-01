@@ -28,7 +28,7 @@ build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca49599
 | Tasks complete | 31 |
 | Tasks incomplete | 0 |
 
-Every task 0.1–5.6 is checked complete in the cumulative apply-progress evidence (Engram observation #8732, topic `sdd/notion-task-hitl-resolver/apply-progress`). WU-0→WU-B all landed: commits `5bf189a`, `1ed71a6` (Slice 0), `1eb6c92` (A1), `e2ec2e5`/`c119683` (A2), `82e9887` (A3), `b29a715` (A4), `449edfc` (B). 4.6 (attended schema-migrate gate) was completed attended by the orchestrator with the human; no orchestrator-owned task remains.
+Every task 0.1–5.6 is checked complete in the cumulative apply-progress evidence (Engram observation #8732, topic `sdd/notion-task-hitl-resolver/apply-progress`). WU-0→WU-B all landed: commits `095d23d`, `b04750f` (Slice 0), `1eb6c92` (A1), `e2ec2e5`/`75ba774` (A2), `856d778` (A3), `64bc14e` (A4), `334b36d` (B). 4.6 (attended schema-migrate gate) was completed attended by the orchestrator with the human; no orchestrator-owned task remains.
 
 ### Build & Tests Execution
 

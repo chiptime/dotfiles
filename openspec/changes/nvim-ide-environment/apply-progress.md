@@ -6,8 +6,8 @@ Direct work-unit commits on `master` (no branch, no PR, per orchestrator). Verif
 
 | Slice | Status | Commit |
 |---|---|---|
-| P0 vtsls parity | 4/5 done — task 1.5 (manual parity battery) pending on the user's acceptance repo | `25697a9` |
-| P1 terminal + bufferline | 12/12 done (P1a `0c6f697`, P1b `40de1fb`) | work-unit commits on master |
+| P0 vtsls parity | 4/5 done — task 1.5 (manual parity battery) pending on the user's acceptance repo | `75e936b` |
+| P1 terminal + bufferline | 12/12 done (P1a `d746a90`, P1b `511c05b`) | work-unit commits on master |
 | P2 AI commit | 9/9 done (WU-P2 commit on master) | see git log after this batch |
 
 ---
