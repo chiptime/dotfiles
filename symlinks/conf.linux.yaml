@@ -16,6 +16,8 @@
     ~/.config/opencode/skills/dotfiles-context: ai/agents/opencode/skills/dotfiles-context
     ~/.config/opencode/skills/hub-session-close: ai/agents/opencode/skills/hub-session-close
     ~/.config/opencode/skills/commit-hours-audit: ai/agents/opencode/skills/commit-hours-audit
+    ~/.config/opencode/skills/brain-msg: ai/agents/opencode/skills/brain-msg
+    ~/.local/bin/herdr-brain: /home/bruno/Code/personal/agent-tts/hosts/herdr/brain/bin/herdr-brain
     ~/.local/bin/commit-hours-audit: ai/agents/opencode/skills/commit-hours-audit/bin/commit-hours-audit
     ~/.local/bin/jest-delta: scripts/jest-delta
     ~/.config/opencode/skills/jest-delta: ai/agents/opencode/skills/jest-delta

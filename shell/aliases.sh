@@ -121,5 +121,8 @@ alias ocs='systemctl --user --no-pager status opencode-web.service mobile-proxy.
 alias ocl='journalctl --user -u opencode-web.service -u mobile-proxy.service -f'
 alias opencode-switch='~/.dotfiles/scripts/opencode-switch-profile.sh'
 
+# Gentle Shell (gentle-ai-shell)
+alias gas='gentle-shell'
+
 # TikTok Ingest
 alias ti='tiktok-ingest'
