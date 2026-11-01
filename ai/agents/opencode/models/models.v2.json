@@ -15,27 +15,27 @@
       "variant": "medium"
     },
     "general": {
-      "model": "zai-coding-plan/glm-5.3",
-      "variant": "max"
+      "model": "agy/gemini-3.8-flash",
+      "variant": ""
     },
     "gentle-ai-explore": {
       "model": "agy/gemini-3.8-flash",
       "variant": "medium"
     },
     "gentle-ai-verify": {
-      "model": "opencode-go/qwen3.7-plus",
-      "variant": ""
+      "model": "openai/gpt-6.1-sol",
+      "variant": "high"
     },
     "gentle-ai-worker": {
-      "model": "zai-coding-plan/glm-5.3",
-      "variant": "max"
+      "model": "agy/gemini-3.8-flash",
+      "variant": "high"
     },
     "gentle-ai-worker-fallback": {
       "model": "anthropic/claude-sonnet-5-5",
       "variant": "high"
     },
     "gentle-orchestrator": {
-      "model": "zai-coding-plan/glm-5.3-flash",
+      "model": "anthropic/claude-opus-5-5",
       "variant": ""
     },
     "gentleman-fix": {
@@ -43,7 +43,7 @@
       "variant": ""
     },
     "gentleman-judge": {
-      "model": "opencode/nemotron-3-ultra-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "issue-creation": {
@@ -123,11 +123,11 @@
       "variant": ""
     },
     "branch-pr-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     },
     "issue-creation-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     },
     "gentleman-judge-fallback": {
@@ -135,15 +135,15 @@
       "variant": ""
     },
     "gentleman-fix-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     },
     "compaction-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     },
     "summary-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     }
   },

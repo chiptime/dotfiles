@@ -1,13 +1,13 @@
 {
   "$comment": "Perfil OpenCode Go: Prioridad Qwen 3.8 Max de OpenCode Go / Zen. models.opencode-go.json",
-  "small_model": "opencode/muse-spark-1.3-contributor-free",
+  "small_model": "opencode/deepseek-v4.1-flash-free",
   "agents": {
     "branch-pr": {
-      "model": "opencode/ling-3.1-flash-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "compaction": {
-      "model": "opencode/muse-spark-1.3-contributor-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "explore": {
@@ -39,7 +39,7 @@
       "variant": ""
     },
     "gentleman-fix": {
-      "model": "opencode/ling-3.1-flash-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "gentleman-judge": {
@@ -47,7 +47,7 @@
       "variant": ""
     },
     "issue-creation": {
-      "model": "opencode/ling-3.1-flash-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "jd-fix-agent": {
@@ -119,15 +119,15 @@
       "variant": ""
     },
     "summary": {
-      "model": "opencode/muse-spark-1.3-contributor-free",
+      "model": "opencode/deepseek-v4.1-flash-free",
       "variant": ""
     },
     "branch-pr-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     },
     "issue-creation-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     },
     "gentleman-judge-fallback": {
@@ -135,15 +135,15 @@
       "variant": ""
     },
     "gentleman-fix-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     },
     "compaction-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     },
     "summary-fallback": {
-      "model": "zai-coding-plan/glm-4.7",
+      "model": "zai-coding-plan/glm-5.3-flash",
       "variant": ""
     }
   },
