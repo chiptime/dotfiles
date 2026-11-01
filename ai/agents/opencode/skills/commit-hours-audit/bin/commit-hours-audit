@@ -848,6 +848,63 @@ function restoreRefs(dir, plan) {
   if (head.ref !== null && plan.rewrite.some((r) => r.ref === head.ref)) git(['reset', '--hard', '-q']);
 }
 
+// ---------------------------------------------------------------------------
+// Audit log: machine-local, outside the repository, so the original commit
+// references survive a deleted or re-cloned checkout.
+//   ${XDG_DATA_HOME:-~/.local/share}/commit-hours-audit/<repo>-<hash>/
+//     audit.jsonl          append-only: started / applied / restored
+//     <plan-stamp>/        backup.bundle, commit-map, plan.json, refs-before.txt, ...
+// ---------------------------------------------------------------------------
+
+function storeRoot() {
+  const base = process.env.XDG_DATA_HOME || path.join(require('node:os').homedir(), '.local', 'share');
+  return path.join(base, PLAN_ROOT);
+}
+
+function repoKey(toplevel) {
+  const hash = require('node:crypto').createHash('sha256').update(toplevel).digest('hex').slice(0, 8);
+  return `${path.basename(toplevel)}-${hash}`;
+}
+
+function logEvent(audit, event, data) {
+  fs.appendFileSync(audit.log, JSON.stringify({ at: new Date().toISOString(), event, ...audit.base, ...data }) + '\n');
+}
+
+function archiveFiles(audit, dir, files) {
+  for (const file of files) {
+    const src = path.join(dir, file);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(audit.archive, file));
+  }
+}
+
+// Runs before anything is rewritten: if the log or the backup copy cannot be
+// written, apply stops with every ref untouched.
+function openAudit(plan, dir) {
+  try {
+    const repoDir = path.join(storeRoot(), repoKey(plan.repo.toplevel));
+    const archive = path.join(repoDir, path.basename(dir));
+    fs.mkdirSync(archive, { recursive: true });
+    const remote = git(['remote', 'get-url', 'origin']);
+    const audit = {
+      log: path.join(repoDir, 'audit.jsonl'),
+      archive,
+      base: { plan: path.basename(dir), repo: plan.repo.toplevel, remote: remote.status === 0 ? remote.stdout.trim() : null },
+    };
+    archiveFiles(audit, dir, ['plan.json', 'refs-before.txt', 'backup.bundle']);
+    logEvent(audit, 'started', {
+      rule: plan.rule,
+      slot: plan.slot,
+      planned: plan.commits.length,
+      refs: plan.rewrite.map((r) => ({ ref: r.ref, old: r.oid })),
+      bundle: path.join(archive, 'backup.bundle'),
+    });
+    return audit;
+  } catch (err) {
+    fail(`cannot write the audit log under ${storeRoot()}; nothing was rewritten.\n  ${err.message}`);
+  }
+  return null;
+}
+
 function cmdApply(opts) {
   const { plan, dir } = loadPlan(opts.planDir);
   if (fs.existsSync(path.join(dir, 'applied.json'))) fail('this plan was already applied; run a new audit');
@@ -868,6 +925,18 @@ function cmdApply(opts) {
   const metadata = path.join(plan.repo.gitdir, 'filter-repo');
   if (fs.existsSync(metadata)) fs.renameSync(metadata, path.join(dir, 'prior-filter-repo'));
 
+  const audit = openAudit(plan, dir);
+  const abort = (message) => {
+    restoreRefs(dir, plan);
+    try {
+      archiveFiles(audit, dir, ['commit-map', 'verify-report.json']);
+      logEvent(audit, 'restored', { reason: message.split('\n')[0] });
+    } catch (err) {
+      message += `\n(the audit log could not record this: ${err.message})`;
+    }
+    fail(message);
+  };
+
   let callback = fs.readFileSync(path.join(dir, 'callback.py'), 'utf8');
   // Test-only fault injection: extra Python appended to the callback.
   if (process.env.COMMIT_HOURS_AUDIT_TEST_EXTRA_CALLBACK) callback += `\n${process.env.COMMIT_HOURS_AUDIT_TEST_EXTRA_CALLBACK}\n`;
@@ -884,9 +953,8 @@ function cmdApply(opts) {
     maxBuffer: 256 * 1024 * 1024,
   });
   if (res.error || res.status !== 0) {
-    restoreRefs(dir, plan);
     const output = `${res.stdout || ''}${res.stderr || ''}`.trim().split('\n').slice(-10).join('\n');
-    fail(`git filter-repo failed; refs restored from the snapshot.\n${res.error ? res.error.message : output}`);
+    abort(`git filter-repo failed; refs restored from the snapshot.\n${res.error ? res.error.message : output}`);
   }
   for (const file of ['commit-map', 'ref-map']) {
     const src = path.join(metadata, file);
@@ -897,21 +965,34 @@ function cmdApply(opts) {
   try {
     report = verifyPlan(plan, dir);
   } catch (err) {
-    restoreRefs(dir, plan);
-    fail(`verification could not run; refs restored from the snapshot.\n  ${err.message}`);
+    abort(`verification could not run; refs restored from the snapshot.\n  ${err.message}`);
   }
   fs.writeFileSync(path.join(dir, 'verify-report.json'), JSON.stringify(report, null, 2) + '\n');
   if (!report.ok) {
-    restoreRefs(dir, plan);
-    fail(`verification failed; refs restored from the snapshot.\n  ${report.errors.slice(0, 20).join('\n  ')}`);
+    abort(`verification failed; refs restored from the snapshot.\n  ${report.errors.slice(0, 20).join('\n  ')}`);
   }
 
   const now = readRefs();
   const changes = plan.rewrite.map((r) => ({ ref: r.ref, old: r.oid, new: now.get(r.ref).oid }));
   fs.writeFileSync(path.join(dir, 'applied.json'), JSON.stringify({ appliedAt: new Date().toISOString(), refs: changes }, null, 2) + '\n');
+  let logged = true;
+  try {
+    archiveFiles(audit, dir, ['commit-map', 'ref-map', 'verify-report.json', 'applied.json']);
+    logEvent(audit, 'applied', {
+      refs: changes,
+      checked: report.checked,
+      datesChanged: report.datesChanged,
+      verify: 'OK',
+      archive: audit.archive,
+    });
+  } catch (err) {
+    logged = false;
+    report.warnings.push(`the rewrite succeeded but the audit log could not record it (${err.message}); keep ${dir}`);
+  }
 
   const out = [];
   out.push(`backup bundle: ${bundle}`);
+  if (logged) out.push(`audit log: ${audit.log} (backup and commit map copied to ${audit.archive})`);
   out.push(`rewrote ${changes.length} ref(s):`);
   for (const c of changes) out.push(`  ${c.ref.padEnd(32)} ${short(c.old)} -> ${short(c.new)}`);
   out.push(verifySummary(report));
@@ -1317,7 +1398,97 @@ function cmdRemapDocs(opts) {
 // CLI
 // ---------------------------------------------------------------------------
 
-const COMMANDS = new Set(['apply', 'verify', 'remap-docs']);
+// ---------------------------------------------------------------------------
+// lookup: old <-> new commit ids from the audit log, no repository needed
+// ---------------------------------------------------------------------------
+
+function readAppliedSteps(repoDir) {
+  const log = path.join(repoDir, 'audit.jsonl');
+  if (!fs.existsSync(log)) return [];
+  const steps = [];
+  for (const line of lines(fs.readFileSync(log, 'utf8'))) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue; // a torn last line must not hide the rest of the log
+    }
+    if (event.event !== 'applied') continue;
+    const archive = path.join(repoDir, event.plan);
+    if (!fs.existsSync(path.join(archive, 'commit-map'))) continue;
+    const map = readCommitMap(archive);
+    const reverse = new Map();
+    for (const [o, n] of map) if (o !== n && !ZERO_ID.test(n)) reverse.set(n, o);
+    const planFile = path.join(archive, 'plan.json');
+    const planned = fs.existsSync(planFile)
+      ? new Map(JSON.parse(fs.readFileSync(planFile, 'utf8')).commits.map((c) => [c.sha, c]))
+      : new Map();
+    steps.push({ event, map, reverse, planned });
+  }
+  return steps;
+}
+
+function cmdLookup(opts) {
+  const token = opts.planDir;
+  if (!token || !/^[0-9a-f]{7,40}$/.test(token)) fail('lookup needs a commit id (7 to 40 lowercase hex characters)');
+  const root = storeRoot();
+  const matches = [];
+  const repos = fs.existsSync(root) ? fs.readdirSync(root).sort() : [];
+  for (const key of repos) {
+    const steps = readAppliedSteps(path.join(root, key));
+    const ids = new Set();
+    for (const s of steps) for (const [o, n] of s.map) if (o !== n && !ZERO_ID.test(n)) { ids.add(o); ids.add(n); }
+    const origins = new Set();
+    for (const id of ids) {
+      if (!id.startsWith(token)) continue;
+      let origin = id;
+      for (let i = steps.length - 1; i >= 0; i--) if (steps[i].reverse.has(origin)) origin = steps[i].reverse.get(origin);
+      origins.add(origin);
+    }
+    for (const original of origins) {
+      let current = original;
+      const chain = [];
+      for (const s of steps) {
+        const next = s.map.get(current);
+        if (next === undefined || next === current || ZERO_ID.test(next)) continue;
+        const p = s.planned.get(current);
+        chain.push({
+          at: s.event.at,
+          plan: s.event.plan,
+          from: current,
+          to: next,
+          author: p && p.author.new ? p.author : null,
+          committer: p && p.committer.new ? p.committer : null,
+        });
+        current = next;
+      }
+      const last = steps[steps.length - 1].event;
+      matches.push({ repo: last.repo, remote: last.remote, original, current, steps: chain });
+    }
+  }
+  if (matches.length === 0) fail(`no commit matching ${token} in the audit log (${root})`);
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ query: token, matches }, null, 2) + '\n');
+    return;
+  }
+  const iso = (raw) => parseRaw(raw).iso.replace('T', ' ');
+  const out = [];
+  for (const m of matches) {
+    out.push(`${m.repo}${m.remote ? ` (${m.remote})` : ''}`);
+    out.push(`  original  ${m.original}`);
+    for (const s of m.steps) {
+      const dates = [];
+      if (s.author) dates.push(`author ${iso(s.author.old)} -> ${iso(s.author.new)}`);
+      if (s.committer) dates.push(`committer ${iso(s.committer.old)} -> ${iso(s.committer.new)}`);
+      out.push(`  ${s.at.slice(0, 16).replace('T', ' ')}  plan ${s.plan}: ${short(s.from)} -> ${short(s.to)}` +
+        `${dates.length > 0 ? `  ${dates.join('; ')}` : '  (rewritten because an ancestor moved)'}`);
+    }
+    out.push(`  current   ${m.current}  (last id recorded by commit-hours-audit)`);
+  }
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+const COMMANDS = new Set(['apply', 'verify', 'remap-docs', 'lookup']);
 const AUDIT_ONLY = new Set(['--ref', '--range', '--all', '--rule', '--slot', '--allow-future']);
 
 function parseArgs(argv) {
@@ -1363,6 +1534,7 @@ Usage:
   commit-hours-audit apply <plan-dir>         rewrite the planned refs (needs git-filter-repo)
   commit-hours-audit verify <plan-dir>        check an applied plan commit by commit
   commit-hours-audit remap-docs <plan-dir>    preview old->new commit ids cited in tracked files
+  commit-hours-audit lookup <commit-id>       old <-> new ids and dates from the audit log
 
 Options:
   --ref <ref>        Ref to audit (default: HEAD, full history).
@@ -1392,8 +1564,14 @@ plan; it writes a full bundle backup first, verifies every commit, and restores
 the refs if verification fails. Push commands are printed, never run. apply,
 verify and remap-docs take no audit options: the plan already fixes them.
 
+Every apply appends to a machine-local audit log, outside the repository:
+  \${XDG_DATA_HOME:-~/.local/share}/commit-hours-audit/<repo>-<hash>/audit.jsonl
+with a copy of the backup bundle, plan and commit map per run. lookup reads it
+from anywhere, even after the clone is gone, and follows chained rewrites.
+
 Environment:
   COMMIT_HOURS_AUDIT_NOW   Treat this ISO date as "now" (reproducible runs).
+  XDG_DATA_HOME            Base directory of the audit log (default ~/.local/share).
 
 Exit codes:
   0  success (0 or more violations; verify passed)
@@ -1408,6 +1586,7 @@ function main() {
     if (opts.command === 'apply') return cmdApply(opts);
     if (opts.command === 'verify') return cmdVerify(opts);
     if (opts.command === 'remap-docs') return cmdRemapDocs(opts);
+    if (opts.command === 'lookup') return cmdLookup(opts);
     return cmdAudit(opts);
   } catch (err) {
     if (!(err instanceof CliError)) throw err;

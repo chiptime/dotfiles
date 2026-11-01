@@ -568,6 +568,86 @@ test('apply warns when a detached HEAD stays on rewritten history', () => {
   assert.match(res.stdout, /HEAD is detached at .* which was rewritten/);
 });
 
+// Audit log outside the repository -----------------------------------------
+
+function freshHome() {
+  return fs.mkdtempSync(path.join(scratch, 'home-'));
+}
+
+function auditEvents(home) {
+  const root = path.join(home, '.local', 'share', 'commit-hours-audit');
+  const repos = fs.readdirSync(root);
+  assert.equal(repos.length, 1, repos.join(','));
+  const dir = path.join(root, repos[0]);
+  const events = fs.readFileSync(path.join(dir, 'audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  return { dir, events };
+}
+
+test('apply keeps an append-only audit log and the backup outside the repository', () => {
+  const home = freshHome();
+  const repo = freshRepo();
+  const { dir } = planOf(repo, [], { HOME: home });
+  const res = cli(repo, ['apply', dir], { HOME: home });
+  assert.equal(res.status, 0, res.stderr);
+  const { dir: store, events } = auditEvents(home);
+  assert.deepEqual(events.map((e) => e.event), ['started', 'applied']);
+  const applied = events[1];
+  assert.equal(applied.repo, repo);
+  assert.equal(applied.verify, 'OK');
+  assert.ok(applied.refs.some((r) => r.ref === 'refs/heads/main' && r.new === git(repo, 'rev-parse', 'main')));
+  const archive = path.join(store, path.basename(dir));
+  for (const file of ['backup.bundle', 'commit-map', 'plan.json', 'refs-before.txt', 'verify-report.json']) {
+    assert.ok(fs.existsSync(path.join(archive, file)), file);
+  }
+  assert.equal(run('git', ['bundle', 'verify', path.join(archive, 'backup.bundle')], repo).status, 0);
+  assert.match(res.stdout, /audit log: /);
+});
+
+test('a failed apply is logged as restored', () => {
+  const home = freshHome();
+  const repo = freshRepo();
+  const { dir } = planOf(repo, [], { HOME: home });
+  const res = cli(repo, ['apply', dir], {
+    HOME: home,
+    COMMIT_HOURS_AUDIT_TEST_EXTRA_CALLBACK: 'if commit.message.startswith(b"child"):\n    commit.committer_date = b"1791300000 +0200"',
+  });
+  assert.notEqual(res.status, 0);
+  const { events } = auditEvents(home);
+  assert.deepEqual(events.map((e) => e.event), ['started', 'restored']);
+  assert.match(events[1].reason, /verification failed/);
+});
+
+test('lookup finds old and new ids across chained rewrites, even after the clone is gone', () => {
+  const home = freshHome();
+  const { repo, shas } = smallRepo('lookup', [
+    ['root', '2026-10-04T12:00:00+02:00'],
+    ['v1', '2026-10-05T10:00:00+02:00'],
+    ['v2', '2026-10-06T10:00:00+02:00'],
+  ]);
+  const first = planOf(repo, ['--range', `${shas[1]}..main`], { HOME: home });
+  assert.equal(cli(repo, ['apply', first.dir], { HOME: home }).status, 0);
+  const second = planOf(repo, [], { HOME: home });
+  assert.equal(cli(repo, ['apply', second.dir], { HOME: home }).status, 0);
+  const current = git(repo, 'rev-parse', 'main');
+  fs.rmSync(path.dirname(repo), { recursive: true, force: true });
+
+  const byOld = cliJson(scratch, ['lookup', shas[2].slice(0, 7)], { HOME: home });
+  assert.equal(byOld.matches.length, 1);
+  const m = byOld.matches[0];
+  assert.equal(m.original, shas[2]);
+  assert.equal(m.current, current);
+  assert.equal(m.steps.length, 2);
+  assert.equal(m.steps[0].author.old.split(' ')[0], '1791273600');
+  const byNew = cliJson(scratch, ['lookup', current], { HOME: home });
+  assert.equal(byNew.matches[0].original, shas[2]);
+  const text = cli(scratch, ['lookup', shas[2]], { HOME: home });
+  assert.equal(text.status, 0);
+  assert.match(text.stdout, new RegExp(`original +${shas[2]}`));
+  const none = cli(scratch, ['lookup', 'deadbeef'], { HOME: home });
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /no commit matching deadbeef/);
+});
+
 test('apply stops when git-filter-repo is missing', () => {
   const gitDir = path.dirname(run('sh', ['-c', 'command -v git'], scratch).stdout.trim());
   const probe = run('git', ['filter-repo', '--version'], scratch, { PATH: gitDir });

@@ -25,6 +25,7 @@ Default rule: **Mon–Thu 09:00–19:00, Fri 08:00–16:00**. Days with no rule 
 - Apply engine: `git filter-repo --force --refs <list> ^<frontier>… --commit-callback` keyed by `commit.original_id`, so history before the first planned commit keeps its ids and signatures. **Never use `git rebase` for this**: it drops merges and resets every replayed committer date to "now". If git-filter-repo is missing, stop and say so.
 - Apply refuses on: uncommitted tracked changes, a git operation in progress, a rewritten branch checked out in another worktree, any ref (remote-tracking included) differing from the plan snapshot — after a `git fetch`, re-run the audit. Never auto-stash.
 - Apply writes and verifies `git bundle create --all` first, and archives any previous `.git/filter-repo/` (filter-repo would chain its maps or stop at a prompt).
+- Every apply records itself in the **machine-local audit log** `~/.local/share/commit-hours-audit/<repo>-<hash>/audit.jsonl` (append-only: `started`, `applied`, `restored`) and copies the bundle, plan and commit map next to it, outside the repository and never committed. If the log cannot be written, apply stops before rewriting. To find what an old or new commit id became, use `commit-hours-audit lookup <id>`; it works without the clone and follows chained rewrites.
 - Success = `commit-hours-audit verify` passes per commit against the pre-rewrite history (tree, mapped parents, identities, dates only where planned, messages except remapped ids, refs, count) AND the re-audit of every rewritten commit reports 0. Commits the plan leaves out on purpose (outside `--range`, no past slot) keep their dates and are listed apart; those outside `--range` also keep their ids (a left-out commit after a rewritten one gets a new id, since its parent changed). Tip-tree equality is **NOT** proof.
 - `apply`, `verify` and `remap-docs` reject audit options (`--ref`, `--rule`, …): the plan already fixes them.
 - **Never call a timestamp "future" or "past" without checking the real clock** (`date`). Session time markers are not the system date.
@@ -44,6 +45,7 @@ Default rule: **Mon–Thu 09:00–19:00, Fri 08:00–16:00**. Days with no rule 
 | Plan warns "cannot keep commit order" | Show it; the user decides (other slot, `--range`, or accept the inversion) |
 | Signed commits will lose their signature | Show the warning; the user decides |
 | Tracked files cite old commit ids after apply | `commit-hours-audit remap-docs <plan-dir>` (preview), `--write` only on request |
+| "What was commit X before / what is it now?" | `commit-hours-audit lookup <id>` |
 | Machine-readable hand-off | `--json` |
 
 ## Execution Steps
@@ -59,7 +61,7 @@ Default rule: **Mon–Thu 09:00–19:00, Fri 08:00–16:00**. Days with no rule 
 
 ## Output Contract
 
-Return: rule used, ref audited, violations count, the proposal table, refs to rewrite (published or not), warnings, plan path, apply command; after apply: rewritten refs (old → new), the verify line, the re-audit result, bundle path, push commands.
+Return: rule used, ref audited, violations count, the proposal table, refs to rewrite (published or not), warnings, plan path, apply command; after apply: rewritten refs (old → new), the verify line, the re-audit result, bundle path, audit log path, push commands.
 
 ## References
 
