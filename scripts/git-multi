@@ -1,0 +1,303 @@
+#!/usr/bin/env node
+/**
+ * git-multi — multi-repository status and branch inspector for composite workspaces.
+ *
+ * Scans the current directory (or explicit directories) for git repositories
+ * (including symlinked repos such as frontend/ and backend/), reporting branch,
+ * working tree dirty state, ahead/behind upstream status, and last commit info.
+ *
+ * Zero dependencies. Requires Node >= 18 and git on PATH.
+ *
+ * Usage:
+ *   git-multi [status] [--json] [--dir <path>] [repo1 repo2 ...]
+ *   git-multi branch [--json]
+ *   git-multi exec <command...>
+ *   git-multi --help
+ */
+
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+function runGit(args, cwd) {
+  const res = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return {
+    code: res.status ?? 1,
+    stdout: (res.stdout || '').trim(),
+    stderr: (res.stderr || '').trim(),
+  };
+}
+
+function isGitRepo(dirPath) {
+  try {
+    const res = runGit(['-C', dirPath, 'rev-parse', '--is-inside-work-tree']);
+    return res.code === 0 && res.stdout === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function discoverRepos(baseDir, explicitList) {
+  if (explicitList && explicitList.length > 0) {
+    const resolved = [];
+    for (const item of explicitList) {
+      const full = path.resolve(baseDir, item);
+      if (isGitRepo(full)) {
+        resolved.push({ name: item, path: full });
+      }
+    }
+    return resolved;
+  }
+
+  const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+  const repos = [];
+  const ignored = new Set(['.git', 'node_modules', '.cache', 'dist', 'build', '.codegraph', '.pi', '.pi-subagents']);
+
+  for (const entry of entries) {
+    if (ignored.has(entry.name) || entry.name.startsWith('.')) continue;
+    const full = path.join(baseDir, entry.name);
+    // Follow symlinks or enter directories
+    if (entry.isDirectory() || entry.isSymbolicLink()) {
+      if (isGitRepo(full)) {
+        repos.push({ name: entry.name, path: full });
+      }
+    }
+  }
+
+  // Sort by name
+  repos.sort((a, b) => a.name.localeCompare(b.name));
+  return repos;
+}
+
+function getRepoInfo(repoPath) {
+  // Branch
+  let branch = '';
+  let detached = false;
+  const branchRes = runGit(['-C', repoPath, 'symbolic-ref', '--short', 'HEAD']);
+  if (branchRes.code === 0 && branchRes.stdout) {
+    branch = branchRes.stdout;
+  } else {
+    const shaRes = runGit(['-C', repoPath, 'rev-parse', '--short', 'HEAD']);
+    branch = shaRes.stdout ? `(detached at ${shaRes.stdout})` : '(unknown)';
+    detached = true;
+  }
+
+  // Status (porcelain)
+  const statusRes = runGit(['-C', repoPath, 'status', '--porcelain=v1']);
+  let staged = 0;
+  let modified = 0;
+  let untracked = 0;
+  if (statusRes.code === 0 && statusRes.stdout) {
+    const lines = statusRes.stdout.split('\n');
+    for (const line of lines) {
+      if (!line) continue;
+      const x = line[0];
+      const y = line[1];
+      if (x === '?' && y === '?') {
+        untracked++;
+      } else {
+        if (x !== ' ' && x !== '?') staged++;
+        if (y !== ' ' && y !== '?') modified++;
+      }
+    }
+  }
+
+  // Upstream sync
+  let upstream = null;
+  let ahead = 0;
+  let behind = 0;
+  const upstreamRes = runGit(['-C', repoPath, 'rev-parse', '--abbrev-ref', '@{u}']);
+  if (upstreamRes.code === 0 && upstreamRes.stdout) {
+    upstream = upstreamRes.stdout;
+    const countRes = runGit(['-C', repoPath, 'rev-list', '--left-right', '--count', 'HEAD...@{u}']);
+    if (countRes.code === 0 && countRes.stdout) {
+      const parts = countRes.stdout.split(/\s+/);
+      if (parts.length >= 2) {
+        ahead = parseInt(parts[0], 10) || 0;
+        behind = parseInt(parts[1], 10) || 0;
+      }
+    }
+  }
+
+  // Last commit
+  const logRes = runGit(['-C', repoPath, 'log', '-1', '--format=%h%x00%cr%x00%s']);
+  let commitSha = '';
+  let commitRelative = '';
+  let commitSubject = '';
+  if (logRes.code === 0 && logRes.stdout) {
+    const [h, r, s] = logRes.stdout.split('\0');
+    commitSha = h || '';
+    commitRelative = r || '';
+    commitSubject = s || '';
+  }
+
+  const isClean = staged === 0 && modified === 0 && untracked === 0;
+
+  return {
+    branch,
+    detached,
+    clean: isClean,
+    staged,
+    modified,
+    untracked,
+    upstream,
+    ahead,
+    behind,
+    lastCommit: {
+      sha: commitSha,
+      relative: commitRelative,
+      subject: commitSubject,
+    },
+  };
+}
+
+function formatStatusSummary(info) {
+  if (info.clean) return 'Clean';
+  const parts = [];
+  if (info.staged > 0) parts.push(`${info.staged} staged`);
+  if (info.modified > 0) parts.push(`${info.modified} modified`);
+  if (info.untracked > 0) parts.push(`${info.untracked} untracked`);
+  return parts.join(', ');
+}
+
+function formatSyncSummary(info) {
+  if (!info.upstream) return 'No upstream';
+  if (info.ahead === 0 && info.behind === 0) return 'Synced';
+  const parts = [];
+  if (info.ahead > 0) parts.push(`ahead ${info.ahead}`);
+  if (info.behind > 0) parts.push(`behind ${info.behind}`);
+  return parts.join(', ');
+}
+
+function printHelp() {
+  console.log(`
+git-multi — multi-repository status and branch inspector for composite workspaces
+
+USAGE:
+  git-multi [status] [--json] [--dir <path>] [repo1 repo2 ...]
+  git-multi branch [--json]
+  git-multi exec <command...>
+  git-multi --help
+
+COMMANDS:
+  status         Show status table across all git subrepos (default)
+  branch         Show active branches across all subrepos
+  exec <cmd...>  Run an arbitrary git/shell command in each subrepo
+
+FLAGS:
+  --json         Output structured JSON
+  --dir <path>   Workspace directory to inspect (default: cwd)
+  --help, -h     Show this help message
+`.trim());
+}
+
+function main() {
+  const rawArgs = process.argv.slice(2);
+  let json = false;
+  let baseDir = process.cwd();
+  const positional = [];
+
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i];
+    if (arg === '--help' || arg === '-h') {
+      printHelp();
+      process.exit(0);
+    }
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
+    if (arg === '--dir') {
+      baseDir = path.resolve(rawArgs[++i]);
+      continue;
+    }
+    positional.push(arg);
+  }
+
+  const subcmd = positional[0] && !positional[0].startsWith('-') ? positional[0] : 'status';
+
+  if (subcmd === 'exec') {
+    const execCmd = positional.slice(1);
+    if (execCmd.length === 0) {
+      console.error('Error: missing command to execute. Example: git-multi exec git fetch');
+      process.exit(1);
+    }
+    const repos = discoverRepos(baseDir);
+    if (repos.length === 0) {
+      console.error(`No git repositories found in ${baseDir}`);
+      process.exit(1);
+    }
+    for (const r of repos) {
+      console.log(`\n=== [${r.name}] ===`);
+      const child = spawnSync(execCmd[0], execCmd.slice(1), {
+        cwd: r.path,
+        stdio: 'inherit',
+      });
+      if (child.status !== 0) {
+        process.exitCode = child.status || 1;
+      }
+    }
+    return;
+  }
+
+  const explicitRepos = subcmd === 'status' || subcmd === 'branch' ? positional.slice(1) : positional;
+  const repos = discoverRepos(baseDir, explicitRepos);
+
+  if (repos.length === 0) {
+    if (json) {
+      console.log(JSON.stringify({ error: 'No git repositories found in workspace', baseDir, repos: [] }));
+    } else {
+      console.log(`No git repositories found in ${baseDir}`);
+    }
+    return;
+  }
+
+  const results = repos.map((r) => {
+    const info = getRepoInfo(r.path);
+    return {
+      name: r.name,
+      path: r.path,
+      ...info,
+    };
+  });
+
+  if (json) {
+    console.log(JSON.stringify({ baseDir, repos: results }, null, 2));
+    return;
+  }
+
+  // Text table formatting
+  console.log(`\nWorkspace: ${baseDir}\n`);
+
+  const colRepo = Math.max(8, ...results.map((r) => r.name.length));
+  const colBranch = Math.max(12, ...results.map((r) => r.branch.length));
+  const colStatus = Math.max(10, ...results.map((r) => formatStatusSummary(r).length));
+  const colSync = Math.max(12, ...results.map((r) => formatSyncSummary(r).length));
+
+  const pad = (str, len) => str + ' '.repeat(Math.max(0, len - str.length));
+
+  const header = `${pad('Repo', colRepo)}  ${pad('Branch', colBranch)}  ${pad('Status', colStatus)}  ${pad('Sync', colSync)}  Commit`;
+  const sep = '-'.repeat(header.length + 20);
+
+  console.log(header);
+  console.log(sep);
+
+  for (const r of results) {
+    const statusText = formatStatusSummary(r);
+    const syncText = formatSyncSummary(r);
+    const commitText = r.lastCommit.sha ? `${r.lastCommit.sha} (${r.lastCommit.relative}) ${r.lastCommit.subject.slice(0, 40)}` : '';
+
+    console.log(
+      `${pad(r.name, colRepo)}  ${pad(r.branch, colBranch)}  ${pad(statusText, colStatus)}  ${pad(syncText, colSync)}  ${commitText}`
+    );
+  }
+  console.log('');
+}
+
+main();
