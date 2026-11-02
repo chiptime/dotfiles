@@ -51,7 +51,7 @@ compare-prices:
   scope: personal
   status: active
   desc: Price comparator (Bun/Elysia + React/Vite). Crawl con resume automático: barrido cada 15 min + botón Reanudar + persistencia confirmada por página y lock por mercado (PRs #50/#51); panel Procesos de crawling con salud y coste MB (PR #47). EROSKI t:ac y ALCAMPO JSON+FALLBACK operativos.
-  next: Redesplegar el VPS para activar el resume y el panel (PRs #47/#50/#51 ya en master) y verificar el primer barrido de 15 min; seguir después con los 8 items de crawl-route-status.md
+  next: Commitear PRDs + backend/scripts/test-env en fix/eci-stores; redesplegar VPS para PRs #47/#50/#51 y verificar el barrido de 15 min
 
 vps:
   scope: personal
