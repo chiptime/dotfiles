@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun/Elysia + React/Vite). Fingerprint coverage complete on a local branch; VPS N0 evidence collected and 47 approvals refreshed.
-  next: Decide commit and publication of fix/fingerprint-coverage (75 evidence files and 47 N0 approvals); investigate GADIS stores HTTP 404 and reconcile concurrent scraper changes before another campaign.
+  desc: Price comparator (Bun/Elysia + React/Vite). Automatic crawl working per market: EROSKI via t:ac (99.8k products, 136.7 MB proxy), ALCAMPO via JSON API + FALLBACK route, circuit breaker survives blocks; route × health table in docs/audits/scraping-campaign/crawl-route-status.md.
+  next: Review the outcome of the ALCAMPO crawl and CARREFOUR PROXIED (VPS /var/log/manual-crawl-20261101/); confirm the RESIDENTIAL_PROXY_ROUTES variables in Dokploy; attack the 8 open items in crawl-route-status.md starting with CONSUM category_tree (LEVEL_INTEGRITY).
 
 vps:
   scope: personal
