@@ -220,3 +220,17 @@ function notifyrun() {
 
 	return $rc
 }
+
+# Re-apply dotfiles-owned agent instruction blocks after gentle-ai rewrites
+# the global agent files (sync, install, upgrade, restore, uninstall).
+gentle-ai() {
+	command gentle-ai "$@"
+	local rc=$?
+	case "$1" in
+		sync|install|upgrade|restore|uninstall)
+			"$DOTFILES_PATH/scripts/install-mission-contract.sh" >/dev/null 2>&1 \
+				|| echo "warning: mission contract re-apply failed; run scripts/install-mission-contract.sh" >&2
+			;;
+	esac
+	return $rc
+}
