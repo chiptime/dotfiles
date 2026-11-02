@@ -50,8 +50,8 @@ agent-tts:
 compare-prices:
   scope: personal
   status: active
-  desc: Price comparator (Bun/Elysia + React/Vite). Automatic crawl working per market: EROSKI via t:ac (99.8k products, 136.7 MB proxy), ALCAMPO via JSON API + FALLBACK route, circuit breaker survives blocks; route × health table in docs/audits/scraping-campaign/crawl-route-status.md.
-  next: Review the outcome of the ALCAMPO crawl and CARREFOUR PROXIED (VPS /var/log/manual-crawl-20261101/); confirm the RESIDENTIAL_PROXY_ROUTES variables in Dokploy; attack the 8 open items in crawl-route-status.md starting with CONSUM category_tree (LEVEL_INTEGRITY).
+  desc: Price comparator (Bun/Elysia + React/Vite). Crawl con resume automático: barrido cada 15 min + botón Reanudar + persistencia confirmada por página y lock por mercado (PRs #50/#51); panel Procesos de crawling con salud y coste MB (PR #47). EROSKI t:ac y ALCAMPO JSON+FALLBACK operativos.
+  next: Redesplegar el VPS para activar el resume y el panel (PRs #47/#50/#51 ya en master) y verificar el primer barrido de 15 min; seguir después con los 8 items de crawl-route-status.md
 
 vps:
   scope: personal
