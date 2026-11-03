@@ -54,6 +54,19 @@ def swap_value(pswpin: int, pswpout: int = 0) -> SwapSnapshot:
     return SwapSnapshot(pswpin_pages=pswpin, pswpout_pages=pswpout, page_size_bytes=4096)
 
 
+class SteppableClock:
+    """Monotonic double that advances only when stepped — no real time."""
+
+    def __init__(self, start: float = 1_000.0) -> None:
+        self.t = start
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+
 def generate_raw(text: str, done_reason: str = "stop") -> str:
     return json.dumps(
         {
@@ -622,6 +635,129 @@ class VisionGateTests(VisionStageBase):
         harness.swap = swap_value(10 + 600 * 1024 * 1024 // 4096)  # ambient, pre-baseline
         outcome = harness.run()
         self.assertEqual(outcome.outcome, "complete", outcome.reason)
+
+    def test_quiet_swap_spike_over_limit_lets_the_phase_complete(self) -> None:
+        # S5: 530 MiB cumulative swap I/O spread over 600 monotonic
+        # seconds (0.88 MiB/s, under the shared 1 MiB/s quiet threshold)
+        # is an ambient spike: the phase must COMPLETE, not trip at
+        # 512 MiB.
+        state, _ = make_prepared_job(self.tmp, frame_count=1)
+        harness = VisionHarness(state, responses=[generate_raw("frame text")])
+        baseline = harness.swap
+        clock = SteppableClock()
+        reads = {"count": 0}
+
+        def slowly_growing_swap() -> SwapSnapshot:
+            reads["count"] += 1
+            if reads["count"] == 1:
+                return baseline
+            clock.advance(600.0)
+            return swap_value(baseline.pswpin_pages + 530 * 1024 * 1024 // 4096)
+
+        outcome = run_vision_stage(
+            VIDEO_ID,
+            state=state,
+            runner=harness.runner,
+            urlopen=harness.ollama,
+            gpu_fn=harness.gpu_fn,
+            vmstat_fn=slowly_growing_swap,
+            read_log_fn=harness.log_fn,
+            post_json_fn=harness.poster,
+            monotonic=clock,
+        )
+        self.assertEqual(outcome.outcome, "complete", outcome.reason)
+        self.assertEqual(harness.poster.calls, 1)
+
+    def _quiet_swap_run(self, mib: int, swap_limit_mib: int | None):
+        state, _ = make_prepared_job(self.tmp, frame_count=1)
+        harness = VisionHarness(state, responses=[generate_raw("frame text")])
+        baseline = harness.swap
+        clock = SteppableClock()
+        reads = {"count": 0}
+
+        def quiet_swap() -> SwapSnapshot:
+            reads["count"] += 1
+            if reads["count"] == 1:
+                return baseline
+            clock.advance(10_000.0)
+            return swap_value(baseline.pswpin_pages + mib * 1024 * 1024 // 4096)
+
+        return run_vision_stage(
+            VIDEO_ID,
+            state=state,
+            runner=harness.runner,
+            urlopen=harness.ollama,
+            gpu_fn=harness.gpu_fn,
+            vmstat_fn=quiet_swap,
+            read_log_fn=harness.log_fn,
+            post_json_fn=harness.poster,
+            monotonic=clock,
+            swap_limit_mib=swap_limit_mib,
+        )
+
+    def test_operator_swap_limit_above_the_ceiling_keeps_its_old_effect(self) -> None:
+        # PRESERVE: --swap-limit-mib raised above the 1024 MiB ceiling
+        # must not be silently capped by it: under the override a delta
+        # within the authorized budget passes and one above it trips,
+        # as before the layered rule.
+        self.assertEqual(self._quiet_swap_run(1500, 2048).outcome, "complete")
+        self.assertEqual(
+            self._quiet_swap_run(2100, 2048).outcome, StageOutcome.FAILED.value
+        )
+
+    def test_quiet_swap_at_the_default_ceiling_trips(self) -> None:
+        self.assertEqual(
+            self._quiet_swap_run(1024, None).outcome, StageOutcome.FAILED.value
+        )
+
+    def test_fast_swap_growth_still_fails_and_keeps_swap_delta_evidence(self) -> None:
+        # PRESERVE (touched path): the same 530 MiB reached in 2 s
+        # (265 MiB/s, sustained) still fires the gate, and the persisted
+        # ledger entry keeps the typed ``swap_delta`` id and failing
+        # detail that the collection-run retry eligibility reads.
+        state, run_dir = make_prepared_job(self.tmp, frame_count=1)
+        harness = VisionHarness(state, responses=[generate_raw("frame text")])
+        baseline = harness.swap
+        clock = SteppableClock()
+        reads = {"count": 0}
+
+        def bursting_swap() -> SwapSnapshot:
+            reads["count"] += 1
+            if reads["count"] == 1:
+                return baseline
+            clock.advance(2.0)
+            return swap_value(baseline.pswpin_pages + 530 * 1024 * 1024 // 4096)
+
+        outcome = run_vision_stage(
+            VIDEO_ID,
+            state=state,
+            runner=harness.runner,
+            urlopen=harness.ollama,
+            gpu_fn=harness.gpu_fn,
+            vmstat_fn=bursting_swap,
+            read_log_fn=harness.log_fn,
+            post_json_fn=harness.poster,
+            monotonic=clock,
+        )
+        self.assertEqual(outcome.outcome, StageOutcome.FAILED.value)
+        self.assertIn("swap_delta", outcome.reason)
+        self.assertEqual(harness.poster.calls, 1, "gate stop is final: no retries")
+        records = json.loads(
+            (run_dir / "vision" / "vision-records.json").read_text()
+        )
+        self.assertEqual(records["status"], "failed")
+        swap_entries = [
+            entry
+            for entry in records["gates"]["gates"]
+            if entry["gate"] == "swap_delta"
+        ]
+        self.assertTrue(swap_entries, "the fired gate must be in the ledger")
+        fired = swap_entries[-1]
+        self.assertFalse(fired["passed"])
+        self.assertEqual(fired["detail"]["delta_bytes"], 530 * 1024 * 1024)
+        self.assertGreater(
+            fired["detail"]["delta_bytes"], fired["detail"]["limit_bytes"]
+        )
 
     def test_cpu_offload_fails_the_run(self) -> None:
         state, _ = make_prepared_job(self.tmp, frame_count=1)

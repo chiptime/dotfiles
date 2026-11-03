@@ -44,8 +44,23 @@ class AdoptedDefaultsTests(unittest.TestCase):
         self.assertEqual(gates.global_ollama_version, "0.14.2")
         self.assertEqual(gates.free_vram_gate_mib, 20480)
         self.assertEqual(gates.swap_delta_limit_mib, 512)
+        self.assertEqual(gates.swap_delta_ceiling_mib, 1024)
         self.assertEqual(gates.vram_delta_limit_mib, {"qwen3.5:9b": 12288})
         self.assertFalse(gates.allow_gpu_co_residency)
+
+    def test_swap_gate_rate_threshold_shares_the_cooldown_constant(self) -> None:
+        gates = config.GATES
+        # S5: ONE quiet-rate constant shared by the per-frame swap gate
+        # and the swap-retry cooldown watcher — never a second magic
+        # number duplicated beside swap_delta_limit_mib.
+        self.assertEqual(
+            gates.swap_rate_limit_mib_per_s,
+            config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S,
+        )
+        self.assertEqual(gates.swap_rate_limit_mib_per_s, 1.0)
+        # The safety-net ceiling strictly exceeds the phase limit so the
+        # tolerated ambient band (512, 1024) MiB is non-empty.
+        self.assertGreater(gates.swap_delta_ceiling_mib, gates.swap_delta_limit_mib)
 
     def test_budget_dataclass_is_frozen(self) -> None:
         with self.assertRaises(dataclasses.FrozenInstanceError):

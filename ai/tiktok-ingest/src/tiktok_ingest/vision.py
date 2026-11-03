@@ -750,6 +750,10 @@ def run_vision_stage(
         session_gpu = gpu_fn()
         session_baseline_used = session_gpu.used_mib
         swap_baseline = vmstat_fn()
+        # S5 rate anchor: the first per-frame sample measures its recent
+        # rate from THIS baseline sample and its monotonic time.
+        swap_prev_bytes = swap_baseline.swap_io_bytes
+        swap_prev_t = monotonic()
         ledger.record(
             check_free_vram(session_gpu, config.GATES.free_vram_gate_mib)
         )
@@ -766,6 +770,50 @@ def run_vision_stage(
         else:
             swap_limit_bytes = swap_default_mib * 1024 * 1024
             swap_limit_mib = swap_default_mib
+        # S5 layered rule: sustained-rate tolerance (shared with the
+        # swap-retry cooldown watcher's quiet threshold) plus the
+        # always-trip ceiling. An operator --swap-limit-mib above the
+        # ceiling keeps its previous meaning: anything over the authorized
+        # budget trips, whatever the rate.
+        swap_rate_limit_bytes_per_s = (
+            config.GATES.swap_rate_limit_mib_per_s * 1024 * 1024
+        )
+        swap_ceiling_bytes = max(
+            config.GATES.swap_delta_ceiling_mib * 1024 * 1024,
+            swap_limit_bytes + 1,
+        )
+
+        def record_swap_gate() -> None:
+            """One per-frame swap reading under the S5 layered rule.
+
+            The DELTA stays measured from the IMMEDIATE phase baseline;
+            the recent RATE spans the previous per-frame sample (the
+            phase baseline for the first frame) and this one, over
+            elapsed monotonic seconds. The sample anchors advance even
+            when the gate fires, so the recorded detail always carries
+            the measurement that fired it.
+            """
+            nonlocal swap_prev_bytes, swap_prev_t
+            snapshot = vmstat_fn()
+            now = monotonic()
+            elapsed = now - swap_prev_t
+            rate = (
+                (snapshot.swap_io_bytes - swap_prev_bytes) / elapsed
+                if elapsed > 0
+                else None
+            )
+            ledger.record(
+                check_swap_delta(
+                    snapshot.swap_io_bytes,
+                    swap_baseline.swap_io_bytes,
+                    swap_limit_bytes,
+                    rate_bytes_per_s=rate,
+                    rate_limit_bytes_per_s=swap_rate_limit_bytes_per_s,
+                    ceiling_bytes=swap_ceiling_bytes,
+                )
+            )
+            swap_prev_bytes = snapshot.swap_io_bytes
+            swap_prev_t = now
 
         for frame in frames:
             clock.check()
@@ -827,13 +875,7 @@ def run_vision_stage(
                     after_gpu.used_mib, session_baseline_used, limit_mib
                 )
             )
-            ledger.record(
-                check_swap_delta(
-                    vmstat_fn().swap_io_bytes,
-                    swap_baseline.swap_io_bytes,
-                    swap_limit_bytes,
-                )
-            )
+            record_swap_gate()
             if not entries:  # first response: the load report is now available
                 ledger.record(check_no_offload(parse_layer_report(read_log_fn())))
 
@@ -884,13 +926,7 @@ def run_vision_stage(
                             after_gpu.used_mib, session_baseline_used, limit_mib
                         )
                     )
-                    ledger.record(
-                        check_swap_delta(
-                            vmstat_fn().swap_io_bytes,
-                            swap_baseline.swap_io_bytes,
-                            swap_limit_bytes,
-                        )
-                    )
+                    record_swap_gate()
 
         # -- unload verification ------------------------------------------
         try:

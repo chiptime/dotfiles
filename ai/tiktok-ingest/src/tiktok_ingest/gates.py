@@ -241,23 +241,73 @@ def check_vram_delta(
 
 
 def check_swap_delta(
-    current_bytes: int, baseline_bytes: int, limit_bytes: int
+    current_bytes: int,
+    baseline_bytes: int,
+    limit_bytes: int,
+    *,
+    rate_bytes_per_s: float | None = None,
+    rate_limit_bytes_per_s: float | None = None,
+    ceiling_bytes: int | None = None,
 ) -> GateResult:
     """Swap I/O delta gate from the IMMEDIATE baseline (methodology 6.4).
 
     The delta is always measured against an immediately pre-phase snapshot:
     ambient host swap growth must be attributed per process, never hidden
     (methodology section 8.4) — the stop rule stays intact either way.
+
+    S5 layered rule (stability): a delta ABOVE ``limit_bytes`` fires only
+    when the recent swap I/O RATE — measured by the caller between
+    consecutive per-frame samples over elapsed monotonic seconds — also
+    exceeds ``rate_limit_bytes_per_s``; a short ambient spike on a quiet
+    host is tolerated without weakening attribution. A delta at or above
+    ``ceiling_bytes`` ALWAYS fires, however quiet the rate. A missing
+    rate measurement cannot prove the spike ambient, so the gate fails
+    closed exactly like the raw-delta rule.
     """
     delta = current_bytes - baseline_bytes
+    detail: dict[str, Any] = {
+        "delta_bytes": delta,
+        "limit_bytes": limit_bytes,
+        "current_bytes": current_bytes,
+        "baseline_bytes": baseline_bytes,
+    }
+    if rate_bytes_per_s is not None:
+        detail["rate_bytes_per_s"] = rate_bytes_per_s
+    if rate_limit_bytes_per_s is not None:
+        detail["rate_limit_bytes_per_s"] = rate_limit_bytes_per_s
+    if ceiling_bytes is not None:
+        detail["ceiling_bytes"] = ceiling_bytes
+
+    if ceiling_bytes is not None and delta >= ceiling_bytes:
+        return GateResult(
+            gate=GATE_SWAP_DELTA,
+            passed=False,
+            reason=f"swap I/O delta {delta} B exceeds the {ceiling_bytes} B "
+            "safety-net ceiling measured from the immediate baseline; a "
+            "gate stop is final for this authorization window",
+            detail=detail,
+        )
     if delta <= limit_bytes:
         return GateResult(
             gate=GATE_SWAP_DELTA,
             passed=True,
             reason=f"swap I/O delta {delta} B <= {limit_bytes} B limit from "
             "the immediate baseline",
-            detail={"delta_bytes": delta, "limit_bytes": limit_bytes,
-                    "current_bytes": current_bytes, "baseline_bytes": baseline_bytes},
+            detail=detail,
+        )
+    if (
+        rate_bytes_per_s is not None
+        and rate_limit_bytes_per_s is not None
+        and rate_bytes_per_s <= rate_limit_bytes_per_s
+    ):
+        return GateResult(
+            gate=GATE_SWAP_DELTA,
+            passed=True,
+            reason=f"swap I/O delta {delta} B exceeds the {limit_bytes} B "
+            f"(512 MiB) phase limit but the recent rate {rate_bytes_per_s} "
+            f"B/s stays within the {rate_limit_bytes_per_s} B/s quiet "
+            "threshold: ambient spike tolerated, attribution preserved",
+            detail=detail,
         )
     return GateResult(
         gate=GATE_SWAP_DELTA,
@@ -265,8 +315,7 @@ def check_swap_delta(
         reason=f"swap I/O delta {delta} B exceeds the {limit_bytes} B "
         "(512 MiB) phase limit measured from the immediate baseline; a "
         "gate stop is final for this authorization window",
-        detail={"delta_bytes": delta, "limit_bytes": limit_bytes,
-                "current_bytes": current_bytes, "baseline_bytes": baseline_bytes},
+        detail=detail,
     )
 
 

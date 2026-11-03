@@ -136,6 +136,9 @@ class VramDeltaGateTests(unittest.TestCase):
 
 class SwapDeltaGateTests(unittest.TestCase):
     LIMIT_BYTES = 512 * MIB
+    CEILING_BYTES = 1024 * MIB
+    # The cooldown watcher's quiet threshold (1 MiB/s), in bytes/second.
+    RATE_LIMIT_BYTES_PER_S = 1 * MIB
 
     def test_within_limit_passes(self) -> None:
         result = check_swap_delta(
@@ -150,6 +153,93 @@ class SwapDeltaGateTests(unittest.TestCase):
 
     def test_over_limit_fails_with_stop_language(self) -> None:
         result = check_swap_delta(512 * MIB + 1, 0, self.LIMIT_BYTES)
+        self.assertFalse(result.passed)
+        self.assertIn("final for this authorization window", result.reason)
+
+    # -- S5: sustained-rate rule + safety-net ceiling ---------------------
+
+    def test_over_limit_with_quiet_rate_tolerates_ambient_spike(self) -> None:
+        # Observed false trips exceeded the limit by only 1.77-18.56 MiB;
+        # a 530 MiB delta accumulated at 0.9 MiB/s is ambient host swap,
+        # not the phase swapping, and must NOT fire the gate.
+        result = check_swap_delta(
+            530 * MIB,
+            0,
+            self.LIMIT_BYTES,
+            rate_bytes_per_s=0.9 * MIB,
+            rate_limit_bytes_per_s=self.RATE_LIMIT_BYTES_PER_S,
+            ceiling_bytes=self.CEILING_BYTES,
+        )
+        self.assertTrue(result.passed)
+        self.assertEqual(result.gate, GATE_SWAP_DELTA)
+        self.assertEqual(result.detail["delta_bytes"], 530 * MIB)
+        self.assertEqual(result.detail["rate_bytes_per_s"], 0.9 * MIB)
+
+    def test_over_limit_with_sustained_rate_trips(self) -> None:
+        result = check_swap_delta(
+            530 * MIB,
+            0,
+            self.LIMIT_BYTES,
+            rate_bytes_per_s=2 * MIB,
+            rate_limit_bytes_per_s=self.RATE_LIMIT_BYTES_PER_S,
+            ceiling_bytes=self.CEILING_BYTES,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.gate, GATE_SWAP_DELTA)
+        self.assertIn("final for this authorization window", result.reason)
+        self.assertEqual(result.detail["delta_bytes"], 530 * MIB)
+
+    def test_ceiling_trips_even_with_quiet_rate(self) -> None:
+        # Safety net: a delta at or above 1024 MiB ALWAYS fires, however
+        # quiet the recent rate — ambient tolerance is never unbounded.
+        result = check_swap_delta(
+            1024 * MIB,
+            0,
+            self.LIMIT_BYTES,
+            rate_bytes_per_s=0.1 * MIB,
+            rate_limit_bytes_per_s=self.RATE_LIMIT_BYTES_PER_S,
+            ceiling_bytes=self.CEILING_BYTES,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.gate, GATE_SWAP_DELTA)
+        self.assertIn("safety-net ceiling", result.reason)
+        self.assertIn("final for this authorization window", result.reason)
+
+    def test_at_limit_never_trips_even_with_sustained_rate(self) -> None:
+        result = check_swap_delta(
+            512 * MIB,
+            0,
+            self.LIMIT_BYTES,
+            rate_bytes_per_s=8 * MIB,
+            rate_limit_bytes_per_s=self.RATE_LIMIT_BYTES_PER_S,
+            ceiling_bytes=self.CEILING_BYTES,
+        )
+        self.assertTrue(result.passed)
+
+    def test_rate_exactly_at_the_quiet_threshold_is_quiet(self) -> None:
+        # Tripping requires a rate strictly ABOVE the threshold, matching
+        # the cooldown watcher's inclusive ``<=`` stable boundary.
+        result = check_swap_delta(
+            530 * MIB,
+            0,
+            self.LIMIT_BYTES,
+            rate_bytes_per_s=1.0 * MIB,
+            rate_limit_bytes_per_s=self.RATE_LIMIT_BYTES_PER_S,
+            ceiling_bytes=self.CEILING_BYTES,
+        )
+        self.assertTrue(result.passed)
+
+    def test_over_limit_without_a_measurable_rate_fails_closed(self) -> None:
+        # A non-advancing clock cannot prove the spike ambient: the gate
+        # keeps the raw-delta behaviour and fires (rate unmeasurable).
+        result = check_swap_delta(
+            600 * MIB,
+            0,
+            self.LIMIT_BYTES,
+            rate_bytes_per_s=None,
+            rate_limit_bytes_per_s=self.RATE_LIMIT_BYTES_PER_S,
+            ceiling_bytes=self.CEILING_BYTES,
+        )
         self.assertFalse(result.passed)
         self.assertIn("final for this authorization window", result.reason)
 

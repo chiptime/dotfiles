@@ -190,6 +190,28 @@ class Budgets:
 BUDGETS = Budgets()
 
 # --------------------------------------------------------------------------
+# Phase 0 addendum: bounded vision swap-retry cooldown (PRD D-04).
+# Proposed operational heuristics requiring validation — NOT efficacy
+# claims (assumption A-03): waiting may or may not quiet the host.
+# Defined before IsolationGates: the S5 swap gate SHARES the quiet-rate
+# threshold below as its sustained-rate tolerance — ONE constant.
+# --------------------------------------------------------------------------
+
+# Read-only sampling interval of the cumulative swap I/O counters.
+SWAP_RETRY_COOLDOWN_INTERVAL_SECONDS = 5.0
+# Admission eligible no earlier than this, from cooldown start.
+SWAP_RETRY_COOLDOWN_FLOOR_SECONDS = 60.0
+# Hard total cap from cooldown start; NEVER restarted (instability or
+# final-conditions drift reset only the consecutive-stable count).
+SWAP_RETRY_COOLDOWN_CAP_SECONDS = 180.0
+# Stability = this many consecutive intervals at or below the rate limit.
+SWAP_RETRY_COOLDOWN_STABLE_INTERVALS = 3
+# Swap I/O need per interval computed from the CUMULATIVE counters.
+SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S = 1.0
+# Truthful progress narration cadence (stderr) during the cooldown.
+SWAP_RETRY_NARRATION_INTERVAL_SECONDS = 15.0
+
+# --------------------------------------------------------------------------
 # Isolation and resource gates — configuration only, NOT implemented here.
 # Any later execution requires separate authorization (MVP-PRD sections 5-7).
 # --------------------------------------------------------------------------
@@ -211,6 +233,15 @@ class IsolationGates:
     free_vram_gate_mib: int = 20480
     # Swap I/O delta per phase, measured from the immediate phase baseline.
     swap_delta_limit_mib: int = 512
+    # S5 sustained-rate tolerance: a delta ABOVE swap_delta_limit_mib
+    # fires only when the recent per-sample swap I/O rate also exceeds
+    # this many MiB/s. The SAME constant the swap-retry cooldown watcher
+    # uses as its quiet threshold — shared, never duplicated.
+    swap_rate_limit_mib_per_s: float = SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S
+    # S5 safety net: a delta at or above this ceiling ALWAYS fires,
+    # however quiet the recent rate — ambient tolerance is never
+    # unbounded swap growth.
+    swap_delta_ceiling_mib: int = 1024
     # Per-model VRAM delta limits from the benchmark.
     vram_delta_limit_mib: dict[str, int] = field(
         default_factory=lambda: {"qwen3.5:9b": 12288}
@@ -224,26 +255,6 @@ class IsolationGates:
 
 
 GATES = IsolationGates()
-
-# --------------------------------------------------------------------------
-# Phase 0 addendum: bounded vision swap-retry cooldown (PRD D-04).
-# Proposed operational heuristics requiring validation — NOT efficacy
-# claims (assumption A-03): waiting may or may not quiet the host.
-# --------------------------------------------------------------------------
-
-# Read-only sampling interval of the cumulative swap I/O counters.
-SWAP_RETRY_COOLDOWN_INTERVAL_SECONDS = 5.0
-# Admission eligible no earlier than this, from cooldown start.
-SWAP_RETRY_COOLDOWN_FLOOR_SECONDS = 60.0
-# Hard total cap from cooldown start; NEVER restarted (instability or
-# final-conditions drift reset only the consecutive-stable count).
-SWAP_RETRY_COOLDOWN_CAP_SECONDS = 180.0
-# Stability = this many consecutive intervals at or below the rate limit.
-SWAP_RETRY_COOLDOWN_STABLE_INTERVALS = 3
-# Swap I/O need per interval computed from the CUMULATIVE counters.
-SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S = 1.0
-# Truthful progress narration cadence (stderr) during the cooldown.
-SWAP_RETRY_NARRATION_INTERVAL_SECONDS = 15.0
 
 # --------------------------------------------------------------------------
 # Milestone 3: isolated Ollama runtime (methodology sections 2 and 5)
