@@ -945,7 +945,7 @@ class VerifyStageTests(unittest.TestCase):
         self.assertIn("no_candidate_urls", claim["reason"])
 
     def test_status_reports_stage_and_backlog_state(self) -> None:
-        from tiktok_ingest.pipeline import video_status
+        from tiktok_ingest.fetch import video_status
 
         state, _ = make_synthesized_job(self.tmp)
         self._run(state, self._fake_urlopen(github_star_page(3456)))

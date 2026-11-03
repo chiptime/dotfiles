@@ -1,4 +1,4 @@
-"""Direct-URL pipeline orchestration (Milestone 2).
+"""URL fetch and validation (Milestone 2).
 
 Implements the "authorized input to CPU artifacts" boundary for ONE
 canonical TikTok video URL (MVP-PRD section 7, milestone row 2):

@@ -107,7 +107,7 @@ from .gpu_lease import (
     reconcile_lease,
     wait_for_whisper_health,
 )
-from .pipeline import parse_tiktok_url
+from .fetch import parse_tiktok_url
 from .guided import (
     GUIDED_MAX_BATCH,
     ConsentProvider,

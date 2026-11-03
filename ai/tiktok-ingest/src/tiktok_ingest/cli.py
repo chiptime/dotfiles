@@ -124,7 +124,7 @@ from .ollama_runtime import (
     import_model,
     install_ollama,
 )
-from .pipeline import PipelineError, fetch_url, parse_tiktok_url, video_status
+from .fetch import PipelineError, fetch_url, parse_tiktok_url, video_status
 from .prepare import PrepareError, prepare_video
 from .review import (
     ReviewError,

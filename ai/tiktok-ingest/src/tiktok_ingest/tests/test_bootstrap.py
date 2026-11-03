@@ -96,9 +96,9 @@ class InstallTests(unittest.TestCase):
         # preparing can never create environments or install packages.
         import tiktok_ingest.extractor as extractor_module
         import tiktok_ingest.prepare as prepare_module
-        import tiktok_ingest.pipeline as pipeline_module
+        import tiktok_ingest.fetch as fetch_module
 
-        for module in (extractor_module, prepare_module, pipeline_module):
+        for module in (extractor_module, prepare_module, fetch_module):
             source = Path(module.__file__).read_text(encoding="utf-8")
             self.assertNotIn("bootstrap", source)
 

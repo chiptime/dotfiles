@@ -19,7 +19,7 @@ from pathlib import Path
 
 from tiktok_ingest import config
 from tiktok_ingest.contracts import BlocklistEntry, StageOutcome, utc_now_iso
-from tiktok_ingest.pipeline import video_status
+from tiktok_ingest.fetch import video_status
 from tiktok_ingest.state import Blocklist, Processed
 from tiktok_ingest.tests.fixtures import FakeResponse, make_prepared_job
 from tiktok_ingest.whisper_client import (

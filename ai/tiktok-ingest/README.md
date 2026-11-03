@@ -95,7 +95,7 @@ backlog review lifecycle, verify semantics and their limits) live in
   surface as explicit `budget_exceeded` outcomes. All artifacts persist
   atomically; `meta.json` records stage outcomes, hashes, versions and
   timings.
-- `src/tiktok_ingest/pipeline.py` — **direct-URL input mode**: one
+- `src/tiktok_ingest/fetch.py` — **direct-URL input mode**: one
   canonical `https://www.tiktok.com/@author/video/<id>` URL → blocklist
   check → metadata/extraction cache checks → gated extraction → validation
   → content-addressed cache → `fetch.json` + `meta.json` + inventory

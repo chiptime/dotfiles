@@ -18,7 +18,7 @@ from typing import Any, Callable, Mapping
 from .collection import CollectionError, parse_collection_url
 from .collection_run import make_auto_synthesizer, run_collection
 from .guided import narrate_stages, run_guided, whisper_coordinated_stage_functions
-from .pipeline import PipelineError, _record_inventory, _utc_now, parse_tiktok_url
+from .fetch import PipelineError, _record_inventory, _utc_now, parse_tiktok_url
 from .runtime import default_urlopen, subprocess_runner
 from .state import StateRoot
 from .synthesis_api import load_text_api_config

@@ -72,7 +72,7 @@ from .gpu_lease import (  # noqa: F401 - re-exported bounds (S2 single home)
     WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS,
 )
 from .ollama_runtime import start_server, stop_server, wait_ready
-from .pipeline import fetch_url
+from .fetch import fetch_url
 from .prepare import prepare_video
 from .runtime import Runner, subprocess_runner
 from .state import Blocklist, Processed, StateRoot

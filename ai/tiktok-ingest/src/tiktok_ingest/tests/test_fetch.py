@@ -16,7 +16,7 @@ from pathlib import Path
 
 from tiktok_ingest import config
 from tiktok_ingest.contracts import InventoryEntry
-from tiktok_ingest.pipeline import (
+from tiktok_ingest.fetch import (
     FetchOutcome,
     PipelineError,
     _record_inventory,
