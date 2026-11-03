@@ -770,7 +770,11 @@ lease writes `<state root>/active_gpu_lease.json` (default
 the owner PID and its process start time, a timestamp, and the verified
 Whisper identity: name, image, and the identity environment keys only,
 never secrets. It is removed only after a verified healthy restore. A
-failed restore, a health timeout, or an interruption keeps it.
+failed restore, a health timeout, or an interruption keeps it. Checking
+and writing the marker, and the whole startup reconcile, run under an
+exclusive lock on `active_gpu_lease.lock` next to it, so two runs can never
+both take the lease or both restore the service. The lock file stays in
+place; the kernel releases the lock when the process exits.
 
 At the start of every `collection-run`, `guided-run` and `ingest`, before
 the Whisper identity is bound and before any GPU work, the run reconciles
@@ -790,7 +794,8 @@ a marker left behind by a previous run:
 - **Owner dead, Whisper already running:** the stale marker is removed
   and the service is not touched.
 - **Anything unproven** (identity differs, container missing, inspect
-  fails, unreadable marker, failed start, health timeout): the run stops
+  fails, unreadable marker or one without a recorded owner PID and start
+  time, failed start, health timeout or a failing health probe): the run stops
   before any GPU work. `collection-run` records
   `hard_stop_reason: "gpu lease reconcile: ..."`; `guided-run` exits with
   the same message. The marker is kept. Verify the container manually,

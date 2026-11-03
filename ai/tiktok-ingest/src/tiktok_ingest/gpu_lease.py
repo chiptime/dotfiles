@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import fcntl
 import os
 import time
 from collections.abc import Mapping
@@ -54,6 +55,9 @@ WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS = 1.0
 
 # Lease marker (S3): schema/version of ``active_gpu_lease.json``.
 LEASE_MARKER_FILENAME = "active_gpu_lease.json"
+# Advisory lock serializing marker check+write (acquire) and the whole
+# startup reconcile across processes; released automatically on exit.
+LEASE_LOCK_FILENAME = "active_gpu_lease.lock"
 LEASE_MARKER_SCHEMA = "tiktok-ingest.gpu-lease"
 LEASE_MARKER_VERSION = 1
 
@@ -240,6 +244,38 @@ class LeaseMarkerFile:
             return
         self._path.unlink(missing_ok=True)
 
+    def exists(self) -> bool:
+        """True when a marker file is present (even an unreadable one)."""
+        return self._path is not None and self._path.exists()
+
+    @contextlib.contextmanager
+    def exclusive(self) -> Iterator[None]:
+        """Hold the cross-process lease lock, or raise GpuLeaseBusyError.
+
+        Non-blocking: another process holding the lock means it is
+        acquiring or reconciling the lease right now. An atomic file
+        replace alone does not make check+write mutually exclusive.
+        No-op when persistence is disabled.
+        """
+        if self._path is None:
+            yield
+            return
+        lock_path = self._path.with_name(LEASE_LOCK_FILENAME)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a", encoding="utf-8") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise GpuLeaseBusyError(
+                    "another tiktok-ingest run is acquiring or reconciling "
+                    "the GPU lease right now; refusing to touch the whisper "
+                    "service — wait for that run, then re-run this command"
+                ) from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
     def live_foreign_owner(self) -> dict[str, Any] | None:
         """The marker when it belongs to ANOTHER live process, else None.
 
@@ -361,6 +397,40 @@ def reconcile_lease(
     shared bounded wait. Every unproven case fails closed with no
     mutation. ``KeyboardInterrupt`` propagates and keeps the marker.
     """
+    if not marker.exists():
+        return ReconcileResult("none")
+    try:
+        with marker.exclusive():
+            return _reconcile_locked(
+                marker,
+                inspect=inspect,
+                restore=restore,
+                health=health,
+                monotonic=monotonic,
+                sleep=sleep,
+                waiting_feedback=waiting_feedback,
+            )
+    except GpuLeaseBusyError as exc:
+        return ReconcileResult("blocked_live_owner", str(exc))
+
+
+def _has_provable_owner(document: Mapping[str, Any]) -> bool:
+    return all(
+        isinstance(document.get(key), int) and not isinstance(document.get(key), bool)
+        for key in ("owner_pid", "owner_start_time")
+    )
+
+
+def _reconcile_locked(
+    marker: LeaseMarkerFile,
+    *,
+    inspect: Callable[[], Any],
+    restore: Callable[[Any], Any],
+    health: Callable[[], tuple[bool, str]],
+    monotonic: Callable[[], float] | None,
+    sleep: Callable[[float], None] | None,
+    waiting_feedback: Callable[[float], None] | None,
+) -> ReconcileResult:
     recovery = _MANUAL_RECOVERY.format(path=marker.path)
     try:
         document = marker.read()
@@ -368,11 +438,16 @@ def reconcile_lease(
         return ReconcileResult(
             "blocked", f"cannot read the GPU lease marker ({exc}); {recovery}"
         )
-    if document is None:
-        return ReconcileResult("none")
     if not isinstance(document, Mapping):
         return ReconcileResult(
             "blocked", f"the GPU lease marker is malformed; {recovery}"
+        )
+    if not _has_provable_owner(document):
+        # Without a recorded PID and start time the owner can be neither
+        # proven dead nor alive: never act on an unprovable ownership.
+        return ReconcileResult(
+            "blocked",
+            f"the GPU lease marker has no provable owner process; {recovery}",
         )
     foreign = marker.live_foreign_owner()
     if foreign is not None:
@@ -416,9 +491,20 @@ def reconcile_lease(
             f"restoring the whisper service left stopped by a previous run "
             f"failed ({exc}); {recovery}",
         )
-    healthy, detail = wait_for_whisper_health(
-        health, monotonic=monotonic, sleep=sleep, waiting_feedback=waiting_feedback
-    )
+    try:
+        healthy, detail = wait_for_whisper_health(
+            health,
+            monotonic=monotonic,
+            sleep=sleep,
+            waiting_feedback=waiting_feedback,
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, marker kept
+        return ReconcileResult(
+            "blocked",
+            "the whisper service left stopped by a previous run was started "
+            f"but its health check failed ({type(exc).__name__}: {exc}); "
+            f"{recovery}",
+        )
     if not healthy:
         return ReconcileResult(
             "blocked",
@@ -552,10 +638,11 @@ class GpuLease:
         if self._marker is not None:
             # Concurrency guard (S6): never stop a service whose lease is
             # held by another live run. An unreadable marker raises.
-            foreign = self._marker.live_foreign_owner()
-            if foreign is not None:
-                raise GpuLeaseBusyError(_busy_message(foreign))
-            self._marker.write(info)
+            with self._marker.exclusive():
+                foreign = self._marker.live_foreign_owner()
+                if foreign is not None:
+                    raise GpuLeaseBusyError(_busy_message(foreign))
+                self._marker.write(info)
         try:
             self._hooks.stop(info)
         except KeyboardInterrupt:

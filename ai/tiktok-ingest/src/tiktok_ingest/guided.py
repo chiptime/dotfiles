@@ -2262,6 +2262,8 @@ def run_guided(
                 "granted": False,
                 "window": plan_window.to_dict(),
             }
+            if reconcile.action != "none":
+                report["gpu_lease_reconcile"] = reconcile.to_dict()
             return 0, report
 
         authorization = RunScopedAuthorization(

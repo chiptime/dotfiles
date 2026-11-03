@@ -224,6 +224,90 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(service.calls, [])
         self.assertTrue(path.exists())
 
+    def test_null_marker_fails_closed(self) -> None:
+        path = gpu_lease.lease_marker_path(self.state)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("null", encoding="utf-8")
+        service = FakeService(stopped(fixture_info()))
+        result = self.reconcile(service)
+        self.assertEqual(result.action, "blocked")
+        self.assertEqual(service.calls, [])
+        self.assertTrue(path.exists())
+
+    def test_marker_without_provable_owner_fails_closed(self) -> None:
+        path = write_marker(self.state, fixture_info())
+        document = json.loads(path.read_text(encoding="utf-8"))
+        del document["owner_pid"]
+        del document["owner_start_time"]
+        path.write_text(json.dumps(document), encoding="utf-8")
+        before = path.read_bytes()
+        service = FakeService(stopped(fixture_info()))
+        result = self.reconcile(service)
+        self.assertEqual(result.action, "blocked")
+        self.assertNotIn("restore", service.calls)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_health_probe_exception_is_reported_and_keeps_the_marker(self) -> None:
+        import http.client
+
+        path = write_marker(self.state, fixture_info())
+        before = path.read_bytes()
+        service = FakeService(stopped(fixture_info()))
+
+        def broken_health() -> tuple[bool, str]:
+            raise http.client.IncompleteRead(b"ok", 5)
+
+        result = gpu_lease.reconcile_lease(
+            gpu_lease.LeaseMarkerFile(self.state),
+            inspect=service.inspect,
+            restore=service.restore,
+            health=broken_health,
+            monotonic=self.clock.monotonic,
+            sleep=self.clock.sleep,
+        )
+        self.assertEqual(result.action, "blocked")
+        self.assertIn("IncompleteRead", result.detail)
+        self.assertIn("marker", result.detail)
+        self.assertEqual(service.calls.count("restore"), 1)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_concurrent_reconcile_refuses_the_second_caller(self) -> None:
+        import multiprocessing
+
+        write_marker(self.state, fixture_info())
+        ctx = multiprocessing.get_context("fork")
+        entered, release = ctx.Event(), ctx.Event()
+
+        def child() -> None:
+            def slow_restore(info: WhisperServiceInfo) -> WhisperServiceInfo:
+                entered.set()
+                if not release.wait(10):
+                    raise RuntimeError("probe release timed out")
+                return info
+
+            gpu_lease.reconcile_lease(
+                gpu_lease.LeaseMarkerFile(self.state),
+                inspect=lambda: stopped(fixture_info()),
+                restore=slow_restore,
+                health=lambda: (True, "healthy"),
+            )
+
+        process = ctx.Process(target=child)
+        process.start()
+        service = FakeService(stopped(fixture_info()))
+        try:
+            self.assertTrue(entered.wait(10))
+            result = self.reconcile(service)
+        finally:
+            release.set()
+            process.join(15)
+            if process.is_alive():
+                process.kill()
+                process.join()
+        self.assertEqual(process.exitcode, 0)
+        self.assertEqual(result.action, "blocked_live_owner")
+        self.assertEqual(service.calls, [])
+
     def test_result_serializes_for_reports(self) -> None:
         write_marker(self.state, fixture_info())
         result = self.reconcile(FakeService(stopped(fixture_info())))
@@ -256,6 +340,28 @@ class AcquireGuardTests(unittest.TestCase):
             self.lease().acquire(fixture_info())
         self.assertEqual(self.stops, [])
         self.assertEqual(path.read_bytes(), before)
+
+    def test_acquire_refuses_while_another_process_holds_the_lease_lock(self) -> None:
+        import multiprocessing
+
+        ctx = multiprocessing.get_context("fork")
+        entered, release = ctx.Event(), ctx.Event()
+
+        def child() -> None:
+            with gpu_lease.LeaseMarkerFile(self.state).exclusive():
+                entered.set()
+                release.wait(10)
+
+        process = ctx.Process(target=child)
+        process.start()
+        try:
+            self.assertTrue(entered.wait(10))
+            with self.assertRaises(gpu_lease.GpuLeaseBusyError):
+                self.lease().acquire(fixture_info())
+        finally:
+            release.set()
+            process.join(15)
+        self.assertEqual(self.stops, [])
 
     def test_dead_owner_marker_is_taken_over(self) -> None:
         path = write_marker(self.state, fixture_info())
@@ -314,6 +420,23 @@ class GuidedReconcileTests(GuidedTestCase):
             self._run(stages)
         self.assertNotIn("whisper-restore", stages.calls)
         self.assertNotIn("whisper-stop", stages.calls)
+
+
+class GuidedReconcileReportTests(GuidedTestCase):
+    def test_denied_run_plan_still_reports_the_reconcile(self) -> None:
+        from tiktok_ingest.guided import run_guided
+
+        seed_scan(self.state, [1])
+        seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
+        write_marker(self.state, fixture_info())
+        _code, report = run_guided(
+            state=self.state,
+            ids=[fake_id(1)],
+            stages=StoppedAtStartGuidedStages().functions(),
+            consent=ScriptedConsent([("run-plan", False)]),
+            out=lambda _text: None,
+        )
+        self.assertEqual(report["gpu_lease_reconcile"]["action"], "restored")
 
 
 class InspectableCollectionStages(CollectionStages):

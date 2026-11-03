@@ -183,6 +183,10 @@ failure branches and on curses terminal handling.
   interruption inside `podman stop`. Anything unproven fails closed.
 - Concurrency guard: a marker owned by another live process blocks a new GPU
   window.
+- Shape: the lease is an object (`acquire` / `restore_once`) rather than a
+  single `with` block, because the stop happens after consent in one phase and
+  the restore in a later one. `leased_window` exists for callers that fit in
+  one block.
 - Not done: free-VRAM verification was not moved into the lease. The
   collection retry's post-stop check reports distinct drift outcomes, so
   moving it would change behaviour. The guided gates stay in the vision stage.
