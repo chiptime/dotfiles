@@ -54,6 +54,7 @@ from .collection import (
     extract_page_items,
     merge_observation,
     sync_inventory_from_scan,
+    zero_items_warning,
 )
 from .contracts import utc_now_iso
 from .guided import ConsentProvider, ConsentWindow
@@ -364,6 +365,18 @@ def run_browser_inventory(
         ) from exc
 
     existing = CollectionScanStore(state).load(ref.collection_key)
+    if not observation.items and existing is not None and existing.items:
+        # Zero-items guard (S6): a fresh EMPTY observation of a previously
+        # NON-empty collection smells like TikTok DOM drift. Exactly one
+        # warning line through the narration channel plus one cleanup note;
+        # the merge below stays union-only and the scan status and run flow
+        # are untouched. A missing container never reaches this point: it
+        # already fails explicitly above as a DOM-change error.
+        warning_text = zero_items_warning(
+            ref.collection_key, len(existing.items)
+        )
+        out(f"warning: {warning_text}")
+        notes.append(warning_text)
     merged = merge_observation(
         existing,
         ref,

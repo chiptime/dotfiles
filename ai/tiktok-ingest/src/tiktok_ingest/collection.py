@@ -967,6 +967,27 @@ def merge_observation(
     )
 
 
+def zero_items_warning(collection_key: str, previously_had: int) -> str:
+    """Exact warning text for a fresh EMPTY observation of a NON-empty scan.
+
+    Returned WITHOUT the ``warning: `` prefix so callers reuse one text as
+    the prefixed narration (stderr) line and as the bare cleanup note. A
+    zero-item observation of a previously non-empty collection suggests
+    TikTok changed the page layout; it is a WARNING only — the merge stays
+    union-only and the scan status and run flow never change because of it.
+    """
+    _require_str(collection_key, "collection_key")
+    if isinstance(previously_had, bool) or not isinstance(previously_had, int):
+        raise ContractError("previously_had must be an integer")
+    if previously_had <= 0:
+        raise ContractError("previously_had must be positive")
+    return (
+        f"collection {collection_key} returned 0 items but previously had "
+        f"{previously_had}; TikTok may have changed its page layout — check "
+        'the collection selector (data-e2e="collection-item-list")'
+    )
+
+
 # --------------------------------------------------------------------------
 # Store
 # --------------------------------------------------------------------------

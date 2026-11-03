@@ -209,6 +209,80 @@ class TestHappyPath(BrowserTestCase):
         self.assertEqual(len(scan.items), 3, "merge-only: items accumulate")
 
 
+class TestZeroItemsWarning(BrowserTestCase):
+    """S6: a fresh EMPTY observation of a previously NON-empty collection
+    warns exactly once (narration line + one cleanup note) while the
+    union merge, the recomputed scan status and the run flow stay exactly
+    as they were. No warning on a first scan, on a prior-zero scan, or
+    when the fresh observation still has items.
+    """
+
+    def _run(self, controller: FakeController, messages: list[str]) -> browser.BrowserInventoryReport:
+        return browser.run_browser_inventory(
+            state=self.state,
+            ref=REF,
+            consent=ScriptedConsent([("browser", True)]),
+            out=messages.append,
+            controller=controller,
+            profile_base=self.profile_base,
+        )
+
+    @staticmethod
+    def _warnings(messages: list[str]) -> list[str]:
+        return [m for m in messages if m.startswith("warning:")]
+
+    def test_prior_items_and_fresh_zero_warns_once_and_changes_nothing(self) -> None:
+        first_messages: list[str] = []
+        self._run(FakeController(page_html(items=3)), first_messages)
+        scan_before = CollectionScanStore(self.state).load(REF.collection_key)
+        assert scan_before is not None
+        ids_before = [item.stable_id for item in scan_before.items]
+        self.assertEqual(len(ids_before), 3)
+        self.assertEqual(self._warnings(first_messages), [])
+
+        messages: list[str] = []
+        report = self._run(FakeController(page_html(items=0)), messages)
+
+        note = (
+            f"collection {REF.collection_key} returned 0 items but "
+            "previously had 3; TikTok may have changed its page layout — "
+            'check the collection selector (data-e2e="collection-item-list")'
+        )
+        self.assertEqual(self._warnings(messages), [f"warning: {note}"])
+        self.assertEqual(report.cleanup_notes, [note])
+        # Merge union + recomputed status stay exactly as before the rule.
+        self.assertEqual(report.observed_items, 3)
+        self.assertEqual(report.scan_status, scan_before.status)
+        self.assertEqual(report.scan_status_reason, scan_before.status_reason)
+        scan_after = CollectionScanStore(self.state).load(REF.collection_key)
+        assert scan_after is not None
+        self.assertEqual([item.stable_id for item in scan_after.items], ids_before)
+        self.assertEqual(scan_after.status, scan_before.status)
+
+    def test_first_scan_with_zero_items_never_warns(self) -> None:
+        messages: list[str] = []
+        report = self._run(FakeController(page_html(items=0)), messages)
+        self.assertEqual(self._warnings(messages), [])
+        self.assertEqual(report.cleanup_notes, [])
+        self.assertEqual(report.observed_items, 0)
+
+    def test_prior_zero_and_fresh_zero_never_warn(self) -> None:
+        messages: list[str] = []
+        self._run(FakeController(page_html(items=0)), messages)
+        report = self._run(FakeController(page_html(items=0)), messages)
+        self.assertEqual(self._warnings(messages), [])
+        self.assertEqual(report.cleanup_notes, [])
+        self.assertEqual(report.observed_items, 0)
+
+    def test_prior_items_and_fresh_items_keep_previous_behaviour(self) -> None:
+        messages: list[str] = []
+        self._run(FakeController(page_html(items=2)), messages)
+        report = self._run(FakeController(page_html(items=3)), messages)
+        self.assertEqual(self._warnings(messages), [])
+        self.assertEqual(report.cleanup_notes, [])
+        self.assertEqual(report.observed_items, 3, "union merge unchanged")
+
+
 class TestLiveSelectorDefaults(unittest.TestCase):
     def test_production_defaults_match_the_verified_live_selector(self) -> None:
         self.assertEqual(browser.DEFAULT_CONTAINER_ATTR, "data-e2e")

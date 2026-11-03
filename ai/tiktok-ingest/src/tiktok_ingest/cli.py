@@ -105,6 +105,7 @@ from .collection import (
     build_collection_plan,
     extract_page_items,
     merge_observation,
+    zero_items_warning,
     parse_collection_url,
     resolve_collection,
     sync_inventory_from_scan,
@@ -967,6 +968,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             store = CollectionScanStore(state)
             existing = store.load(ref.collection_key)
+            if existing is not None and existing.items and not observation.items:
+                print(
+                    "warning: "
+                    + zero_items_warning(ref.collection_key, len(existing.items)),
+                    file=sys.stderr,
+                )
             merged = merge_observation(
                 existing,
                 ref,

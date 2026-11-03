@@ -35,6 +35,7 @@ from tiktok_ingest.collection import (
     parse_collection_url,
     resolve_collection,
     sync_inventory_from_scan,
+    zero_items_warning,
 )
 from tiktok_ingest.contracts import ContractError, InventoryEntry, ProcessedEntry
 from tiktok_ingest.state import (
@@ -727,6 +728,14 @@ class MergeTests(unittest.TestCase):
         self.assertIn("log in", lowered)
         self.assertIn("do not prove deletion or privacy", scan2.status_reason.lower())
 
+    def test_zero_items_warning_text_is_exact(self) -> None:
+        self.assertEqual(
+            zero_items_warning(REF.collection_key, 7),
+            f"collection {REF.collection_key} returned 0 items but "
+            "previously had 7; TikTok may have changed its page layout — "
+            'check the collection selector (data-e2e="collection-item-list")',
+        )
+
     def test_status_matches_accumulated_evidence(self) -> None:
         scan = merge_page(None, video_ids=(1, 2), declared=2, end_evidence="footer reached")
         self.assertEqual(scan.status, "complete")
@@ -1129,6 +1138,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("collection error", err)
         self.assertFalse((self.state_root / "collections").exists())
+
+    def test_collect_empty_page_over_a_non_empty_scan_warns_on_stderr(self) -> None:
+        full = self._write_html(collection_page(item_href(1), item_href(2)), name="full.html")
+        code, _out, err = self._main(self._collect_argv(str(full)))
+        self.assertEqual(code, 0, msg=err)
+        self.assertNotIn("warning:", err)
+        empty = self._write_html(collection_page(), name="empty.html")
+        code, out, err = self._main(self._collect_argv(str(empty)))
+        self.assertEqual(code, 0, msg=err)
+        self.assertIn("warning: collection ", err)
+        self.assertIn("returned 0 items but previously had 2", err)
+        self.assertEqual(json.loads(out)["observed_count"], 2)
 
     def test_collect_invalid_url_exits_two(self) -> None:
         html_path = self._write_html(collection_page(item_href(1)), name="ok.html")
