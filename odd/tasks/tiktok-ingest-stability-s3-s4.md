@@ -24,7 +24,7 @@ Objective: ROADMAP Stability track S3 and S4. Branch `feat/tiktok-stability-s3-s
 | T5 | S3,S4 | collection_run on engine; swap-retry in one place | delegated after T2 | done | `f2cc146`; RED static test; GREEN 1051 OK; differential 3 incl. swap-retry identical |
 | T6 | S7 | opt-in live smoke test | delegated after T3,T4 | done | `2413cca`; exception: live parts not runnable here (would stop real Whisper, hit TikTok); verified skipped by default and without URLs |
 | T7 | S8 | docs (parent owns OPERATIONS.md/ROADMAP.md) | inline | done | docs commit |
-| T8 | all | independent verifier (risk items 4 GPU stop/restore ordering, 2 safety gate) | delegated | pending | |
+| T8 | all | independent verifier (risk items 4 GPU stop/restore ordering, 2 safety gate) | delegated | done | blocker 1 (negative rate quiet) fixed `c86517a`; blocker 2 (live-smoke doc ambiguity) fixed in docs; recheck all S# pass; 1052 OK |
 
 ## Log
 
@@ -35,3 +35,5 @@ Objective: ROADMAP Stability track S3 and S4. Branch `feat/tiktok-stability-s3-s
 - L5: T3 worker made the 1024 MiB ceiling unconditional, which silently capped an operator `--swap-limit-mib` above 1024 (an explicit option losing its effect). Parent decision: ceiling = max(1024 MiB, override + 1 byte), so an override keeps its old raw-delta meaning; RED test observed first.
 - L6: T4 left `inventory-collect` (offline HTML import, same load+merge) unwired; parent wired the stderr warning there (its JSON stdout unchanged).
 - L7: T5 audit — only duplication between swap retry and engine was lease construction (now `engine.lease_from_stages`); restore-outcome mappings stay per driver (different pinned messages). `GuidedRun._execute_collection_phase` kept as forwarder: tests still call it.
+- L8 (verifier T8): blocker — a swap counter going backwards between samples gave a negative rate treated as quiet (530 MiB delta passed; baseline failed). Fixed `c86517a`: negative rate is unmeasurable, fails closed. Recheck: S1–S7 pass incl. baseline tests on new code (1024 OK after expected import/clock patch rewrites), interrupted-stop per driver, stage-level gate probes, inventory-collect stdout byte-identical.
+- L9: second blocker — OPERATIONS live-smoke text implied every part needs a URL; environment probes run with only TIKTOK_INGEST_LIVE=1. Docs corrected.

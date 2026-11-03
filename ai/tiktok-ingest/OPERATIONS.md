@@ -368,10 +368,11 @@ TIKTOK_INGEST_LIVE_COLLECTION=<collection url> \
 PYTHONPATH=ai/tiktok-ingest/src python3 -m unittest tiktok_ingest.tests.test_live_smoke -v
 ```
 
-It never runs in the default suite: every test needs `TIKTOK_INGEST_LIVE=1`
-and each part skips without its URL variable. It checks podman, the
-`voice-assistant-whisper` container and its health, the isolated Ollama with
-the vision model, and the pinned yt-dlp gate. The video part runs `ingest`
+It never runs in the default suite: every test needs `TIKTOK_INGEST_LIVE=1`.
+With only that variable set, the environment checks still run (read-only:
+podman, the `voice-assistant-whisper` container and its health, the isolated
+Ollama with the vision model, and the pinned yt-dlp gate). The video and
+collection parts also need their URL variable and skip without it. The video part runs `ingest`
 end to end in a temporary state root (your real state is untouched) and
 REALLY stops and restores Whisper. The collection part opens the headed
 browser (log in first) and is the canary for TikTok layout changes.
