@@ -99,7 +99,12 @@ from .collection import (
 )
 from .contracts import JobManifest, StageOutcome, utc_now_iso
 from .gates import GATE_SWAP_DELTA
-from .gpu_lease import wait_for_whisper_health
+from .gpu_lease import (
+    GpuLease,
+    LeaseHooks,
+    LeaseMarkerFile,
+    wait_for_whisper_health,
+)
 from .pipeline import parse_tiktok_url
 from .guided import (
     GUIDED_MAX_BATCH,
@@ -1422,6 +1427,51 @@ def _restore_whisper_after_drift(
         ) from exc
 
 
+def _release_retry_lease(
+    lease: GpuLease,
+    *,
+    now: Callable[[], float],
+    do_sleep: Callable[[float], None],
+    context: str,
+) -> None:
+    """Release a retry window's GPU lease: the ONE authorized restore.
+
+    The lease is the single owner of the stop→…→restore window (S1): it
+    performs exactly one start, the bounded readiness wait (S2) and the
+    marker clear on the verified healthy path (S3). Every drift/exit
+    path that must not leave the shared service stopped releases the
+    lease through here, so the restore logic lives in ONE place; this
+    helper only maps the lease's outcome onto the existing global
+    fail-closed category (``_SwapRetryBlocked``) with the exact
+    per-branch messages. A ``KeyboardInterrupt`` propagates (the lease
+    records where it landed; the one start is never repeated).
+    """
+    try:
+        outcome = lease.restore_once(monotonic=now, sleep=do_sleep)
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
+        raise _SwapRetryBlocked(
+            f"whisper restoration after {context} failed ({exc}): ALL "
+            "further progress is blocked; verify the service state "
+            "explicitly; no rollback is performed or implied"
+        ) from exc
+    if outcome.status == "restore_failed":
+        exc = outcome.error
+        raise _SwapRetryBlocked(
+            f"whisper restoration after {context} failed ({exc}): ALL "
+            "further progress is blocked; verify the service state "
+            "explicitly; no rollback is performed or implied"
+        ) from exc
+    if outcome.status != "healthy":
+        raise _SwapRetryBlocked(
+            f"whisper restoration after {context} did not become "
+            "healthy: ALL further progress is blocked; verify the "
+            "service state explicitly; no rollback is performed or "
+            "implied"
+        )
+
+
 def _swap_retry_readmission(
     *,
     state: StateRoot,
@@ -1433,22 +1483,27 @@ def _swap_retry_readmission(
     out: Callable[[str], None],
     now: Callable[[], float],
     do_sleep: Callable[[float], None],
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, GpuLease | None]:
     """Re-admission under the retry consent's named authority (D-05).
 
-    Returns ``(status, reason)``:
+    Returns ``(status, reason, lease)``:
 
-    - ``("ok", None)`` — whisper stopped under the retry authority,
-      identical configuration re-checked, a fresh post-stop swap sample
-      recorded and (when measurable) below threshold, fresh free-VRAM
-      gate green; the retry attempt may run;
-    - ``("drift", reason)`` — final-conditions drift (FR-11): the
-      stability count must reset and sampling resumes inside the SAME
-      180 s cap; whisper is left RUNNING (restored if it had been
-      stopped — the shared service is NEVER held down while resampling);
-    - ``("new_authorization", reason)`` — scope fingerprints changed
-      since the consent (FR-24): the approved retry does not cover this
-      scope; the video stays pending for a fresh authorization.
+    - ``("ok", None, lease)`` — whisper stopped under the retry
+      authority (through the window's GPU lease: the persisted marker
+      exists for exactly this stop→…→restore window), identical
+      configuration re-checked, a fresh post-stop swap sample recorded
+      and (when measurable) below threshold, fresh free-VRAM gate green;
+      the retry attempt may run — the caller releases the SAME lease
+      when it ends the window instead of executing the attempt;
+    - ``("drift", reason, lease|None)`` — final-conditions drift
+      (FR-11): the stability count must reset and sampling resumes
+      inside the SAME 180 s cap; whisper is left RUNNING (the window's
+      lease was released — restored — if this re-admission had stopped
+      it; the shared service is NEVER held down while resampling);
+    - ``("new_authorization", reason, None)`` — scope fingerprints
+      changed since the consent (FR-24): the approved retry does not
+      cover this scope; the video stays pending for a fresh
+      authorization. No stop was attempted, so there is no lease.
 
     Raises ``_SwapRetryBlocked`` (the existing global service-
     restoration fail-closed category, actual state reported) for
@@ -1460,6 +1515,7 @@ def _swap_retry_readmission(
     """
     bound = plan.whisper_info
     assert bound is not None  # narrowing: the flow verified the binding
+    lease: GpuLease | None = None
     # Scope fingerprints first (read-only, before any mutation).
     scope_now = _swap_retry_scope_now(state, elig.video_id)
     if scope_now is None:
@@ -1477,6 +1533,7 @@ def _swap_retry_readmission(
                 f"{scope_now.get(key)!r}); a retry under changed scope is "
                 "a NEW authorization question — the approved retry does "
                 "not cover it",
+                None,
             )
     current = stages.whisper_inspect()
     if current is None:
@@ -1490,6 +1547,10 @@ def _swap_retry_readmission(
         # Volatile-state drift (FR-11 "service state changed"), but the
         # shared service is DOWN: restore it under the granted retry
         # authority FIRST so resampling never proceeds with it held down.
+        # This flow did NOT stop it in this window, so there is no lease
+        # and no marker for this restore: exactly one direct start under
+        # the standing grant, exactly as before the lease existed (a
+        # marker here would claim ownership of a stop nobody made).
         _restore_whisper_after_drift(
             stages, current, now=now, do_sleep=do_sleep,
             context="a not-running drift at re-admission",
@@ -1501,6 +1562,7 @@ def _swap_retry_readmission(
             "healthy under the retry authority before resampling "
             "(pre-mutation healthy samples never guarantee post-change "
             "conditions); sampling resumes inside the SAME cap",
+            None,
         )
     if not same_service_config(bound, current):
         # Identity-level mismatch: a DIFFERENT configuration is answering
@@ -1518,13 +1580,27 @@ def _swap_retry_readmission(
             "the service state explicitly; no rollback is performed or "
             "implied"
         )
-    # Stop under the retry consent's named lifecycle authority.
+    # Stop under the retry consent's named lifecycle authority. The GPU
+    # lease is the single owner of this stop→…→restore window (S1): it
+    # persists the lease marker BEFORE the stop command is issued (S3,
+    # under the run's state root) and owns the exactly-one restore that
+    # ends the window on every path below.
+    lease = GpuLease(
+        hooks=LeaseHooks(
+            stop=lambda info: stages.whisper_stop(info),
+            restore=lambda info: stages.whisper_restore(info),
+            health=lambda: stages.whisper_health(),
+        ),
+        marker=LeaseMarkerFile(state),
+    )
     try:
-        stages.whisper_stop(current)
+        lease.acquire(current)
     except KeyboardInterrupt:
         # The stop result is UNKNOWN: never guess, never restore — the
         # operator verifies the exact service manually (mirrors the
         # standing whisper-stop interrupt semantics; no unsafe rollback).
+        # The marker STAYS on disk so the next start can prove the stop
+        # was ours (S5).
         raise
     except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
         raise _SwapRetryBlocked(
@@ -1545,11 +1621,12 @@ def _swap_retry_readmission(
         # The stop above is VERIFIED, so the shared service is in a KNOWN
         # stopped state. A handled post-stop measurement failure or an
         # interrupt here must never leave it stopped behind a normal
-        # window end: restore the SAME service under the retry authority
-        # first (no replay of the start attempt), then let the original
-        # failure propagate with its honest terminal state.
-        _restore_whisper_after_drift(
-            stages, current, now=now, do_sleep=do_sleep,
+        # window end: release the window's lease (restore the SAME
+        # service under the retry authority, no replay of the start
+        # attempt) first, then let the original failure propagate with
+        # its honest terminal state.
+        _release_retry_lease(
+            lease, now=now, do_sleep=do_sleep,
             context="a post-stop swap measurement failure at re-admission",
         )
         raise
@@ -1566,11 +1643,11 @@ def _swap_retry_readmission(
             f"{config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S:.2f} "
             "MiB/s); sampling resumes inside the SAME cap"
         )
-        _restore_whisper_after_drift(
-            stages, current, now=now, do_sleep=do_sleep,
+        _release_retry_lease(
+            lease, now=now, do_sleep=do_sleep,
             context="a post-stop swap drift at re-admission",
         )
-        return ("drift", drift)
+        return ("drift", drift, lease)
     # Fresh admission gate AFTER the transition (FR-10/FR-11): the
     # vision stage's own gate stays authoritative; this seam only
     # enables the pre-attempt drift check. A RAISING probe leaves the
@@ -1584,8 +1661,8 @@ def _swap_retry_readmission(
         except KeyboardInterrupt:
             raise
         except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-            _restore_whisper_after_drift(
-                stages, current, now=now, do_sleep=do_sleep,
+            _release_retry_lease(
+                lease, now=now, do_sleep=do_sleep,
                 context="a failed free-VRAM probe at re-admission",
             )
             raise _SwapRetryBlocked(
@@ -1601,13 +1678,13 @@ def _swap_retry_readmission(
                 f"{config.GATES.free_vram_gate_mib} MiB); sampling "
                 "resumes inside the SAME cap"
             )
-            _restore_whisper_after_drift(
-                stages, current, now=now, do_sleep=do_sleep,
+            _release_retry_lease(
+                lease, now=now, do_sleep=do_sleep,
                 context="a re-admission VRAM drift",
             )
-            return ("drift", drift)
+            return ("drift", drift, lease)
     out("whisper stop (retry authority): verified identical config")
-    return ("ok", None)
+    return ("ok", None, lease)
 
 
 def _archive_original_vision_attempt(
@@ -1691,7 +1768,7 @@ def _execute_swap_retry(
     state: StateRoot,
     stages: StageFunctions,
     narrated: StageFunctions,
-    plan: RunPlan,
+    lease: GpuLease,
     video_id: str,
     elig: SwapRetryEligibility,
     window: ConsentWindow,
@@ -1704,25 +1781,25 @@ def _execute_swap_retry(
     """Run the ONE vision retry attempt inside its own bounded window.
 
     Precondition: re-admission already stopped whisper under the retry
-    authority and checked the fresh final conditions. This function
-    owns: the evidence archive, the isolated-Ollama lifecycle (never
-    adopting a preexisting server), the single narrated vision call,
-    the server stop, and the whisper restore + bounded health wait on
-    EVERY exit path (success, failure, interrupt). A failing evidence
-    archive also restores the SAME service under the retry authority
-    before its failure is reported. Terminal state and the attempt
-    record land in ``record``.
+    authority (through ``lease``) and checked the fresh final
+    conditions. This function owns: the evidence archive, the
+    isolated-Ollama lifecycle (never adopting a preexisting server), the
+    single narrated vision call, the server stop, and the release of the
+    window's GPU lease (the ONE whisper restore + bounded health wait)
+    on EVERY exit path (success, failure, interrupt). A failing evidence
+    archive also releases the lease before its failure is reported.
+    Terminal state and the attempt record land in ``record``.
     """
     started_iso = utc_now_iso()
     started = now()
-    stopped_info = plan.whisper_info
-    assert stopped_info is not None  # narrowing: readmission verified it
+    assert lease.stopped_info is not None  # narrowing: readmission stopped it
     # The evidence archive runs BEFORE the retry can overwrite the live
     # paths, but re-admission has ALREADY stopped whisper under the retry
     # authority. A failing archive here (a raise, or a manifest that
-    # unexpectedly vanished) must therefore restore the SAME service under
-    # that authority before it is reported — the shared service is never
-    # left stopped behind the retry window.
+    # unexpectedly vanished) must therefore release the window's lease
+    # (restore the SAME service under that authority) before it is
+    # reported — the shared service is never left stopped behind the
+    # retry window.
     try:
         archive = _archive_original_vision_attempt(
             state, video_id, elig, window
@@ -1735,20 +1812,20 @@ def _execute_swap_retry(
                 "attempt; the retry is not executed and progress is blocked"
             )
     except _SwapRetryBlocked:
-        _restore_whisper_after_drift(
-            stages, stopped_info, now=now, do_sleep=do_sleep,
+        _release_retry_lease(
+            lease, now=now, do_sleep=do_sleep,
             context="a vanished manifest at the retry archive",
         )
         raise
     except KeyboardInterrupt:
-        _restore_whisper_after_drift(
-            stages, stopped_info, now=now, do_sleep=do_sleep,
+        _release_retry_lease(
+            lease, now=now, do_sleep=do_sleep,
             context="an interrupted original-evidence archive at re-admission",
         )
         raise
     except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-        _restore_whisper_after_drift(
-            stages, stopped_info, now=now, do_sleep=do_sleep,
+        _release_retry_lease(
+            lease, now=now, do_sleep=do_sleep,
             context="a failed original-evidence archive at re-admission",
         )
         raise _SwapRetryBlocked(
@@ -1802,18 +1879,13 @@ def _execute_swap_retry(
                 )
         # Whisper restore on EVERY exit path, under the retry consent's
         # named authority (D-03/D-05): no shared service is left down.
+        # Releasing the window's lease performs the ONE authorized start
+        # and the bounded health wait, and clears the lease marker only
+        # on the verified healthy path (S1/S3).
         try:
-            stages.whisper_restore(stopped_info)
-            healthy, detail = _wait_whisper_healthy_for_retry(
-                stages, now=now, do_sleep=do_sleep
+            _release_retry_lease(
+                lease, now=now, do_sleep=do_sleep, context="the retry window"
             )
-            if not healthy:
-                raise _SwapRetryBlocked(
-                    "whisper restoration after the retry window did not "
-                    "become healthy: ALL further progress is blocked; "
-                    "verify the service state explicitly; no rollback is "
-                    "performed or implied"
-                )
             restore_ok = True
             out("whisper restored healthy after the retry window")
         except _SwapRetryBlocked as exc:
@@ -1824,7 +1896,7 @@ def _execute_swap_retry(
             blocked = exc
         except KeyboardInterrupt:
             if not attempt_interrupted:
-                # An interrupt inside the restore itself: its outcome is
+                # An interrupt inside the release itself: its outcome is
                 # UNKNOWN — record honestly and let it propagate.
                 record["restore_unknown_interrupt"] = True
             raise
@@ -2035,7 +2107,7 @@ def _run_swap_retry_flow(
                             f"{watcher.floor_seconds:.0f}s floor: admitting "
                             "retry"
                         )
-                        status, reason = _swap_retry_readmission(
+                        status, reason, lease = _swap_retry_readmission(
                             state=state,
                             stages=stages,
                             plan=plan,
@@ -2053,12 +2125,12 @@ def _run_swap_retry_flow(
                             # waits, probes) consume real time, and past
                             # the ORIGINAL deadline the attempt must not
                             # start. Whisper is STOPPED here (readmission
-                            # stopped it) — restore it under the retry
-                            # authority before expiring honestly.
+                            # stopped it) — release the window's lease
+                            # (restore under the retry authority) before
+                            # expiring honestly.
                             if watcher.expired:
-                                _restore_whisper_after_drift(
-                                    stages,
-                                    plan.whisper_info,
+                                _release_retry_lease(
+                                    lease,
                                     now=now,
                                     do_sleep=do_sleep,
                                     context=(
@@ -2082,7 +2154,7 @@ def _run_swap_retry_flow(
                                 state=state,
                                 stages=stages,
                                 narrated=narrated,
-                                plan=plan,
+                                lease=lease,
                                 video_id=video_id,
                                 elig=elig,
                                 window=window,
