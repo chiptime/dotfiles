@@ -761,6 +761,45 @@ restores it afterwards under this same standing authorization. Only a
 programmatic caller that builds `StageFunctions` without the hooks keeps
 the operator-managed behavior (blocks with instructions).
 
+### GPU lease marker and startup reconcile
+
+Every Whisper stop (the vision window and the swap retry) goes through
+one GPU lease (`gpu_lease.py`). Before the stop command is issued, the
+lease writes `<state root>/active_gpu_lease.json` (default
+`~/.local/state/tiktok-ingest/active_gpu_lease.json`). The marker holds
+the owner PID and its process start time, a timestamp, and the verified
+Whisper identity: name, image, and the identity environment keys only,
+never secrets. It is removed only after a verified healthy restore. A
+failed restore, a health timeout, or an interruption keeps it.
+
+At the start of every `collection-run`, `guided-run` and `ingest`, before
+the Whisper identity is bound and before any GPU work, the run reconciles
+a marker left behind by a previous run:
+
+- **Owner still running** (same PID and start time): another run holds
+  the GPU window. The new run stops with "another tiktok-ingest run ...
+  currently holds the GPU window" and touches nothing. A run also refuses
+  to stop Whisper whenever a live foreign process owns the marker.
+- **Owner dead, Whisper stopped with the same identity:** the service is
+  started once under the restore authorization granted by the run that
+  stopped it, with no new prompt. Identity is verified and the bounded
+  60 s health wait applies. The marker is then removed. This also covers
+  a run interrupted inside `podman stop`: that run still never restores
+  the service itself (its stop result is UNKNOWN), but the marker proves
+  the stop was ours, so the next run restores it.
+- **Owner dead, Whisper already running:** the stale marker is removed
+  and the service is not touched.
+- **Anything unproven** (identity differs, container missing, inspect
+  fails, unreadable marker, failed start, health timeout): the run stops
+  before any GPU work. `collection-run` records
+  `hard_stop_reason: "gpu lease reconcile: ..."`; `guided-run` exits with
+  the same message. The marker is kept. Verify the container manually,
+  remove the marker, and re-run.
+
+Reports carry `gpu_lease_reconcile: {action, detail}` whenever a marker
+was found. `action` is one of `cleared`, `restored`, `blocked`, or
+`blocked_live_owner`.
+
 ### Bounded vision swap-retry (collection-run only)
 
 After a vision resource window whose vision stage failed ONLY the

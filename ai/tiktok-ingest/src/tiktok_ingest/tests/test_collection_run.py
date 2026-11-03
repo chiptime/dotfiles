@@ -1947,8 +1947,20 @@ class TestHardStopBlocksGroupedVerification(CollectionRunTestCase):
         self.assertEqual([c for c in stages.calls if c.startswith("verify:")], [])
         self.assertEqual(Backlog(self.state).entries(), [])
         # Resumable: a NEW authorized run completes the journey without
-        # repeating any completed media stage.
-        stages2 = CollectionStages()
+        # repeating any completed media stage. After the failed restore the
+        # container still exists, stopped (real podman inspect reports it,
+        # it does not vanish): the new run reconciles the GPU lease marker
+        # left behind and restores the service before planning.
+        class StoppedContainer(CollectionStages):
+            def do_whisper_inspect(self) -> WhisperServiceInfo | None:
+                self.calls.append("whisper-inspect")
+                return dataclasses.replace(
+                    KNOWN_INFO,
+                    running=self.whisper_running,
+                    state="running" if self.whisper_running else "exited",
+                )
+
+        stages2 = StoppedContainer()
         consent2 = RecordingConsent()
         code2, report2, _ = self.run_collection(stages2, consent2)
         self.assertEqual(code2, 0, report2.get("hard_stop_reason"))

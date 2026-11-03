@@ -2180,6 +2180,7 @@ def run_guided(
     human = consent if consent is not None else ConsoleConsentProvider()
     effective_stages = stages if stages is not None else default_stage_functions()
     frozen_ids = tuple(selection.ids)
+    reconcile = None
 
     # The run plan is the ONE upfront authorization for the whole tanda:
     # it freezes the exact ids/URLs/service/endpoint so the single window
@@ -2191,9 +2192,13 @@ def run_guided(
             RunPlan,
             RunScopedAuthorization,
             _bind_whisper_identity,
+            _reconcile_gpu_lease,
             build_run_plan_window,
         )
 
+        reconcile = _reconcile_gpu_lease(state, effective_stages, out_fn)
+        if reconcile.blocks:
+            raise GuidedError(f"gpu lease reconcile: {reconcile.detail}")
         bound_info, whisper_note = _bind_whisper_identity(
             effective_stages, out_fn
         )
@@ -2294,6 +2299,8 @@ def run_guided(
             ),
             "stage_windows": authorization.authorization_log,
         }
+    if reconcile is not None and reconcile.action != "none":
+        report["gpu_lease_reconcile"] = reconcile.to_dict()
     exit_code = 1 if (report["failures"] or report["interrupted"]) else 0
     return exit_code, report
 

@@ -103,6 +103,8 @@ from .gpu_lease import (
     GpuLease,
     LeaseHooks,
     LeaseMarkerFile,
+    ReconcileResult,
+    reconcile_lease,
     wait_for_whisper_health,
 )
 from .pipeline import parse_tiktok_url
@@ -411,6 +413,35 @@ def _frozen_inventory(
             urls[item.stable_id] = item.canonical_url
         stage_states[item.stable_id] = derive_item_stages(state, item.stable_id)
     return tuple(ids), urls, stage_states, dict(plan.counts)
+
+
+def _reconcile_gpu_lease(
+    state: StateRoot,
+    stages: StageFunctions,
+    out: Callable[[str], None],
+) -> ReconcileResult:
+    """Reconcile a GPU lease marker left by a previous run (S4-S6).
+
+    Runs before the whisper identity is bound and before any GPU work, in
+    both collection-run and guided-run. Without the whisper lifecycle
+    hooks this pipeline never stops the service, so nothing is touched.
+    """
+    if not stages.whisper_lifecycle_ready():
+        return ReconcileResult("none")
+    result = reconcile_lease(
+        LeaseMarkerFile(state),
+        inspect=stages.whisper_inspect,  # type: ignore[arg-type]
+        restore=stages.whisper_restore,  # type: ignore[arg-type]
+        health=stages.whisper_health,
+        waiting_feedback=lambda seconds: out(
+            f"waiting for Whisper readiness after the restore "
+            f"(read-only health polling for up to {seconds:.0f}s; "
+            "no further start is attempted)"
+        ),
+    )
+    if result.action != "none":
+        out(f"gpu lease reconcile: {result.detail}")
+    return result
 
 
 def _bind_whisper_identity(
@@ -2549,6 +2580,13 @@ def run_collection(
             "plan itself)"
         )
     else:
+        reconcile = _reconcile_gpu_lease(state, stages_exec, out)
+        if reconcile.action != "none":
+            report["gpu_lease_reconcile"] = reconcile.to_dict()
+        if reconcile.blocks:
+            report["hard_stop_reason"] = f"gpu lease reconcile: {reconcile.detail}"
+            out(f"collection-run report saved: {_persist_report(state, report)}")
+            return 1, report
         bound_info, whisper_note = _bind_whisper_identity(stages_exec, out)
         run_plan = RunPlan(
             collection_url=ref.collection_url,

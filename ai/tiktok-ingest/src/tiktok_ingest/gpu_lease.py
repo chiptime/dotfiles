@@ -240,6 +240,199 @@ class LeaseMarkerFile:
             return
         self._path.unlink(missing_ok=True)
 
+    def live_foreign_owner(self) -> dict[str, Any] | None:
+        """The marker when it belongs to ANOTHER live process, else None.
+
+        Used by the concurrency guard (S6): such a marker means another
+        run currently holds the GPU window. A marker of this very process
+        or of a dead process is not a foreign owner. An unreadable marker
+        raises (:class:`tiktok_ingest.state.StateError`): ownership is
+        never guessed.
+        """
+        document = self.read()
+        if not isinstance(document, Mapping):
+            return None
+        if document.get("owner_pid") == self._pid:
+            return None
+        if not owner_alive(document, start_time_reader=self._start_time_reader):
+            return None
+        return dict(document)
+
+
+class GpuLeaseBusyError(RuntimeError):
+    """Another live tiktok-ingest process holds the GPU lease (S6)."""
+
+
+def _busy_message(document: Mapping[str, Any]) -> str:
+    return (
+        "another tiktok-ingest run (pid "
+        f"{document.get('owner_pid')}, lease since "
+        f"{document.get('created_at')}) currently holds the GPU window; "
+        "refusing to touch the whisper service — wait for that run to "
+        "finish, then re-run this command"
+    )
+
+
+# Startup reconcile (S4-S6) --------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class ReconcileResult:
+    """Outcome of reconciling a persisted lease marker at startup.
+
+    ``action`` is one of:
+
+    - ``"none"`` — no marker: nothing to reconcile;
+    - ``"cleared"`` — dead owner, the service is already running: the
+      stale marker was removed, the service was not touched;
+    - ``"restored"`` — dead owner, the service was stopped with the SAME
+      identity: started once under the original run's restore grant,
+      healthy, marker removed;
+    - ``"blocked_live_owner"`` — another live run holds the lease;
+    - ``"blocked"`` — anything unproven or failed; the marker is kept
+      and ``detail`` explains what to verify manually.
+    """
+
+    action: str
+    detail: str = ""
+
+    @property
+    def blocks(self) -> bool:
+        return self.action in ("blocked", "blocked_live_owner")
+
+    def to_dict(self) -> dict[str, str]:
+        return {"action": self.action, "detail": self.detail}
+
+
+def _identity_of(info: Any) -> tuple[str, str, tuple[tuple[str, str], ...]]:
+    env = tuple(
+        sorted(
+            (str(key), str(value))
+            for key, value in getattr(info, "env", ())
+            if key in WHISPER_IDENTITY_ENV_KEYS
+        )
+    )
+    return (str(getattr(info, "name", "")), str(getattr(info, "image", "")), env)
+
+
+def _snapshot_identity(
+    document: Mapping[str, Any],
+) -> tuple[str, str, tuple[tuple[str, str], ...]] | None:
+    whisper = document.get("whisper")
+    if not isinstance(whisper, Mapping):
+        return None
+    env = whisper.get("env")
+    if not isinstance(env, list) or not all(
+        isinstance(pair, list) and len(pair) == 2 for pair in env
+    ):
+        return None
+    return (
+        str(whisper.get("name", "")),
+        str(whisper.get("image", "")),
+        tuple(sorted((str(k), str(v)) for k, v in env)),
+    )
+
+
+_MANUAL_RECOVERY = (
+    "the lease marker is kept at {path}; verify the "
+    "voice-assistant-whisper container manually (podman inspect / "
+    "podman start), then remove the marker and re-run"
+)
+
+
+def reconcile_lease(
+    marker: LeaseMarkerFile,
+    *,
+    inspect: Callable[[], Any],
+    restore: Callable[[Any], Any],
+    health: Callable[[], tuple[bool, str]],
+    monotonic: Callable[[], float] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    waiting_feedback: Callable[[float], None] | None = None,
+) -> ReconcileResult:
+    """Reconcile a marker left by a previous run, before any GPU work.
+
+    A marker proves a previous tiktok-ingest run stopped (or was stopping)
+    the whisper service under an authorized stop+restore grant. When its
+    owner is dead and the service is stopped with the SAME identity as
+    the recorded snapshot, the service is started ONCE under that
+    original restore authorization (user decision: no new prompt),
+    identity-verified by the restore hook and health-checked with the
+    shared bounded wait. Every unproven case fails closed with no
+    mutation. ``KeyboardInterrupt`` propagates and keeps the marker.
+    """
+    recovery = _MANUAL_RECOVERY.format(path=marker.path)
+    try:
+        document = marker.read()
+    except Exception as exc:  # noqa: BLE001 - unreadable marker fails closed
+        return ReconcileResult(
+            "blocked", f"cannot read the GPU lease marker ({exc}); {recovery}"
+        )
+    if document is None:
+        return ReconcileResult("none")
+    if not isinstance(document, Mapping):
+        return ReconcileResult(
+            "blocked", f"the GPU lease marker is malformed; {recovery}"
+        )
+    foreign = marker.live_foreign_owner()
+    if foreign is not None:
+        return ReconcileResult("blocked_live_owner", _busy_message(foreign))
+    snapshot = _snapshot_identity(document)
+    if snapshot is None:
+        return ReconcileResult(
+            "blocked", f"the GPU lease marker has no whisper identity; {recovery}"
+        )
+    try:
+        info = inspect()
+    except Exception as exc:  # noqa: BLE001 - unverifiable service: no mutation
+        return ReconcileResult(
+            "blocked",
+            f"cannot inspect the whisper service ({exc}); {recovery}",
+        )
+    if info is None:
+        return ReconcileResult(
+            "blocked",
+            f"the whisper container recorded by a previous run no longer "
+            f"exists; {recovery}",
+        )
+    if _identity_of(info) != snapshot:
+        return ReconcileResult(
+            "blocked",
+            "the whisper service identity (name/image/configuration) differs "
+            f"from the one a previous run stopped; refusing to start it; {recovery}",
+        )
+    if getattr(info, "running", False):
+        marker.clear()
+        return ReconcileResult(
+            "cleared",
+            "a previous run left a GPU lease marker but the whisper service "
+            "is already running; the stale marker was removed",
+        )
+    try:
+        restore(info)
+    except Exception as exc:  # noqa: BLE001 - reported, marker kept
+        return ReconcileResult(
+            "blocked",
+            f"restoring the whisper service left stopped by a previous run "
+            f"failed ({exc}); {recovery}",
+        )
+    healthy, detail = wait_for_whisper_health(
+        health, monotonic=monotonic, sleep=sleep, waiting_feedback=waiting_feedback
+    )
+    if not healthy:
+        return ReconcileResult(
+            "blocked",
+            "the whisper service left stopped by a previous run was started "
+            f"but did not become healthy within "
+            f"{WHISPER_RESTORE_READY_DEADLINE_SECONDS:.0f}s ({detail}); {recovery}",
+        )
+    marker.clear()
+    return ReconcileResult(
+        "restored",
+        "the whisper service left stopped by a previous run was restored "
+        "under that run's restore authorization and is healthy",
+    )
+
 
 # The lease itself (S1) -----------------------------------------------------
 
@@ -357,6 +550,11 @@ class GpuLease:
         reconciles from the real container state).
         """
         if self._marker is not None:
+            # Concurrency guard (S6): never stop a service whose lease is
+            # held by another live run. An unreadable marker raises.
+            foreign = self._marker.live_foreign_owner()
+            if foreign is not None:
+                raise GpuLeaseBusyError(_busy_message(foreign))
             self._marker.write(info)
         try:
             self._hooks.stop(info)

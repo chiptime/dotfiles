@@ -169,15 +169,25 @@ failure branches and on curses terminal handling.
   a global timer would only duplicate the per-stage deadlines.
 - Coverage: `tests/test_bounded_calls.py`.
 
-### S2 — One owner for the GPU swap
+### S2 — One owner for the GPU swap (done)
 
-- Introduce a single `gpu_lease` context manager that stops Whisper, verifies
-  free VRAM, and restores Whisper in `finally`. Every vision attempt and swap
-  retry runs inside it, replacing the per-branch restoration in `guided.py`
-  and `collection_run.py`.
-- Reconcile at startup: if a previous run left Whisper stopped, detect it and
-  restore it before any new work, instead of leaving an `UNKNOWN` state for
-  manual repair.
+- `gpu_lease.py` owns every Whisper stop and restore: exactly one start per
+  window, no restore after an interruption inside the stop, and one shared
+  60 s readiness wait. The guided vision window and the collection swap retry
+  both use it; per-branch restoration is gone.
+- A persisted marker (`active_gpu_lease.json`) is written before each stop
+  and removed after a verified healthy restore.
+- Startup reconcile: a marker left by a dead run is reconciled before any new
+  GPU work. If Whisper is stopped with the same identity, it is restored
+  automatically under the original run's restore grant, including after an
+  interruption inside `podman stop`. Anything unproven fails closed.
+- Concurrency guard: a marker owned by another live process blocks a new GPU
+  window.
+- Not done: free-VRAM verification was not moved into the lease. The
+  collection retry's post-stop check reports distinct drift outcomes, so
+  moving it would change behaviour. The guided gates stay in the vision stage.
+- Details: `OPERATIONS.md` "GPU lease marker and startup reconcile";
+  feature document `odd/tasks/tiktok-ingest-gpu-lease.md`.
 
 ### S3 — Layered orchestration
 
