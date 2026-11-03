@@ -295,16 +295,18 @@ def check_swap_delta(
             "the immediate baseline",
             detail=detail,
         )
+    # A negative rate means the counter went backwards between samples
+    # (reset or wrap): the rate is unmeasurable, so it fails closed.
     if (
         rate_bytes_per_s is not None
         and rate_limit_bytes_per_s is not None
-        and rate_bytes_per_s <= rate_limit_bytes_per_s
+        and 0 <= rate_bytes_per_s <= rate_limit_bytes_per_s
     ):
         return GateResult(
             gate=GATE_SWAP_DELTA,
             passed=True,
             reason=f"swap I/O delta {delta} B exceeds the {limit_bytes} B "
-            f"(512 MiB) phase limit but the recent rate {rate_bytes_per_s} "
+            f"({limit_bytes // (1024 * 1024)} MiB) phase limit but the recent rate {rate_bytes_per_s} "
             f"B/s stays within the {rate_limit_bytes_per_s} B/s quiet "
             "threshold: ambient spike tolerated, attribution preserved",
             detail=detail,

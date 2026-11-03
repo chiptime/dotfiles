@@ -158,6 +158,19 @@ class SwapDeltaGateTests(unittest.TestCase):
 
     # -- S5: sustained-rate rule + safety-net ceiling ---------------------
 
+    def test_counter_decrease_does_not_make_over_limit_delta_quiet(self) -> None:
+        mib = 1024 * 1024
+        result = check_swap_delta(
+            730 * mib,
+            200 * mib,
+            512 * mib,
+            rate_bytes_per_s=-70 * mib,
+            rate_limit_bytes_per_s=mib,
+            ceiling_bytes=1024 * mib,
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.gate, "swap_delta")
+
     def test_over_limit_with_quiet_rate_tolerates_ambient_spike(self) -> None:
         # Observed false trips exceeded the limit by only 1.77-18.56 MiB;
         # a 530 MiB delta accumulated at 0.9 MiB/s is ambient host swap,
