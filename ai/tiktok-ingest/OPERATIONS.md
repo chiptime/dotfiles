@@ -731,7 +731,10 @@ genuinely new scope and fails closed on denial. Denial of either
 blocks BEFORE any mutation (no stop happens). The
 restore then runs under that prior authorization once the GPU window
 ends — normally, on failure, or after an interruption (Ctrl-C, which
-itself never grants anything and never triggers a new prompt) —
+itself never grants anything and never triggers a new prompt; SIGTERM
+and SIGHUP — `kill`, `systemctl stop`, a closed terminal — take the
+same interruption path, and a repeated signal does not abort the
+cleanup already running) —
 UNLESS the interruption lands inside the stop itself: then the stop
 result is UNKNOWN, NO restore is attempted (it cannot be verified that
 the stop was ours/completed) and manual verification/recovery of the

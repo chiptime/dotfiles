@@ -2337,7 +2337,7 @@ class TestStageNarration(unittest.TestCase):
 class TestWhisperCoordinatedStageFunctions(unittest.TestCase):
     def test_hooks_are_all_present_and_lifecycle_ready(self) -> None:
         stages = guided.whisper_coordinated_stage_functions(
-            runner=lambda args: (0, "", "")
+            runner=lambda args, timeout=None: (0, "", "")
         )
         self.assertTrue(stages.whisper_lifecycle_ready())
 
@@ -2347,7 +2347,7 @@ class TestWhisperCoordinatedStageFunctions(unittest.TestCase):
     def test_inspect_delegates_to_the_injected_runner(self) -> None:
         calls: list[list[str]] = []
 
-        def runner(args):
+        def runner(args, timeout=None):
             calls.append(args)
             return 1, "", "no such container"
 

@@ -65,7 +65,11 @@ from .gates import (
 )
 from .ollama_runtime import read_server_log, request_unload, resident_models
 from .prepare import Runner, StageClock, StageDeadlineExceeded, container_argv, resolve_image_id
-from .runtime import subprocess_runner
+from .runtime import (
+    PODMAN_QUERY_TIMEOUT_SECONDS,
+    PROBE_TIMEOUT_SECONDS,
+    subprocess_runner,
+)
 from .state import Blocklist, Processed, StateRoot, atomic_write_bytes
 from .validation import sha256_of_file
 
@@ -226,7 +230,8 @@ def query_gpu(runner: Runner) -> Any:
             "nvidia-smi",
             "--query-gpu=memory.total,memory.used,memory.free",
             "--format=csv,noheader,nounits",
-        ]
+        ],
+        timeout=PROBE_TIMEOUT_SECONDS,
     )
     if returncode != 0:
         raise VisionError(
@@ -279,7 +284,10 @@ def assert_whisper_stopped(runner: Runner) -> None:
     Read-only query only: the pipeline NEVER stops services itself — that
     is an operator-authorized action (MVP-PRD section 5).
     """
-    returncode, out, err = runner(["podman", "ps", "--format", "{{.Names}}"])
+    returncode, out, err = runner(
+        ["podman", "ps", "--format", "{{.Names}}"],
+        timeout=PODMAN_QUERY_TIMEOUT_SECONDS,
+    )
     if returncode != 0:
         raise VisionError(
             "cannot verify that the whisper service is stopped (podman ps "

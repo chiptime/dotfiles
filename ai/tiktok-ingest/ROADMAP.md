@@ -140,6 +140,66 @@ run-collection.sh
 - [ ] Re-running the same collection performs zero unnecessary audiovisual work.
 - [ ] All emitted entries remain local and `pending` until explicit review.
 
+## Stability track
+
+**Outcome:** a run either finishes or stops with an explicit, resumable outcome,
+and the shared Whisper service is never left stopped. This track runs alongside
+the product phases and comes before any further orchestration feature work.
+
+Review baseline (2026-11-03): 944 tests passing, all with fakes; no live
+integration coverage. Recent fixes cluster on Whisper restoration in individual
+failure branches and on curses terminal handling.
+
+### S1 — Nothing can hang (done)
+
+- Every podman, `nvidia-smi`, and process-probe subprocess has a finite timeout
+  (`runtime.py` constants). A timeout surfaces as the runner's exit 124 and
+  fails closed: it is never read as a negative answer such as "container
+  missing" or "process gone".
+- The Whisper client no longer blocks on a socket with no timeout after sending
+  audio. Reads poll in 1 s windows and the stage deadline is checked before
+  every read, so a service that stalls with the connection open, or trickles
+  bytes of a frame that never completes, ends in a deadline outcome. Sending
+  the audio is bounded too, and fragmented messages survive a poll timeout
+  between frames.
+- SIGTERM and SIGHUP (`kill`, `systemctl stop`, a closed terminal) take the
+  same `KeyboardInterrupt` cleanup paths as Ctrl+C. A repeated signal does not
+  abort the cleanup that is already running.
+- Decision: no run-level wall-clock watchdog. With every external call bounded,
+  a global timer would only duplicate the per-stage deadlines.
+- Coverage: `tests/test_bounded_calls.py`.
+
+### S2 — One owner for the GPU swap
+
+- Introduce a single `gpu_lease` context manager that stops Whisper, verifies
+  free VRAM, and restores Whisper in `finally`. Every vision attempt and swap
+  retry runs inside it, replacing the per-branch restoration in `guided.py`
+  and `collection_run.py`.
+- Reconcile at startup: if a previous run left Whisper stopped, detect it and
+  restore it before any new work, instead of leaving an `UNKNOWN` state for
+  manual repair.
+
+### S3 — Layered orchestration
+
+- Extract a stage engine (items + phase in, outcomes out) with no TUI and no
+  consent logic. `guided-run` and `collection-run` become thin drivers;
+  consent and the TUI become adapters.
+- Remove `collection_run`'s dependency on the private
+  `GuidedRun._execute_collection_phase` and keep swap-retry logic in one place.
+- Rename `pipeline.py` to reflect what it does (URL fetch and validation).
+
+### S4 — Realistic gates and live checks
+
+- Make the swap gate tolerate short ambient spikes (sustained rate instead of
+  a raw delta), or measure the Ollama cgroup instead of host-wide
+  `/proc/vmstat`. Observed false trips exceeded the 512 MiB limit by only
+  1.77–18.56 MiB.
+- Add an opt-in live smoke test (`TIKTOK_INGEST_LIVE=1`) with one short real
+  video: Whisper, Ollama, podman, and the TikTok collection selector. It never
+  runs in the default suite.
+- Warn when the collection selector returns zero items for a collection that
+  previously had items, so TikTok DOM changes are not silent.
+
 ## Phase 1 — Local web application
 
 **Outcome:** replace terminal ceremony with a loopback-only, single-user interface

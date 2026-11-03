@@ -34,6 +34,7 @@ from typing import Any, Callable
 
 from . import config
 from .gates import parse_ollama_ps
+from .runtime import PROBE_TIMEOUT_SECONDS, TIMEOUT_RETURNCODE
 from .state import atomic_write_bytes
 from .validation import sha256_of_file
 
@@ -197,8 +198,11 @@ def verify_pid_gone(
         pid = int(Path(pid_path).read_text(encoding="ascii").strip())
     except (OSError, ValueError):
         return True  # no readable PID file: nothing to be alive
-    returncode, _, _ = runner(["kill", "-0", str(pid)])
-    return returncode != 0
+    returncode, _, _ = runner(
+        ["kill", "-0", str(pid)], timeout=PROBE_TIMEOUT_SECONDS
+    )
+    # A timed-out probe proves nothing: never report the process as gone.
+    return returncode not in (0, TIMEOUT_RETURNCODE)
 
 
 # --------------------------------------------------------------------------

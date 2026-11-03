@@ -54,6 +54,15 @@ _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # recorded observation, not an error.
 _ACK_WAIT_SECONDS = 5.0
 
+# After the audio is sent the service may take minutes to answer. Reads use
+# a short poll window instead of a blocking socket so the stage deadline is
+# re-checked between windows: a service that stalls with the connection
+# open ends in an explicit deadline outcome, never a run blocked forever.
+_RECV_POLL_SECONDS = 1.0
+# Bound for sending the single WAV message: a service that stops reading
+# must not block ``sendall`` forever either.
+_SEND_TIMEOUT_SECONDS = 120.0
+
 _OP_CONT = 0x0
 _OP_TEXT = 0x1
 _OP_BINARY = 0x2
@@ -233,6 +242,12 @@ class TranscribeSession:
         self.sock = sock
         self._mask_key_provider = mask_key_provider
         self._buffer = b""
+        # Called before every socket read: lets the caller enforce its
+        # deadline even while a peer trickles bytes of an unfinished frame.
+        self.on_wait: Callable[[], None] | None = None
+        # Fragment assembly survives a poll timeout between frames.
+        self._fragments: list[bytes] = []
+        self._fragment_opcode: int | None = None
 
     @classmethod
     def connect(
@@ -286,6 +301,8 @@ class TranscribeSession:
             if decoded is not None:
                 frame, self._buffer = decoded
                 return frame
+            if self.on_wait is not None:
+                self.on_wait()
             try:
                 self._buffer += self._recv_more()
             except TimeoutError as exc:
@@ -296,10 +313,10 @@ class TranscribeSession:
 
         Ping frames are answered automatically (RFC 6455). A close frame is
         answered once and reported as ``None`` (the service signaled the
-        end). Fragmented messages are assembled across continuation frames.
+        end). Fragmented messages are assembled across continuation frames,
+        and a poll timeout (``_WouldBlock``) between fragments keeps the
+        partial assembly for the next call.
         """
-        fragments: list[bytes] = []
-        fragment_opcode: int | None = None
         while True:
             frame = self._next_frame()
             if frame.opcode == _OP_PING:
@@ -320,20 +337,23 @@ class TranscribeSession:
                 if frame.fin:
                     kind = "text" if frame.opcode == _OP_TEXT else "binary"
                     return WsMessage(kind=kind, payload=frame.payload)
-                fragment_opcode = frame.opcode
-                fragments = [frame.payload]
+                self._fragment_opcode = frame.opcode
+                self._fragments = [frame.payload]
                 continue
             if frame.opcode == _OP_CONT:
-                if fragment_opcode is None:
+                if self._fragment_opcode is None:
                     raise WhisperProtocolError(
                         "continuation frame without a started message"
                     )
-                fragments.append(frame.payload)
+                self._fragments.append(frame.payload)
                 if frame.fin:
                     kind = (
-                        "text" if fragment_opcode == _OP_TEXT else "binary"
+                        "text" if self._fragment_opcode == _OP_TEXT else "binary"
                     )
-                    return WsMessage(kind=kind, payload=b"".join(fragments))
+                    payload = b"".join(self._fragments)
+                    self._fragments = []
+                    self._fragment_opcode = None
+                    return WsMessage(kind=kind, payload=payload)
                 continue
             raise WhisperProtocolError(
                 f"unsupported WebSocket opcode 0x{frame.opcode:02x}"
@@ -440,6 +460,7 @@ def transcribe_audio(
         mask_key_provider=mask_key_provider,
         handshake_key=handshake_key,
     )
+    session.on_wait = _check_deadline
     try:
         _check_deadline()
         # Optional initial prompt: the contract supports it; the MVP omits
@@ -472,7 +493,7 @@ def transcribe_audio(
             except _WouldBlock:
                 continue
         try:
-            session.sock.settimeout(None)
+            session.sock.settimeout(_SEND_TIMEOUT_SECONDS)
         except (AttributeError, OSError):
             pass
         if first is None:
@@ -507,9 +528,19 @@ def transcribe_audio(
         # ONE binary message carries the COMPLETE normalized WAV; the
         # service transcribes each binary message whole and answers with a
         # partial (server.py: each message -> temp .wav -> model.transcribe).
-        session.send_binary(audio)
+        try:
+            session.send_binary(audio)
+        except TimeoutError as exc:
+            raise WhisperProtocolError(
+                f"the service stopped accepting audio for {_SEND_TIMEOUT_SECONDS:.0f}s "
+                "while sending; failing without retry"
+            ) from exc
         result.bytes_sent = len(audio)
         result.chunk_count = 1
+        try:
+            session.sock.settimeout(_RECV_POLL_SECONDS)
+        except (AttributeError, OSError):
+            pass
 
         # Await the response to our single message. A close or raw EOF
         # before any partial means the service died mid-job: an explicit
@@ -518,7 +549,7 @@ def transcribe_audio(
             _check_deadline()
             try:
                 message = session.receive_message()
-            except _WouldBlock:  # pragma: no cover - blocking mode here
+            except _WouldBlock:  # poll window elapsed; re-check the deadline
                 continue
             except ConnectionError as exc:
                 raise WhisperProtocolError(

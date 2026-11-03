@@ -43,7 +43,7 @@ from .contracts import (
     utc_now_iso,
 )
 from .resume import build_fingerprint, fingerprints_equal
-from .runtime import subprocess_runner
+from .runtime import PODMAN_QUERY_TIMEOUT_SECONDS, subprocess_runner
 from .sampling import (
     Candidate,
     SelectedFrame,
@@ -158,7 +158,8 @@ def resolve_image_id(
     a moving tag or an invented digest (MVP-PRD section 3.B).
     """
     returncode, out, err = runner(
-        ["podman", "inspect", "--format", "{{.Id}}", image_ref]
+        ["podman", "inspect", "--format", "{{.Id}}", image_ref],
+        timeout=PODMAN_QUERY_TIMEOUT_SECONDS,
     )
     if returncode != 0:
         raise PrepareError(

@@ -97,7 +97,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, config, tui
+from . import __version__, config, runtime, tui
 from .bootstrap import BootstrapError, install_extractor, verify_installation
 from .collection import (
     CollectionError,
@@ -865,6 +865,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # SIGTERM/SIGHUP take the same interrupt-cleanup paths as Ctrl+C.
+    runtime.install_termination_handlers()
 
     try:
         if args.command == "install-extractor":

@@ -31,7 +31,14 @@ from __future__ import annotations
 import dataclasses
 import json
 
-from .runtime import Runner, subprocess_runner
+from .runtime import (
+    PODMAN_QUERY_TIMEOUT_SECONDS,
+    PODMAN_START_TIMEOUT_SECONDS,
+    PODMAN_STOP_EXTRA_SECONDS,
+    TIMEOUT_RETURNCODE,
+    Runner,
+    subprocess_runner,
+)
 
 # The one known shared Whisper service this pipeline may ever touch
 # (MVP-PRD section 5: stopping ``voice-assistant-whisper`` requires
@@ -128,11 +135,13 @@ def inspect_whisper(
     service is never mutated.
     """
     returncode, out, err = runner(
-        ["podman", "inspect", WHISPER_CONTAINER_NAME]
+        ["podman", "inspect", WHISPER_CONTAINER_NAME],
+        timeout=PODMAN_QUERY_TIMEOUT_SECONDS,
     )
     if returncode != 0:
         lowered = (err or "").lower()
-        if "no such" in lowered or "not found" in lowered:
+        missing = "no such" in lowered or "not found" in lowered
+        if missing and returncode != TIMEOUT_RETURNCODE:
             return None
         raise WhisperLifecycleError(
             "cannot verify the whisper service identity (podman inspect "
@@ -175,7 +184,10 @@ def same_service_config(
 
 
 def _assert_not_running(runner: Runner) -> None:
-    returncode, out, err = runner(["podman", "ps", "--format", "{{.Names}}"])
+    returncode, out, err = runner(
+        ["podman", "ps", "--format", "{{.Names}}"],
+        timeout=PODMAN_QUERY_TIMEOUT_SECONDS,
+    )
     if returncode != 0:
         raise WhisperLifecycleError(
             "cannot verify the whisper service stopped (podman ps failed: "
@@ -215,7 +227,8 @@ def stop_whisper(
             "--timeout",
             str(grace_seconds),
             WHISPER_CONTAINER_NAME,
-        ]
+        ],
+        timeout=grace_seconds + PODMAN_STOP_EXTRA_SECONDS,
     )
     if returncode != 0:
         raise WhisperLifecycleError(
@@ -249,7 +262,10 @@ def restore_whisper(
     separate step — this returns as soon as identity matches.
     """
     verify_known_service(before)
-    returncode, _, err = runner(["podman", "start", WHISPER_CONTAINER_NAME])
+    returncode, _, err = runner(
+        ["podman", "start", WHISPER_CONTAINER_NAME],
+        timeout=PODMAN_START_TIMEOUT_SECONDS,
+    )
     if returncode != 0:
         raise WhisperLifecycleError(
             "the whisper service restore command failed ("
