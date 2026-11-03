@@ -99,6 +99,7 @@ from .collection import (
 )
 from .contracts import JobManifest, StageOutcome, utc_now_iso
 from .gates import GATE_SWAP_DELTA
+from .gpu_lease import wait_for_whisper_health
 from .pipeline import parse_tiktok_url
 from .guided import (
     GUIDED_MAX_BATCH,
@@ -1352,18 +1353,20 @@ def _wait_whisper_healthy_for_retry(
 ) -> tuple[bool, str]:
     """Bounded read-only readiness polling after a retry-window restore.
 
-    First probe immediate, one bounded interval between probes, one
-    probe of overshoot at most; a crossing stops with the last REAL
-    detail. ``KeyboardInterrupt`` is never caught here.
+    Thin delegation to the ONE shared implementation (S2,
+    :func:`tiktok_ingest.gpu_lease.wait_for_whisper_health`): first
+    probe immediate, one bounded interval between probes, one probe of
+    overshoot at most; a crossing stops with the last REAL detail.
+    ``KeyboardInterrupt`` is never caught here. This wrapper stays
+    silent (no operator feedback), exactly as before.
     """
-    started = now()
-    while True:
-        healthy, detail = stages.whisper_health()
-        if healthy:
-            return True, detail
-        if now() - started >= deadline_seconds:
-            return False, detail
-        do_sleep(1.0)
+    return wait_for_whisper_health(
+        stages.whisper_health,
+        deadline_seconds=deadline_seconds,
+        poll_interval_seconds=1.0,
+        monotonic=now,
+        sleep=do_sleep,
+    )
 
 
 def _swap_retry_scope_now(

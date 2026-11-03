@@ -11,8 +11,11 @@ restated):
 
 - All progress is DERIVED from the product's own state (``Processed``
   entries, ``meta.json`` stage outcomes, fingerprints). This module keeps
-  no second stage ledger and persists nothing: its report is a summary,
-  never an authority parallel to the manifests.
+  no second stage ledger and persists no stage state: its report is a
+  summary, never an authority parallel to the manifests. The ONE
+  persisted artifact is the GPU lease marker (see
+  :mod:`tiktok_ingest.gpu_lease`), lifecycle recovery state for the
+  whisper swap — never stage progress.
 - ``synthesize --from-file`` is validated-document INGESTION only. The
   guided command never generates, edits or auto-fills a synthesis
   document and never calls a text model.
@@ -58,11 +61,16 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import config
+from . import gpu_lease
 from .collection import (
     build_collection_plan,
     resolve_collection,
 )
 from .contracts import JobManifest, ProcessedEntry, utc_now_iso
+from .gpu_lease import (  # noqa: F401 - re-exported bounds (S2 single home)
+    WHISPER_RESTORE_READY_DEADLINE_SECONDS,
+    WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS,
+)
 from .ollama_runtime import start_server, stop_server, wait_ready
 from .pipeline import fetch_url
 from .prepare import prepare_video
@@ -88,14 +96,9 @@ GUIDED_STAGES: tuple[str, ...] = (
 GUIDED_MAX_BATCH = config.BUDGETS.batch_pilot_clips
 
 # Bounded read-only readiness wait after the ONE authorized whisper
-# restore: a freshly started service can need a moment before its
-# health endpoint answers (observed in a real run: an immediate
-# connection reset that a later read-only precheck showed healthy).
-# Polling NEVER performs another start. Worst-case overshoot past the
-# deadline is ONE probe — the health precheck's own bounded timeout
-# (5s default, see whisper_client.health_precheck) — never unbounded.
-WHISPER_RESTORE_READY_DEADLINE_SECONDS = 60.0
-WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS = 1.0
+# restore. The bounds' single home is :mod:`tiktok_ingest.gpu_lease`
+# (the ONE shared wait, S2); they are re-exported here because callers
+# and tests reference them through this module.
 
 
 class GuidedError(RuntimeError):
@@ -397,34 +400,24 @@ def _wait_for_whisper_health(
     sleep: Callable[[float], None] | None = None,
     waiting_feedback: Callable[[float], None] | None = None,
 ) -> tuple[bool, str]:
-    """Poll the ALREADY-RESTORED service until healthy or deadline.
+    """Thin delegation to the ONE shared readiness wait (S2).
 
-    Read-only readiness polling after the one authorized restore: the
-    first probe runs immediately (an already-healthy service never
-    sleeps or waits), a failed probe is followed by exactly one bounded
-    interval (no busy loop), and crossing the deadline stops with the
-    last REAL detail — the caller then blocks all progress. Success
-    stops the polling outright. ``KeyboardInterrupt`` is never caught
-    here: an interruption stays an interruption. The total wait can
-    overshoot ``deadline_seconds`` by at most one probe (the health
-    precheck's own bounded timeout).
+    The implementation lives in
+    :func:`tiktok_ingest.gpu_lease.wait_for_whisper_health` (identical
+    bounds: immediate first probe, one bounded interval between probes,
+    60 s deadline, ``KeyboardInterrupt`` never caught). This name stays
+    because tests patch ``guided.time`` for the deterministic clock: the
+    clock defaults are resolved HERE, in this module's namespace, so
+    that seam keeps working unchanged.
     """
-    now = monotonic or time.monotonic
-    do_sleep = sleep or time.sleep
-    started = now()
-    announced = False
-    while True:
-        healthy, detail = health()
-        if healthy:
-            return True, detail
-        if not announced and waiting_feedback is not None:
-            # Bounded operator feedback: emitted once when the wait
-            # actually starts, never per probe.
-            waiting_feedback(deadline_seconds)
-            announced = True
-        if now() - started >= deadline_seconds:
-            return False, detail
-        do_sleep(poll_interval_seconds)
+    return gpu_lease.wait_for_whisper_health(
+        health,
+        deadline_seconds=deadline_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        monotonic=monotonic if monotonic is not None else time.monotonic,
+        sleep=sleep if sleep is not None else time.sleep,
+        waiting_feedback=waiting_feedback,
+    )
 
 
 def default_stage_functions() -> StageFunctions:
@@ -803,8 +796,22 @@ class GuidedRun:
         self.cleanup_notes: list[str] = []
         self._interrupted = False
         self._gpu_cleanup_failed = False
-        # Whisper coordination state (Phase 0 hooks; None when not used).
-        self._whisper_we_stopped: Any = None
+        # Whisper coordination (Phase 0 hooks): the GPU LEASE is the
+        # single owner of this run's stop/restore swap (S1/S3) — it
+        # writes the persisted marker BEFORE the stop, performs exactly
+        # ONE start attempt, restores under the standing authorization
+        # obtained BEFORE the stop, never restores when an interruption
+        # landed inside the stop itself, and records honest bookkeeping
+        # this coordinator maps onto its operator-facing reports. The
+        # hooks are resolved through self.stages at call time.
+        self._gpu_lease = gpu_lease.GpuLease(
+            hooks=gpu_lease.LeaseHooks(
+                stop=lambda info: self.stages.whisper_stop(info),
+                restore=lambda info: self.stages.whisper_restore(info),
+                health=lambda: self.stages.whisper_health(),
+            ),
+            marker=gpu_lease.LeaseMarkerFile(state),
+        )
         self.whisper_restore_failed = False
         # Standing-restore bookkeeping: the restore/recovery authorization
         # is asked BEFORE the stop (a Ctrl-C never grants anything, and a
@@ -812,8 +819,6 @@ class GuidedRun:
         # runs under that prior authorization — never re-asked, never
         # retried, and always reported honestly.
         self._whisper_restore_authorized = False
-        self._whisper_restore_attempted = False
-        self._whisper_restore_completed = False
         # Set when an interruption leaves a cleanup outcome UNKNOWN (for
         # example a Ctrl-C landing inside the whisper stop itself): the
         # generic interruption message must then NOT claim that the
@@ -1127,7 +1132,11 @@ class GuidedRun:
                 self._block_vision_all(pending, report_items, reason)
                 return False
             try:
-                stop(info)
+                # The lease is the single owner of the swap (S1): it
+                # persists the lease marker BEFORE issuing the stop (S3)
+                # and performs the stop through the verified hook. The
+                # lease starts ONLY here, after BOTH consents.
+                self._gpu_lease.acquire(info)
             except KeyboardInterrupt:
                 # The stop result is UNKNOWN: the interruption may have
                 # landed before, during or after the actual termination.
@@ -1167,7 +1176,6 @@ class GuidedRun:
                 )
                 self._block_vision_all(pending, report_items, reason)
                 return False
-            self._whisper_we_stopped = info
             self._whisper_restore_authorized = True
             self.cleanup_notes.append(
                 "shared whisper service stopped by this run after identity "
@@ -1212,7 +1220,7 @@ class GuidedRun:
         never inferred. Returns True when audio may proceed (including
         when we never stopped anything).
         """
-        if self._whisper_we_stopped is None:
+        if self._gpu_lease.stopped_info is None:
             return True
         return self._whisper_restore_now(
             report_items, context="after the vision window"
@@ -1221,51 +1229,79 @@ class GuidedRun:
     def _whisper_restore_now(self, report_items: dict, *, context: str) -> bool:
         """Restore under the standing authorization; report honestly.
 
-        Performs the ONE bounded start of the SAME container (positive
-        identity/config verification inside the hook), then a BOUNDED
-        read-only readiness wait: the freshly started service may need a
-        moment before its health endpoint answers, so health is polled
-        (first probe immediate, fixed interval, small monotonic
-        deadline) instead of being decided by a single immediate probe.
-        Any failure — or an interruption that leaves the restore
+        The GPU lease owns the swap mechanics (S1): the ONE bounded start
+        of the SAME container (positive identity/config verification
+        inside the hook), the persisted marker clear on the verified
+        healthy path (S3), and exactly-once bookkeeping. This coordinator
+        keeps the operator-facing honesty: after the start comes a
+        BOUNDED read-only readiness wait (first probe immediate, fixed
+        interval, small monotonic deadline — the ONE shared wait, S2),
+        and any failure — or an interruption that leaves the restore
         incomplete — blocks ALL further progress (audio included): the
         run reports the actual partial service state with instructions
         and promises no rollback. Never re-asked, never retried, and
         the start itself is never repeated: one attempt per execution
         context, polling only.
         """
-        if self._whisper_restore_attempted:
+        lease = self._gpu_lease
+        if lease.restore_attempted:
             # The ONE authorized restore already ran (or was in flight):
             # never a second start, never a re-ask — only the recorded
             # outcome decides whether progress may continue.
-            return self._whisper_restore_completed
-        info = self._whisper_we_stopped
+            return lease.restore_completed
+        info = lease.stopped_info
         assert info is not None  # narrowing: callers check before calling
         service_text = getattr(info, "describe", lambda: str(info))()
         restore = self.stages.whisper_restore
-        self._whisper_restore_attempted = True
+        assert restore is not None  # narrowing: hooks are all-or-nothing
         try:
-            assert restore is not None  # narrowing: hooks are all-or-nothing
-            restore(info)
-        except KeyboardInterrupt:
-            # The interruption itself is never granted anything; the
-            # restore outcome is UNKNOWN and no retry happens.
-            self.whisper_restore_failed = True
-            reason = (
-                f"whisper restore was interrupted {context}: the service "
-                f"stopped by this run ({service_text}) is in an UNKNOWN "
-                "state (the start may or may not have completed) — verify "
-                "it explicitly (podman inspect/ps, health endpoint); ALL "
-                "further progress is blocked; no rollback is performed or "
-                "implied"
+            outcome = lease.restore_once(
+                waiting_feedback=lambda deadline: self.out(
+                    f"waiting for Whisper readiness after the restore "
+                    f"(read-only health polling for up to {deadline:.0f}s; "
+                    "no further start is attempted)"
+                ),
+                # Resolved HERE so tests patching ``guided.time`` keep
+                # driving the deterministic clock through this seam.
+                monotonic=time.monotonic,
+                sleep=time.sleep,
             )
+        except KeyboardInterrupt:
+            # The interruption itself is never granted anything. Where it
+            # landed decides the honest report: inside the start the
+            # restore outcome is UNKNOWN; inside the readiness wait the
+            # service WAS started (identity verified) and only its health
+            # is UNKNOWN. No retry in either case.
+            self.whisper_restore_failed = True
+            if lease.restore_interrupt_phase == "start":
+                reason = (
+                    f"whisper restore was interrupted {context}: the service "
+                    f"stopped by this run ({service_text}) is in an UNKNOWN "
+                    "state (the start may or may not have completed) — verify "
+                    "it explicitly (podman inspect/ps, health endpoint); ALL "
+                    "further progress is blocked; no rollback is performed or "
+                    "implied"
+                )
+            else:
+                reason = (
+                    f"whisper restore health wait was interrupted {context}: "
+                    f"the service {service_text} was STARTED (identity "
+                    "verified) but its health is UNKNOWN (the readiness "
+                    "polling may or may not have completed) — verify it "
+                    "explicitly (health endpoint, podman inspect/ps); ALL "
+                    "further progress is blocked; the ONE authorized start "
+                    "already happened and is never repeated; no rollback is "
+                    "performed or implied"
+                )
             self.failures.append(
                 {"id": "*", "stage": "whisper-restore", "outcome": "failed", "reason": reason}
             )
             self.cleanup_notes.append(reason)
             self.out(reason)
             raise
-        except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
+        if outcome.status == "restore_failed":
+            exc = outcome.error
+            assert exc is not None  # narrowing: status carries the error
             self.whisper_restore_failed = True
             reason = (
                 f"whisper restore failed {context}: {exc}; the service "
@@ -1280,37 +1316,8 @@ class GuidedRun:
             self.cleanup_notes.append(reason)
             self.out(reason)
             return False
-        try:
-            healthy, detail = _wait_for_whisper_health(
-                self.stages.whisper_health,
-                waiting_feedback=lambda deadline: self.out(
-                    f"waiting for Whisper readiness after the restore "
-                    f"(read-only health polling for up to {deadline:.0f}s; "
-                    "no further start is attempted)"
-                ),
-            )
-        except KeyboardInterrupt:
-            # The service WAS started and identity-verified above; only
-            # its health is UNKNOWN. Honest unknown semantics, no
-            # swallow, no second start, no retry: report and re-raise.
-            self.whisper_restore_failed = True
-            reason = (
-                f"whisper restore health wait was interrupted {context}: "
-                f"the service {service_text} was STARTED (identity "
-                "verified) but its health is UNKNOWN (the readiness "
-                "polling may or may not have completed) — verify it "
-                "explicitly (health endpoint, podman inspect/ps); ALL "
-                "further progress is blocked; the ONE authorized start "
-                "already happened and is never repeated; no rollback is "
-                "performed or implied"
-            )
-            self.failures.append(
-                {"id": "*", "stage": "whisper-restore", "outcome": "failed", "reason": reason}
-            )
-            self.cleanup_notes.append(reason)
-            self.out(reason)
-            raise
-        if not healthy:
+        if outcome.status == "health_timeout":
+            detail = outcome.detail
             self.whisper_restore_failed = True
             reason = (
                 f"restored whisper service did not become healthy within "
@@ -1326,10 +1333,9 @@ class GuidedRun:
             self.cleanup_notes.append(reason)
             self.out(reason)
             return False
-        self._whisper_restore_completed = True
         self.cleanup_notes.append(
             f"shared whisper service restored and healthy {context} "
-            f"({detail[:120]})"
+            f"({outcome.detail[:120]})"
         )
         return True
 
@@ -1712,12 +1718,12 @@ class GuidedRun:
                 "cleanup; the whisper service this run stopped (if any) "
                 "is recovered next under its prior standing authorization"
             )
-            if self._whisper_we_stopped is not None:
-                if not self._whisper_restore_attempted:
+            if self._gpu_lease.stopped_info is not None:
+                if not self._gpu_lease.restore_attempted:
                     self._whisper_restore_now(
                         report_items, context="after interruption (Ctrl-C)"
                     )
-                elif not self._whisper_restore_completed:
+                elif not self._gpu_lease.restore_completed:
                     # A restore was already in flight when the interrupt
                     # landed: _whisper_restore_now's own handler already
                     # reported the UNKNOWN state and appended the failure
@@ -1734,8 +1740,9 @@ class GuidedRun:
         finally:
             # Also recover after an unexpected exception from start/readiness
             # hooks. Ordinary success and interrupt paths already consumed the
-            # single restore; its bookkeeping makes this check idempotent.
-            if self._whisper_we_stopped is not None and not self._whisper_restore_attempted:
+            # single restore; the lease's bookkeeping makes this check
+            # idempotent.
+            if self._gpu_lease.stopped_info is not None and not self._gpu_lease.restore_attempted:
                 self._whisper_restore_now(report_items, context="after GPU boundary exit")
 
     def _synthesis_and_verify_phase(
