@@ -1,6 +1,6 @@
 # tiktok-ingest — Stability S3 (layered orchestration) + S4 (realistic gates, live checks)
 
-Objective: ROADMAP Stability track S3 and S4. Branch `feat/tiktok-stability-s3-s4` (base `4d0ca21`). Delivery: work-unit commits, no push. Runner: `env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=ai/tiktok-ingest/src python3 -m unittest discover -s ai/tiktok-ingest/src/tiktok_ingest/tests -t ai/tiktok-ingest/src` (baseline 1024 OK).
+Objective: ROADMAP Stability track S3 and S4. Branch `feat/tiktok-stability-s3-s4` (base `ce98dab`). Delivery: work-unit commits, no push. Runner: `env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=ai/tiktok-ingest/src python3 -m unittest discover -s ai/tiktok-ingest/src/tiktok_ingest/tests -t ai/tiktok-ingest/src` (baseline 1024 OK).
 
 ## Specs
 
@@ -17,14 +17,14 @@ Objective: ROADMAP Stability track S3 and S4. Branch `feat/tiktok-stability-s3-s
 
 | ID | Specs | Task | Route | Status | Evidence |
 |---|---|---|---|---|---|
-| T1 | S1,S4 | rename pipeline.py -> fetch.py | delegated (user request: use gentle-ai subagents) | done | `132a2e0`; pure rename (no RED: no behaviour); 1024 OK. Worker interrupted mid-way, parent finished inline |
-| T2 | S2,S4 | extract engine.py from guided.py; GuidedRun thin driver with consent/narration adapters | delegated, parallel with T3,T4 | done | `d112a95`; RED import error; GREEN 1042 OK; differential 3 scenarios identical; patch targets: tests patch `engine.time` alongside `guided.time` |
-| T3 | S5 | swap gate sustained-rate + 1024 MiB ceiling | delegated, parallel | done | `21e3df8`; RED 1 fail/7 errors; GREEN; parent fix: ceiling no longer caps `--swap-limit-mib` (RED test then GREEN) |
-| T4 | S6 | zero-items warning | delegated, parallel | done | `60ecdee`; RED rule 1; GREEN; parent wired `inventory-collect` (RED then GREEN) |
-| T5 | S3,S4 | collection_run on engine; swap-retry in one place | delegated after T2 | done | `f2cc146`; RED static test; GREEN 1051 OK; differential 3 incl. swap-retry identical |
-| T6 | S7 | opt-in live smoke test | delegated after T3,T4 | done | `2413cca`; exception: live parts not runnable here (would stop real Whisper, hit TikTok); verified skipped by default and without URLs |
+| T1 | S1,S4 | rename pipeline.py -> fetch.py | delegated (user request: use gentle-ai subagents) | done | `3519a2f`; pure rename (no RED: no behaviour); 1024 OK. Worker interrupted mid-way, parent finished inline |
+| T2 | S2,S4 | extract engine.py from guided.py; GuidedRun thin driver with consent/narration adapters | delegated, parallel with T3,T4 | done | `d50c947`; RED import error; GREEN 1042 OK; differential 3 scenarios identical; patch targets: tests patch `engine.time` alongside `guided.time` |
+| T3 | S5 | swap gate sustained-rate + 1024 MiB ceiling | delegated, parallel | done | `4410474`; RED 1 fail/7 errors; GREEN; parent fix: ceiling no longer caps `--swap-limit-mib` (RED test then GREEN) |
+| T4 | S6 | zero-items warning | delegated, parallel | done | `dc8c6e6`; RED rule 1; GREEN; parent wired `inventory-collect` (RED then GREEN) |
+| T5 | S3,S4 | collection_run on engine; swap-retry in one place | delegated after T2 | done | `473855c`; RED static test; GREEN 1051 OK; differential 3 incl. swap-retry identical |
+| T6 | S7 | opt-in live smoke test | delegated after T3,T4 | done | `070c770`; exception: live parts not runnable here (would stop real Whisper, hit TikTok); verified skipped by default and without URLs |
 | T7 | S8 | docs (parent owns OPERATIONS.md/ROADMAP.md) | inline | done | docs commit |
-| T8 | all | independent verifier (risk items 4 GPU stop/restore ordering, 2 safety gate) | delegated | done | blocker 1 (negative rate quiet) fixed `c86517a`; blocker 2 (live-smoke doc ambiguity) fixed in docs; recheck all S# pass; 1052 OK |
+| T8 | all | independent verifier (risk items 4 GPU stop/restore ordering, 2 safety gate) | delegated | done | blocker 1 (negative rate quiet) fixed `b55c466`; blocker 2 (live-smoke doc ambiguity) fixed in docs; recheck all S# pass; 1052 OK |
 
 ## Log
 
@@ -35,5 +35,5 @@ Objective: ROADMAP Stability track S3 and S4. Branch `feat/tiktok-stability-s3-s
 - L5: T3 worker made the 1024 MiB ceiling unconditional, which silently capped an operator `--swap-limit-mib` above 1024 (an explicit option losing its effect). Parent decision: ceiling = max(1024 MiB, override + 1 byte), so an override keeps its old raw-delta meaning; RED test observed first.
 - L6: T4 left `inventory-collect` (offline HTML import, same load+merge) unwired; parent wired the stderr warning there (its JSON stdout unchanged).
 - L7: T5 audit — only duplication between swap retry and engine was lease construction (now `engine.lease_from_stages`); restore-outcome mappings stay per driver (different pinned messages). `GuidedRun._execute_collection_phase` kept as forwarder: tests still call it.
-- L8 (verifier T8): blocker — a swap counter going backwards between samples gave a negative rate treated as quiet (530 MiB delta passed; baseline failed). Fixed `c86517a`: negative rate is unmeasurable, fails closed. Recheck: S1–S7 pass incl. baseline tests on new code (1024 OK after expected import/clock patch rewrites), interrupted-stop per driver, stage-level gate probes, inventory-collect stdout byte-identical.
+- L8 (verifier T8): blocker — a swap counter going backwards between samples gave a negative rate treated as quiet (530 MiB delta passed; baseline failed). Fixed `b55c466`: negative rate is unmeasurable, fails closed. Recheck: S1–S7 pass incl. baseline tests on new code (1024 OK after expected import/clock patch rewrites), interrupted-stop per driver, stage-level gate probes, inventory-collect stdout byte-identical.
 - L9: second blocker — OPERATIONS live-smoke text implied every part needs a URL; environment probes run with only TIKTOK_INGEST_LIVE=1. Docs corrected.
