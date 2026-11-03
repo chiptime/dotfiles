@@ -78,11 +78,13 @@ Subcommands:
                           missing URLs are rejected before any effect;
                           ``--dry-run`` prints preflight + plan only.
 - ``summary``            read-only human/JSON view of the durable
-                          per-video stage state (one row per item with
-                          per-stage states, backlog status, author and a
-                          derived next step). Reads live state by default
-                          or a saved ``collection-run`` report via
-                          ``--report latest|PATH``; zero writes.
+                           per-video stage state (one row per item with
+                           per-stage states, backlog status, author and a
+                           derived next step). Reads live state by default
+                           or a saved ``collection-run`` report via
+                           ``--report latest|PATH``; zero writes.
+- ``web``                serve the local web interface on 127.0.0.1
+                          (loopback only).
 Every state-touching command accepts ``--state-root`` (default
 ``~/.local/state/tiktok-ingest/``) so tests and dry inspection can point
 at a scratch location. No subcommand stops services, browsers, downloads
@@ -140,6 +142,7 @@ from .state import StateError, StateRoot
 from .synthesis import SynthesisError, run_synthesis_stage
 from .verify import VerifyError, run_verify_stage
 from .vision import VisionError, run_vision_stage
+from .web.server import DEFAULT_PORT, WebServerError, run_web
 from .whisper_client import run_audio_stage
 
 
@@ -860,6 +863,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_state_root(summary_parser)
 
+    web_parser = subparsers.add_parser(
+        "web",
+        help="Serve the local web interface on 127.0.0.1 (loopback only).",
+        description=(
+            "Serves the Phase 1 local web interface from the existing "
+            "local state: a stdlib-only threaded HTTP server bound to "
+            "127.0.0.1 (never any other host), protected by a random "
+            "per-start token required on every mutating request plus "
+            "Host/Origin checks. Prints the URL once, opens the browser "
+            "unless --no-browser and serves until Ctrl+C (exit 0). A busy "
+            "port fails loudly; there is no remote access path by design."
+        ),
+    )
+    web_parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help="TCP port to listen on (default: %(default)s)",
+    )
+    web_parser.add_argument(
+        "--no-browser",
+        dest="no_browser",
+        action="store_true",
+        help="do not open the browser automatically",
+    )
+    add_state_root(web_parser)
+
     return parser
 
 
@@ -1271,6 +1301,17 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(render_table(data))
             return 0
+
+        if args.command == "web":
+            try:
+                return run_web(
+                    state=state,
+                    port=args.port,
+                    open_browser=not args.no_browser,
+                )
+            except WebServerError as exc:
+                print(f"web: {exc}", file=sys.stderr)
+                return 2
 
     except ReviewError as exc:
         print(f"review error: {exc}", file=sys.stderr)

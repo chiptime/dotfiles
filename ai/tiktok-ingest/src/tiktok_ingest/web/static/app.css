@@ -1,0 +1,21 @@
+/* Phase 1 placeholder styles. CSP (default-src 'self') forbids inline
+   styles, so everything lives in this external stylesheet. */
+:root { color-scheme: light dark; }
+
+body {
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  margin: 0 auto;
+  max-width: 720px;
+  padding: 0 1rem 2rem;
+}
+
+header {
+  border-bottom: 1px solid currentColor;
+  margin-bottom: 1rem;
+  padding: 1rem 0;
+}
+
+h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
+
+.health { font-weight: 600; margin: 0; }

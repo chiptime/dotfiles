@@ -7,6 +7,7 @@
 #
 # Dispatches to:
 #   python3 -m tiktok_ingest ingest "<url>" "$@"
+#   python3 -m tiktok_ingest web "$@"   (when the first argument is `web`)
 
 set -euo pipefail
 
@@ -20,6 +21,12 @@ if [ ! -d "$SRC_DIR/tiktok_ingest" ]; then
 fi
 
 export PYTHONPATH="$SRC_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+# `ti web [options]` serves the local web interface instead of ingesting.
+if [ "${1:-}" = "web" ]; then
+  shift
+  exec python3 -m tiktok_ingest web "$@"
+fi
 
 URL=""
 EXTRA_ARGS=()

@@ -48,6 +48,7 @@ class ParserTests(unittest.TestCase):
                 "collection-run",
                 "ingest",
                 "summary",
+                "web",
             },
         )
 
