@@ -193,8 +193,17 @@ failure branches and on curses terminal handling.
 - Details: `OPERATIONS.md` "GPU lease marker and startup reconcile";
   feature document `odd/tasks/tiktok-ingest-gpu-lease.md`.
 
-### S3 — Layered orchestration
+### S3 — Layered orchestration (done)
 
+- Done: `engine.py` holds `StageEngine`, which runs the stages and the GPU
+  lease with injected `approve` (consent) and `notify` (narration) adapters
+  and imports no TUI or consent provider. `GuidedRun` is a thin driver;
+  `collection-run` drives phases through the public `GuidedRun.engine`.
+- Done: the GPU lease is built in one place (`engine.lease_from_stages`) for
+  the primary swap and the swap retry. Restore outcome mapping stays per
+  driver because each emits its own pinned messages.
+- Done: `pipeline.py` renamed to `fetch.py`.
+- Original plan:
 - Extract a stage engine (items + phase in, outcomes out) with no TUI and no
   consent logic. `guided-run` and `collection-run` become thin drivers;
   consent and the TUI become adapters.
@@ -202,7 +211,18 @@ failure branches and on curses terminal handling.
   `GuidedRun._execute_collection_phase` and keep swap-retry logic in one place.
 - Rename `pipeline.py` to reflect what it does (URL fetch and validation).
 
-### S4 — Realistic gates and live checks
+### S4 — Realistic gates and live checks (done)
+
+- Done: swap gate trips over 512 MiB only while swap I/O exceeds 1 MiB/s;
+  1024 MiB always trips. The cgroup option was dropped: the isolated Ollama
+  is a direct child process with no cgroup of its own.
+- Done: opt-in live smoke test `tests/test_live_smoke.py`
+  (`TIKTOK_INGEST_LIVE`, `TIKTOK_INGEST_LIVE_URL`,
+  `TIKTOK_INGEST_LIVE_COLLECTION`).
+- Done: zero-items warning in browser inventory and `inventory-collect`.
+- Details: `OPERATIONS.md`; feature document
+  `odd/tasks/tiktok-ingest-stability-s3-s4.md`.
+- Original plan:
 
 - Make the swap gate tolerate short ambient spikes (sustained rate instead of
   a raw delta), or measure the Ollama cgroup instead of host-wide

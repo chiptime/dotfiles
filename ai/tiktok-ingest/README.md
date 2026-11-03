@@ -213,7 +213,8 @@ window honored by all writers remains necessary and does not exist
 
 ## Guided operation (`guided-run`)
 
-`src/tiktok_ingest/guided.py` adds ONE thin coordinator — not a
+`src/tiktok_ingest/guided.py` (driver) and `src/tiktok_ingest/engine.py`
+(stage engine, no consent or TUI) add ONE thin coordinator — not a
 framework, not a scheduler, no agent skill: it sequences the EXISTING
 stage functions for one operator-confirmed tanda behind ONE upfront
 run-plan authorization, and derives all progress from the product's

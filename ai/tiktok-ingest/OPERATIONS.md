@@ -360,6 +360,22 @@ defects.
 
 ## 7. What is tested and what is not
 
+### Live smoke test (opt-in)
+
+```bash
+TIKTOK_INGEST_LIVE=1 TIKTOK_INGEST_LIVE_URL=<short video> \
+TIKTOK_INGEST_LIVE_COLLECTION=<collection url> \
+PYTHONPATH=ai/tiktok-ingest/src python3 -m unittest tiktok_ingest.tests.test_live_smoke -v
+```
+
+It never runs in the default suite: every test needs `TIKTOK_INGEST_LIVE=1`
+and each part skips without its URL variable. It checks podman, the
+`voice-assistant-whisper` container and its health, the isolated Ollama with
+the vision model, and the pinned yt-dlp gate. The video part runs `ingest`
+end to end in a temporary state root (your real state is untouched) and
+REALLY stops and restores Whisper. The collection part opens the headed
+browser (log in first) and is the canary for TikTok layout changes.
+
 Tested (720 tests in the 2026-09-23 local run, fixture-only, zero
 network/GPU/podman/ollama):
 
@@ -499,8 +515,18 @@ STARTING and STOPPING the isolated server this run started (stop runs at
 window end or on failure); a server already answering on the isolated
 port is NEVER adopted (identity/scope cannot be verified from outside) —
 stop it explicitly and re-invoke. Gates are the existing ones,
-unweakened: ≥20 GiB free VRAM before every Qwen load, ≤512 MiB swap
-delta per phase, zero CPU offload, a fired gate is FINAL for the window.
+unweakened: ≥20 GiB free VRAM before every Qwen load, the swap gate
+below, zero CPU offload, a fired gate is FINAL for the window.
+
+Swap gate: swap I/O is measured from `/proc/vmstat` against the immediate
+pre-phase baseline and checked after every frame. A delta over 512 MiB
+trips only while the swap rate since the previous sample (bytes over
+elapsed monotonic seconds) is above 1 MiB/s, the same quiet threshold as
+the swap-retry cooldown; a short ambient spike that stays quiet does not
+trip. A delta of 1024 MiB or more always trips. An unmeasurable rate fails
+closed. An operator `--swap-limit-mib` above 1024 keeps its old meaning:
+anything over that budget trips. The gate id stays `swap_delta`, so
+swap-retry eligibility is unchanged.
 
 Denial, EOF, Ctrl-C or a non-interactive environment stop without
 assuming consent (only a literal `yes` grants a window; there is no
@@ -647,6 +673,12 @@ second state.
     markers match rendered text only — the page ships its
     unavailability string as script i18n JSON on every page, which is
     never evidence.
+    A fresh capture with ZERO items over a stored scan that had items
+    prints one `warning: collection <key> returned 0 items but
+    previously had <N>; …` line on stderr (browser inventory also adds it
+    to `cleanup_notes`; `inventory-collect` prints it too). Suspect a
+    TikTok layout change. The merge stays union-only, nothing is dropped
+    and the run continues.
     The browser closes and the profile is removed BEFORE any media
     work. An abrupt kill cannot guarantee cleanup: recover from real
     state, never from a promise.
