@@ -171,11 +171,35 @@ class Selection:
         return [item.video_id for item in self.items]
 
 
-def _run_dir_of(state: StateRoot, video_id: str) -> str | None:
+def run_dir_of(state: StateRoot, video_id: str) -> str | None:
     entry = Processed(state).get(video_id)
     if entry is None or not entry.artifacts:
         return None
     return str(state.root / entry.artifacts[0])
+
+
+# Historical private name kept as an alias for pre-S3 importers; new
+# code (and the collection driver since S3) uses the public name.
+_run_dir_of = run_dir_of
+
+
+def lease_from_stages(
+    stages: StageFunctions, state: StateRoot
+) -> gpu_lease.GpuLease:
+    """The ONE lease wiring (S3): a GPU lease whose lifecycle hooks are
+    resolved through a stage bundle at call time, with the state-root
+    lease marker. The stage engine's primary whisper swap and the
+    collection driver's swap-retry window both build their lease here,
+    so the hook/marker glue exists in exactly one place."""
+
+    return gpu_lease.GpuLease(
+        hooks=gpu_lease.LeaseHooks(
+            stop=lambda info: stages.whisper_stop(info),
+            restore=lambda info: stages.whisper_restore(info),
+            health=lambda: stages.whisper_health(),
+        ),
+        marker=gpu_lease.LeaseMarkerFile(state),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -227,14 +251,7 @@ class StageEngine:
         # landed inside the stop itself, and records honest bookkeeping
         # this coordinator maps onto its operator-facing reports. The
         # hooks are resolved through self.stages at call time.
-        self._gpu_lease = gpu_lease.GpuLease(
-            hooks=gpu_lease.LeaseHooks(
-                stop=lambda info: self.stages.whisper_stop(info),
-                restore=lambda info: self.stages.whisper_restore(info),
-                health=lambda: self.stages.whisper_health(),
-            ),
-            marker=gpu_lease.LeaseMarkerFile(state),
-        )
+        self._gpu_lease = lease_from_stages(stages, state)
         self.whisper_restore_failed = False
         # Standing-restore bookkeeping: the restore/recovery authorization
         # is asked BEFORE the stop (a Ctrl-C never grants anything, and a
@@ -1197,7 +1214,7 @@ class StageEngine:
                 continue
             document = synthesis_docs.get(item.video_id)
             if document is None and self.auto_synthesizer is None:
-                run_dir = item.run_dir or _run_dir_of(self.state, item.video_id)
+                run_dir = item.run_dir or run_dir_of(self.state, item.video_id)
                 waiting.append(
                     {
                         "id": item.video_id,
@@ -1249,7 +1266,7 @@ class StageEngine:
         urls: list[str] = []
         per_id_urls: dict[str, list[str]] = {}
         for item in verify_pending:
-            run_dir = _run_dir_of(self.state, item.video_id)
+            run_dir = run_dir_of(self.state, item.video_id)
             doc_urls: list[str] = []
             if run_dir is not None:
                 path = Path(run_dir) / "synthesis.json"

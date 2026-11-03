@@ -101,12 +101,12 @@ from .contracts import JobManifest, StageOutcome, utc_now_iso
 from .gates import GATE_SWAP_DELTA
 from .gpu_lease import (
     GpuLease,
-    LeaseHooks,
     LeaseMarkerFile,
     ReconcileResult,
     reconcile_lease,
     wait_for_whisper_health,
 )
+from .engine import lease_from_stages, run_dir_of
 from .fetch import parse_tiktok_url
 from .guided import (
     GUIDED_MAX_BATCH,
@@ -115,7 +115,6 @@ from .guided import (
     ConsoleConsentProvider,
     GuidedRun,
     StageFunctions,
-    _run_dir_of,
     default_stage_functions,
     derive_item_stages,
     narrate_stages,
@@ -306,7 +305,7 @@ def make_auto_synthesizer(
             )
 
         def document_fn() -> Mapping[str, Any]:
-            entry_run_dir = _run_dir_of(state, video_id)
+            entry_run_dir = run_dir_of(state, video_id)
             if entry_run_dir is None:
                 raise RuntimeError(
                     "no run directory recorded for this ID; fetch must "
@@ -973,7 +972,7 @@ def _collect_verify_candidates(
     read_failures: list[tuple[str, str]] = []
     for video_id in ready:
         doc_urls: list[str] = []
-        run_dir = _run_dir_of(state, video_id)
+        run_dir = run_dir_of(state, video_id)
         if run_dir is not None:
             path = Path(run_dir) / "synthesis.json"
             if path.is_file():
@@ -1141,7 +1140,7 @@ class SwapRetryEligibility:
 def _load_job_manifest(
     state: StateRoot, video_id: str
 ) -> tuple[JobManifest, Path] | None:
-    run_dir = _run_dir_of(state, video_id)
+    run_dir = run_dir_of(state, video_id)
     if run_dir is None:
         return None
     path = Path(run_dir) / "meta.json"
@@ -1616,14 +1615,7 @@ def _swap_retry_readmission(
     # persists the lease marker BEFORE the stop command is issued (S3,
     # under the run's state root) and owns the exactly-one restore that
     # ends the window on every path below.
-    lease = GpuLease(
-        hooks=LeaseHooks(
-            stop=lambda info: stages.whisper_stop(info),
-            restore=lambda info: stages.whisper_restore(info),
-            health=lambda: stages.whisper_health(),
-        ),
-        marker=LeaseMarkerFile(state),
-    )
+    lease = lease_from_stages(stages, state)
     try:
         lease.acquire(current)
     except KeyboardInterrupt:
@@ -2356,7 +2348,7 @@ def _refresh_batch_report(state: StateRoot, batch: dict[str, Any]) -> None:
     for item in batch["selected"]:
         states = derive_item_stages(state, item["id"])
         item["stages"] = states
-        item["run_dir"] = _run_dir_of(state, item["id"])
+        item["run_dir"] = run_dir_of(state, item["id"])
         if states["audio"] == states["vision"] == "complete" and states["synthesis"] != "complete":
             waiting.append(item["id"])
         if any(value != "complete" for value in states.values()):
@@ -2670,7 +2662,7 @@ def run_collection(
                         state, stages=narrated, consent=authorization, out=out,
                         auto_synthesizer=auto_synthesizer,
                     )
-                    result = runner._execute_collection_phase(selection, phase)
+                    result = runner.engine.execute_collection_phase(selection, phase)
                     if phase == "preparation":
                         report["batches"].append({
                             "ids": batch_ids, "exit_code": 0, "selected": [],
@@ -2765,7 +2757,7 @@ def run_collection(
                             state, stages=narrated, consent=authorization, out=out,
                             auto_synthesizer=auto_synthesizer,
                         )
-                        result = runner._execute_collection_phase(selection, phase)
+                        result = runner.engine.execute_collection_phase(selection, phase)
                         batch_target = None
                         for b in report["batches"]:
                             if any(vid in b["ids"] for vid in r_ids):

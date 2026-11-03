@@ -182,5 +182,36 @@ class TestNotifyNarration(EngineSeamTestCase):
         self.assertEqual(_normalized(driver_report), _normalized(engine_report))
 
 
+class TestCollectionRunPublicSurface(unittest.TestCase):
+    """S3: the collection driver depends on public names only."""
+
+    @staticmethod
+    def _collection_run_source() -> str:
+        source_path = Path(engine.__file__).parent / "collection_run.py"
+        return source_path.read_text(encoding="utf-8")
+
+    def test_collection_run_drives_phases_through_the_public_engine(self) -> None:
+        source = self._collection_run_source()
+        self.assertNotIn(
+            "._execute_collection_phase(",
+            source,
+            "collection_run must drive phases through the public engine API "
+            "(GuidedRun.engine.execute_collection_phase), not a private "
+            "GuidedRun member",
+        )
+        for node in ast.walk(ast.parse(source)):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 1
+                and node.module == "guided"
+            ):
+                for alias in node.names:
+                    self.assertFalse(
+                        alias.name.startswith("_"),
+                        f"collection_run must not import the private guided "
+                        f"name {alias.name!r}",
+                    )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

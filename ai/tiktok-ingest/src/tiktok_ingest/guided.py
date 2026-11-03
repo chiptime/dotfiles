@@ -75,7 +75,7 @@ from .engine import (  # noqa: F401 - re-exported seam (S2 single home)
     Selection,
     StageEngine,
     StageFunctions,
-    _run_dir_of,
+    run_dir_of,
 )
 from .gpu_lease import (  # noqa: F401 - re-exported bounds (S2 single home)
     WHISPER_RESTORE_READY_DEADLINE_SECONDS,
@@ -563,7 +563,7 @@ def select_from_plan(state: StateRoot, plan: Any, *, limit: int) -> Selection:
                     canonical_url=item.canonical_url,
                     classification=classification,
                     stages=derive_item_stages(state, item.stable_id),
-                    run_dir=_run_dir_of(state, item.stable_id),
+                    run_dir=run_dir_of(state, item.stable_id),
                 )
             )
         else:
@@ -637,7 +637,7 @@ def select_ids(
                 canonical_url=url,
                 classification=classification,
                 stages=derive_item_stages(state, video_id),
-                run_dir=_run_dir_of(state, video_id),
+                run_dir=run_dir_of(state, video_id),
             )
         )
     if unknown:
@@ -703,6 +703,15 @@ class GuidedRun:
             notify=self.out,
             auto_synthesizer=auto_synthesizer,
         )
+
+    # -- public engine seam ---------------------------------------------------
+
+    @property
+    def engine(self) -> StageEngine:
+        """The wired stage engine (S3): drivers drive phases through it
+        (``runner.engine.execute_collection_phase``) instead of private
+        driver members."""
+        return self._engine
 
     # -- consent ------------------------------------------------------------
 
