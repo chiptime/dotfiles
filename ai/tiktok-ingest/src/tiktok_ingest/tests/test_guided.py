@@ -19,7 +19,7 @@ from unittest import mock
 from pathlib import Path
 from typing import Any
 
-from tiktok_ingest import config, guided
+from tiktok_ingest import config, engine, guided
 from tiktok_ingest.collection import (
     CollectionScanStore,
     build_collection_plan,
@@ -1712,10 +1712,14 @@ class TestWhisperRestoreReadinessWait(GuidedTestCase):
         fake_time = SimpleNamespace(
             monotonic=clock.monotonic, sleep=clock.sleep
         )
+        # The restore-readiness clock moved to tiktok_ingest.engine with
+        # the stage engine (S2); narration keeps resolving guided.time,
+        # so both seams get the same deterministic clock.
         with mock.patch.object(guided, "time", fake_time):
-            return self.run_guided_with(
-                stages, ScriptedConsent(list(MANAGED_GRANT)), ids=[fake_id(1)]
-            )
+            with mock.patch.object(engine, "time", fake_time):
+                return self.run_guided_with(
+                    stages, ScriptedConsent(list(MANAGED_GRANT)), ids=[fake_id(1)]
+                )
 
     def test_transient_unready_then_healthy_single_restore(self) -> None:
         self._seed_prepared()

@@ -1480,11 +1480,15 @@ class TestWhisperCoordination(CollectionRunTestCase):
         # stays false until the 60s deadline). Assertions unchanged.
         from unittest import mock
 
-        from tiktok_ingest import guided
+        from tiktok_ingest import engine, guided
         from tiktok_ingest.tests.test_guided import FakeRestoreClock
 
+        # The restore-readiness clock moved to tiktok_ingest.engine with
+        # the stage engine (S2); stage narration keeps resolving
+        # guided.time, so both seams get the same deterministic clock.
         with mock.patch.object(guided, "time", FakeRestoreClock()):
-            code, report, _ = self.run_collection(stages, consent)
+            with mock.patch.object(engine, "time", FakeRestoreClock()):
+                code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
         self.assertTrue(report["interrupted"])
         self.assertEqual(stages.whisper_restores, 1)
