@@ -44,8 +44,8 @@ herdr-brain:
 agent-tts:
   scope: personal
   status: active
-  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 22/10: visor interactivo de diagramas Mermaid. 29/10: soporte de rutas .jsonl directas y raíces gentle-shell en PiTranscript (herdr-brain) para sincronizar transcripts y TTS con Herdr y Collie; 96 tests pasando en verde
-  next: Push de commits locales y continuar con F2/UAT; decidir chips de respuesta rápida y vías de audio abiertas (resampler en decode, 429 de edge-tts)
+  desc: Monorepo de voz para agentes (engine, herdr-brain, herdr-tts) — 3/11: click del glance habla con el Web Speech del navegador (RFC-02), stamp de shell refleja estáticos sucios para que la PWA refresque, merge de call-reliability a main (b4a2097)
+  next: Revisar el run de CI de b4a2097; opcionales: portar el fix del segmentador a modular-saas y mirar el shutdown lento de herdr-brain (~90s SIGTERM)
 
 compare-prices:
   scope: personal
@@ -321,3 +321,9 @@ operational-centers:
   status: active
   desc: Clece SIS operational centers and recruitment notification integrations
   next: Validate the FinalistaEstructura scoped User lookup in CPI TEST, then plan a controlled PROD deployment without changing the chief fallback or executionDateFinalistaEstructura
+
+km38:
+  scope: personal
+  status: active
+  desc: Landing universitaria de vinos KM38 en GitHub Pages, con etiquetas y logo compartido.
+  next: Sustituir los SVG provisionales por las fotografías finales de las botellas cuando estén disponibles.
