@@ -138,6 +138,7 @@ from .synthesis_api import (
     build_evidence_payload,
     build_request_messages,
     load_text_api_config,
+    normalize_automatic_synthesis,
     read_evidence_text,
     request_json_document,
     sanitize_evidence_text,
@@ -317,7 +318,8 @@ def make_auto_synthesizer(
                 sanitize_evidence_text(audio_md),
             )
             messages = build_request_messages(payload)
-            return request_json_document(api_config, messages, transport=transport)
+            document = request_json_document(api_config, messages, transport=transport)
+            return normalize_automatic_synthesis(document)
 
         # Progress narration like every other stage: start line, then
         # finish with the ACTUAL outcome/reuse/duration. The network

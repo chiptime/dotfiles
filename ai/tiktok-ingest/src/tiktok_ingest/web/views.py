@@ -26,7 +26,9 @@ real ``ti web`` app serves these endpoints.
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 from typing import Any
 
 from ..contracts import BACKLOG_STATUSES
@@ -34,12 +36,13 @@ from ..collection import (
     CollectionError,
     CollectionScanStore,
     build_collection_plan,
+    parse_collection_url,
 )
 from ..engine import run_dir_of
-from ..fetch import video_status
+from ..fetch import PipelineError, parse_tiktok_url, video_status
 from ..guided import derive_item_stages
 from ..review import ReviewError, list_entries
-from ..state import StateRoot, _KEY_RE, Processed
+from ..state import Blocklist, InventoryStore, StateRoot, _KEY_RE, Processed
 from ..summary import (
     REPORTS_DIRNAME,
     build_summary,
@@ -53,6 +56,24 @@ from .server import App, HTTPError, Request, Response, json_response
 # Saved reports are named ``utc_now_iso().replace(":", "-") + ".json"``
 # by ``collection_run._persist_report``; anything else is not a report.
 _REPORT_NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.json$")
+_SLUG_ID_SUFFIX_RE = re.compile(r"-\d{6,}$")
+
+
+def collection_display_name(url: str | None) -> str | None:
+    """Human name of a collection: its URL slug, decoded, without the
+    trailing numeric id (``juegos%20de%20mesa-7540…`` -> ``juegos de mesa``).
+    Display only; the collection key stays the identity."""
+    if not url:
+        return None
+    slug = unquote(urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1])
+    return _SLUG_ID_SUFFIX_RE.sub("", slug) or slug or None
+
+
+def _saved_at(report_name: str) -> str:
+    """The report's save time, from its writer-pattern file name."""
+    stamp = report_name[: -len(".json")]
+    date, time_part = stamp.split("T", 1)
+    return f"{date}T{time_part.replace('-', ':')}"
 
 # Evidence artifacts an operator may read through the web surface.
 # ``meta.json`` is the engine's manifest, not evidence, and stays out.
@@ -92,6 +113,17 @@ def _state_of(request: Request) -> StateRoot:
     return request.state.state_root
 
 
+def _collection_resume_command(state: StateRoot, url: Any, key: str) -> str | None:
+    """Only offer a command when the saved URL still identifies this collection."""
+    try:
+        ref = parse_collection_url(url)
+    except (CollectionError, TypeError):
+        return None
+    if ref.collection_key != key:
+        return None
+    return shlex.join(["ti", ref.collection_url, "--state-root", str(state.root)])
+
+
 def _scan_facts(state: StateRoot, key: str) -> dict[str, Any] | None:
     """Load one scan strictly through the store (shape-checked key)."""
     store = CollectionScanStore(state)
@@ -110,6 +142,10 @@ def _scan_facts(state: StateRoot, key: str) -> dict[str, Any] | None:
     return {
         "key": scan.collection.collection_key,
         "url": scan.collection.collection_url,
+        "resume_command": _collection_resume_command(
+            state, scan.collection.collection_url, key
+        ),
+        "name": collection_display_name(scan.collection.collection_url),
         "author": scan.collection.author,
         "kind": scan.collection.kind,
         "declared_count": scan.declared_count,
@@ -215,8 +251,13 @@ def _runs(request: Request) -> Response:
                 {
                     "collection_key": key,
                     "report": name,
-                    "generated_at": summary.get("generated_at"),
+                    # Saved reports carry no generation time; summary would
+                    # report "now", so the file name's save time is used.
+                    "saved_at": _saved_at(name),
                     "collection": summary.get("collection"),
+                    "collection_name": collection_display_name(
+                        (summary.get("collection") or {}).get("url")
+                    ),
                     "counts": _row_counts(summary.get("items") or []),
                     "items": summary.get("items") or [],
                 }
@@ -249,6 +290,8 @@ def _run_report(request: Request) -> Response:
 
 def _blocks(request: Request) -> Response:
     state = _state_of(request)
+    inventory = {entry.stable_id: entry for entry in InventoryStore(state).load()}
+    blocked_ids = Blocklist(state).entries()
     items: list[dict[str, Any]] = []
     for video_id in sorted(Processed(state).all().keys()):
         stages = derive_item_stages(state, video_id)
@@ -259,11 +302,21 @@ def _blocks(request: Request) -> Response:
         }
         if not blocked:
             continue
+        command = None
+        entry = inventory.get(video_id)
+        if entry is not None and video_id not in blocked_ids:
+            try:
+                parsed_id, url, _ = parse_tiktok_url(entry.canonical_url)
+                if parsed_id == video_id:
+                    command = shlex.join(["ti", url, "--state-root", str(state.root)])
+            except (PipelineError, TypeError):
+                pass
         items.append(
             {
                 "id": video_id,
                 "blocked_stages": blocked,  # recorded outcomes, unchanged
                 "next": derive_next(stages),  # the resume line summary prints
+                "resume_command": command,
             }
         )
     runs: list[dict[str, Any]] = []
@@ -283,6 +336,10 @@ def _blocks(request: Request) -> Response:
         run_block: dict[str, Any] = {
             "collection_key": key,
             "report": names[-1],
+            "collection_name": collection_display_name(
+                document.get("collection_url")
+            ),
+            "saved_at": _saved_at(names[-1]),
         }
         if document.get("hard_stop_reason"):
             run_block["hard_stop_reason"] = document["hard_stop_reason"]
@@ -295,7 +352,10 @@ def _blocks(request: Request) -> Response:
             run_block["failures"] = failures
         if cleanup_notes:
             run_block["cleanup_notes"] = cleanup_notes
-        if len(run_block) > 2:
+        if len(run_block) > 4:  # identity fields alone are not a block
+            run_block["resume_command"] = _collection_resume_command(
+                state, document.get("collection_url"), key
+            )
             runs.append(run_block)
     return json_response(200, {"items": items, "runs": runs})
 

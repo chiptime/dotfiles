@@ -8,71 +8,46 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <header class="site-header">
-    <h1>tiktok-ingest</h1>
-    <p id="health" role="status">checking health...</p>
-    <nav aria-label="Primary">
-      <ul id="nav">
-        <li><a href="#/collections">Collections</a></li>
-        <li><a href="#/runs">Runs</a></li>
-        <li><a href="#/blocks">Blocks</a></li>
-        <li><a href="#/evidence">Evidence</a></li>
-        <li><a href="#/review">Review</a></li>
-      </ul>
-    </nav>
-  </header>
+  <a class="skip-link" href="#main">Skip to content</a>
 
-  <div class="layout">
-    <main id="view" class="view">
-      <p class="status" role="status">Loading...</p>
-    </main>
-
-    <aside id="run-panel" class="run-panel" aria-labelledby="run-heading">
-      <h2 id="run-heading">Run</h2>
-      <p id="run-state" role="status">checking run state...</p>
-
-      <form id="run-form">
-        <div class="field">
-          <label for="run-url">Video or collection URL</label>
-          <input id="run-url" name="url" type="text" autocomplete="off"
-                 spellcheck="false">
-        </div>
-        <div class="field">
-          <label for="run-limit">Limit (items per batch)</label>
-          <input id="run-limit" name="limit" type="number" min="1" step="1">
-        </div>
-        <fieldset class="options">
-          <legend>Options</legend>
-          <div class="field option">
-            <input type="checkbox" id="opt-dry-run" name="dry_run">
-            <label for="opt-dry-run">Dry run</label>
-          </div>
-          <div class="field option">
-            <input type="checkbox" id="opt-no-auto-verify" name="no_auto_verify">
-            <label for="opt-no-auto-verify">No auto verify</label>
-          </div>
-          <div class="field option">
-            <input type="checkbox" id="opt-rescan" name="rescan">
-            <label for="opt-rescan">Rescan</label>
-          </div>
-        </fieldset>
-        <button type="submit">Start</button>
-      </form>
-      <p id="run-error" class="error" role="alert" hidden></p>
-
-      <section id="active-run" hidden>
-        <h3>Active run</h3>
-        <p id="active-run-meta"></p>
-        <button id="cancel-run" type="button">Cancel run</button>
-      </section>
-
-      <section id="narration-section" hidden>
-        <h3>Run narration</h3>
-        <div id="narration" class="narration" aria-live="polite"
-             aria-label="Run narration log" tabindex="0"></div>
-      </section>
+  <div id="app" class="app">
+    <aside id="sidebar" class="sidebar" aria-label="Primary">
+      <div class="brand">
+        <span id="brand-mark" class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">tiktok-ingest</span>
+      </div>
+      <nav id="nav" aria-label="Sections">
+        <ul>
+          <li><a href="#/" data-icon="home">Home</a></li>
+          <li><a href="#/collections" data-icon="collections">Collections</a></li>
+          <li><a href="#/runs" data-icon="runs">Runs</a></li>
+          <li><a href="#/blocks" data-icon="blocks">Blocks</a></li>
+          <li><a href="#/evidence" data-icon="evidence">Evidence</a></li>
+          <li><a href="#/review" data-icon="review">Review</a></li>
+          <li><a href="#/run" data-icon="run">Run</a></li>
+        </ul>
+      </nav>
+      <p class="sidebar-foot">local phase 1 surface</p>
     </aside>
+
+    <header id="topbar" class="topbar">
+      <button id="menu-toggle" class="menu-toggle btn btn-ghost btn-sm" type="button"
+              aria-expanded="false" aria-controls="sidebar">Menu</button>
+      <h1 id="section-title" class="topbar-title">Home</h1>
+      <div class="topbar-pills">
+        <span id="engine-pill" class="pill pill-muted" role="status">engine: checking...</span>
+        <span id="run-state-pill" class="pill pill-muted">run: checking...</span>
+      </div>
+    </header>
+
+    <main id="main" class="main">
+      <div id="view" class="view">
+        <p class="status" role="status">Loading...</p>
+      </div>
+    </main>
   </div>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 
   <div id="consent-modal" class="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true"
@@ -93,6 +68,7 @@
     </div>
   </div>
 
+  <script src="/static/reader.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

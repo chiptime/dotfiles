@@ -24,6 +24,7 @@ never auto-granted.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import io
 import json
 import re
@@ -1737,6 +1738,92 @@ class TestRetryWindowWhisperRestore(CollectionRunTestCase):
 
 
 class TestSynthesisApi(CollectionRunTestCase):
+    def test_automatic_cleanup_does_not_hide_credentials_in_discarded_action(self) -> None:
+        from tiktok_ingest.synthesis_api import load_text_api_config
+
+        video_id = fake_id(1)
+        run_dir = seed_job(self.state, video_id, complete=("fetch", "prepare", "audio", "vision"), evidence=True)
+        document = sample_synthesis_document()
+        document["actionables"] = ["Seguir a @ghp_" + "x" * 30 + " para más consejos."]
+        config, _ = load_text_api_config(API_ENV)
+        transport = FakeApiTransport([FakeApiResponse(document)])
+        synthesize = collection_run.make_auto_synthesizer(config, transport=transport)
+        def state_hashes() -> dict[str, str]:
+            return {str(path.relative_to(self.state.root)): hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in self.state.root.rglob("*") if path.is_file()}
+        before = state_hashes()
+        result = synthesize(video_id, self.state, lambda window: True)
+        self.assertEqual(result.outcome, "failed")
+        self.assertFalse((run_dir / "synthesis.json").exists())
+        self.assertEqual(state_hashes(), before)
+
+    def test_manual_file_verdict_is_still_preserved_without_fetches(self) -> None:
+        from tiktok_ingest.synthesis import run_synthesis_stage
+        from tiktok_ingest.verify import run_verify_stage
+
+        video_id = fake_id(1)
+        seed_scan_for_run(self.state, [1])
+        run_dir = seed_job(self.state, video_id, complete=("fetch", "prepare", "audio", "vision"), evidence=True)
+        document = sample_synthesis_document()
+        for claim in document["claims"]:
+            claim["verdict"] = "confirmed"
+            claim["candidate_urls"] = []
+        for entity in document["entities"]:
+            if isinstance(entity, dict):
+                entity["candidate_urls"] = []
+        source = Path(self.tmp.name) / "operator.json"
+        source.write_text(json.dumps(document), encoding="utf-8")
+        outcome = run_synthesis_stage(video_id, state=self.state, from_file=source)
+        self.assertEqual(outcome.outcome, "complete")
+        outcome = run_verify_stage(video_id, state=self.state,
+                                   urlopen=lambda *a, **k: self.fail("unexpected fetch"))
+        self.assertEqual(outcome.outcome, "complete")
+        verified = json.loads((run_dir / "verification.json").read_text(encoding="utf-8"))
+        self.assertEqual(verified["claims"][0]["verdict"], "confirmed")
+        self.assertIn("kept operator-supplied verdict", verified["claims"][0]["reason"])
+        self.assertEqual(verified["claims"][0]["fetches"], [])
+
+    def test_model_verdicts_are_unverified_and_engagement_only_is_excluded(self) -> None:
+        from tiktok_ingest.synthesis_api import load_text_api_config
+        from tiktok_ingest.synthesis import SynthesisDocument
+        from tiktok_ingest.verify import evaluate_claim, run_verify_stage
+
+        video_id = fake_id(1)
+        seed_scan_for_run(self.state, [1])
+        run_dir = seed_job(self.state, video_id, complete=("fetch", "prepare", "audio", "vision"), evidence=True)
+        document = sample_synthesis_document()
+        for claim in document["claims"]:
+            claim["verdict"] = "confirmed"
+            claim["candidate_urls"] = []
+        for entity in document["entities"]:
+            if isinstance(entity, dict):
+                entity["candidate_urls"] = []
+        document["actionables"] = [
+            "Seguir a @canal para más consejos.",
+            "Preparar pollo al horno", "Consultar la receta original",
+        ]
+        config, _ = load_text_api_config(API_ENV)
+        self.assertIsNotNone(config)
+        transport = FakeApiTransport([FakeApiResponse(document)])
+        synthesize = collection_run.make_auto_synthesizer(config, transport=transport)
+        result = synthesize(video_id, self.state, lambda window: True)
+        self.assertEqual(result.outcome, "complete")
+        saved = json.loads((run_dir / "synthesis.json").read_text(encoding="utf-8"))
+        self.assertIsNone(saved["claims"][0]["verdict"])
+        self.assertEqual(saved["actionables"], ["Preparar pollo al horno", "Consultar la receta original"])
+        parsed = SynthesisDocument.from_dict(saved)
+        self.assertNotEqual(evaluate_claim(parsed.claims[0], {}, parsed.entities).verdict, "confirmed")
+        def no_fetch(*args: Any, **kwargs: Any) -> None:
+            raise AssertionError("no candidate URLs should be fetched")
+        verified = run_verify_stage(video_id, state=self.state, urlopen=no_fetch)
+        self.assertEqual(verified.outcome, "complete")
+        verification = json.loads((run_dir / "verification.json").read_text(encoding="utf-8"))
+        self.assertTrue(all(claim["verdict"] != "confirmed" for claim in verification["claims"]))
+        self.assertTrue(all(not claim["fetches"] for claim in verification["claims"]))
+        self.assertEqual(Backlog(self.state).entries()[0]["actionable"],
+                         "Preparar pollo al horno; Consultar la receta original")
+        self.assertEqual(len(transport.requests), 1)
+
     def api_windows(self, report: dict[str, Any]) -> list[dict[str, Any]]:
         windows = [
             entry["window"]
@@ -2320,4 +2407,3 @@ class TestIntraPhaseRetries(CollectionRunTestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
-

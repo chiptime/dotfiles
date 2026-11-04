@@ -159,6 +159,39 @@ class TestSanitization(unittest.TestCase):
 
 
 class TestRequest(unittest.TestCase):
+    def test_automatic_prompt_requires_evidence_based_separate_ideas(self) -> None:
+        prompt = sa.build_request_messages("evidence")[0]["content"]
+        self.assertIn('"verdict": null', prompt)
+        self.assertIn("no external verification", prompt)
+        self.assertIn("each distinct useful idea as a separate actionable", prompt)
+        self.assertIn("Exclude engagement-only", prompt)
+        self.assertIn("Do not infer facts missing", prompt)
+
+    def test_automatic_normalization_keeps_mixed_actions_and_original_document(self) -> None:
+        document = json.loads(json.dumps(VALID_DOCUMENT))
+        document["claims"][0]["verdict"] = "confirmed"
+        document["actionables"] = ["Seguir a @canal para más consejos.",
+                                   "Seguir el método para mejorar la movilidad",
+                                   "Follow @account for more tips and learn the technique"]
+        before = json.dumps(document, sort_keys=True)
+        normalized = sa.normalize_automatic_synthesis(document)
+        self.assertEqual(json.dumps(document, sort_keys=True), before)
+        self.assertIsNone(normalized["claims"][0]["verdict"])
+        self.assertEqual(normalized["actionables"], document["actionables"][1:])
+
+    def test_automatic_normalization_does_not_repair_malformed_model_documents(self) -> None:
+        document = json.loads(json.dumps(VALID_DOCUMENT))
+        document["claims"][0]["verdict"] = "not-a-verdict"
+        self.assertEqual(sa.normalize_automatic_synthesis(document), document)
+
+    def test_automatic_normalization_drops_obvious_standalone_engagement(self) -> None:
+        document = json.loads(json.dumps(VALID_DOCUMENT))
+        document["actionables"] = ["Suscríbete para más consejos.", "Dale like.",
+                                   "Comparte este vídeo.", "Subscribe for more tips.",
+                                   "Preparar la receta"]
+        self.assertEqual(sa.normalize_automatic_synthesis(document)["actionables"],
+                         ["Preparar la receta"])
+
     def test_request_body_disables_tools_and_requests_json(self) -> None:
         config, _ = sa.load_text_api_config(ENV_OK)
         assert config is not None

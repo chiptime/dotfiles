@@ -13,12 +13,14 @@ import hashlib
 import http.client
 import json
 import re
+import shlex
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 
 from tiktok_ingest.contracts import (
+    BlocklistEntry,
     JobManifest,
     ProcessedEntry,
     StageOutcome,
@@ -27,7 +29,7 @@ from tiktok_ingest.contracts import (
 )
 from tiktok_ingest.fetch import video_status
 from tiktok_ingest.review import list_entries
-from tiktok_ingest.state import Backlog, Processed, StateRoot
+from tiktok_ingest.state import Backlog, Blocklist, Processed, StateRoot
 from tiktok_ingest.tests.fixtures import (
     FIXED_NOW,
     MEDIA_SHA256,
@@ -146,6 +148,29 @@ class ViewsTestCase(unittest.TestCase):
 
 
 class TestCollections(ViewsTestCase):
+    def test_collection_resume_command_preserves_state_root(self) -> None:
+        seed_scan(self.state, [1])
+        before = snapshot(self.state.root)
+        status, data = self.get_json(f"/api/collections/{REF.collection_key}")
+        self.assertEqual(status, 200)
+        self.assertEqual(shlex.split(data["resume_command"]), [
+            "ti", COLLECTION_URL, "--state-root", str(self.state.root),
+        ])
+        self.assertEqual(before, snapshot(self.state.root))
+
+    def test_collection_resume_command_quotes_shell_metacharacters(self) -> None:
+        from tiktok_ingest.collection import parse_collection_url
+        from tiktok_ingest.web.views import _collection_resume_command
+
+        url = "https://www.tiktok.com/@safe/collection/x;touch%20PWN"
+        alternate = StateRoot(Path(self.tmp.name) / "state ; touch PWN")
+        key = parse_collection_url(url).collection_key
+        command = _collection_resume_command(alternate, url, key)
+        self.assertEqual(shlex.split(command), [
+            "ti", url, "--state-root", str(alternate.root),
+        ])
+        self.assertIsNone(_collection_resume_command(alternate, url, "0" * 16))
+
     def test_list_shows_scan_facts_and_plan_counts(self) -> None:
         seed_scan(self.state, [1, 2])
         seed_job(
@@ -189,6 +214,38 @@ class TestCollections(ViewsTestCase):
         self.assertEqual(self.get("/api/collections/deadbeefdeadbeef")[0], 404)
         self.assertEqual(self.get("/api/collections/not-hex-at-all")[0], 404)
         self.assertEqual(self.get("/api/collections/..")[0], 404)
+
+
+class TestDisplayFields(ViewsTestCase):
+    def test_collection_display_name_comes_from_the_url_slug(self) -> None:
+        from tiktok_ingest.web.views import collection_display_name
+
+        self.assertEqual(
+            collection_display_name(
+                "https://www.tiktok.com/@bruno.narro/collection/"
+                "juegos%20de%20mesa-7540809735797951254"
+            ),
+            "juegos de mesa",
+        )
+        self.assertEqual(
+            collection_display_name(
+                "https://www.tiktok.com/@a/collection/salud-7631104329985968918"
+            ),
+            "salud",
+        )
+        self.assertEqual(collection_display_name(COLLECTION_URL), "guided-col")
+        self.assertIsNone(collection_display_name(None))
+        seed_scan(self.state, [1])
+        _status, data = self.get_json("/api/collections")
+        self.assertEqual(data["collections"][0]["name"], "guided-col")
+
+    def test_runs_carry_the_save_time_from_the_report_file_name(self) -> None:
+        write_report(self.state, REF.collection_key, TS_NAME, guided_report([fake_id(1)]))
+        _status, data = self.get_json("/api/runs")
+        run = data["runs"][0]
+        self.assertEqual(run["saved_at"], "2026-10-12T09:55:16Z")
+        self.assertEqual(run["collection_name"], "summary-col")
+        self.assertNotIn("generated_at", run)
 
 
 class TestRuns(ViewsTestCase):
@@ -251,6 +308,59 @@ class TestRuns(ViewsTestCase):
 
 
 class TestBlocks(ViewsTestCase):
+    def test_blocked_video_offers_safe_resume_command_for_same_state(self) -> None:
+        seed_scan(self.state, [1])
+        seed_blocked_job(self.state, fake_id(1))
+        before = snapshot(self.state.root)
+        status, data = self.get_json("/api/blocks")
+        self.assertEqual(status, 200)
+        item = data["items"][0]
+        self.assertEqual(item["next"], "audio: blocked")
+        self.assertEqual(shlex.split(item["resume_command"]), [
+            "ti", f"https://www.tiktok.com/@fixture_author/video/{fake_id(1)}",
+            "--state-root", str(self.state.root),
+        ])
+        self.assertEqual(before, snapshot(self.state.root))
+
+    def test_blocked_collection_offers_matching_resume_command(self) -> None:
+        document = guided_report([fake_id(1)])
+        document["collection_key"] = REF.collection_key
+        document["collection_url"] = COLLECTION_URL
+        document["hard_stop_reason"] = "fixture hard stop"
+        write_report(self.state, REF.collection_key, TS_NAME, document)
+        status, data = self.get_json("/api/blocks")
+        self.assertEqual(status, 200)
+        self.assertEqual(shlex.split(data["runs"][0]["resume_command"]), [
+            "ti", COLLECTION_URL, "--state-root", str(self.state.root),
+        ])
+
+    def test_missing_video_identity_never_invents_a_resume_command(self) -> None:
+        seed_blocked_job(self.state, fake_id(1))
+        status, data = self.get_json("/api/blocks")
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["items"][0]["resume_command"])
+
+    def test_permanently_rejected_video_has_no_resume_command(self) -> None:
+        seed_scan(self.state, [1])
+        seed_blocked_job(self.state, fake_id(1))
+        Blocklist(self.state).reject(BlocklistEntry(
+            video_id=fake_id(1), rejected_at=FIXED_NOW, reason="rejected"
+        ))
+        before = snapshot(self.state.root)
+        status, data = self.get_json("/api/blocks")
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["items"][0]["resume_command"])
+        self.assertEqual(before, snapshot(self.state.root))
+
+    def test_mismatched_report_collection_url_has_no_resume_command(self) -> None:
+        document = guided_report([fake_id(1)])
+        document["collection_url"] = "https://www.tiktok.com/@other/collection/other"
+        document["hard_stop_reason"] = "fixture hard stop"
+        write_report(self.state, REF.collection_key, TS_NAME, document)
+        status, data = self.get_json("/api/blocks")
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["runs"][0]["resume_command"])
+
     def test_blocks_from_manifest_outcomes(self) -> None:
         seed_scan(self.state, [1])
         seed_blocked_job(self.state, fake_id(1))
@@ -286,6 +396,8 @@ class TestBlocks(ViewsTestCase):
         )
         self.assertEqual(run_block["failures"][0]["stage"], "audio")
         self.assertEqual(run_block["cleanup_notes"], ["fixture cleanup note"])
+        self.assertEqual(run_block["collection_name"], "summary-col")
+        self.assertEqual(run_block["saved_at"], "2026-10-12T09:55:16Z")
 
 
 class TestVideos(ViewsTestCase):

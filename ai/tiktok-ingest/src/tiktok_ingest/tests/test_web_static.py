@@ -62,6 +62,12 @@ FORBIDDEN_IN_APP_JS = (
     "new Function",
 )
 
+# The one external-looking string the static assets may contain: the W3C
+# SVG namespace identifier required by DOM createElementNS. It is a
+# namespace name, never fetched (CSP default-src 'self' blocks any
+# request); every other http(s) URL would be an outbound reference.
+SVG_NAMESPACE = "http://www.w3.org/2000/svg"
+
 
 def _idle_ingest(*args: object, **kwargs: object) -> tuple[int, dict[str, object]]:
     raise AssertionError("the dummy runner must never start a run")
@@ -200,10 +206,123 @@ class ConsentModalTests(StaticHarness):
     def test_status_regions_are_live_regions(self) -> None:
         _, _, body = self.request("GET", "/")
         text = body.decode("utf-8")
-        narration = re.search(r"<[^>]*id=\"narration\"[^>]*>", text)
-        self.assertIsNotNone(narration, "narration log must exist")
-        self.assertIn("aria-live", narration.group(0))
+        # The page-level live region is the toast/status strip.
+        toasts = re.search(r"<[^>]*id=\"toasts\"[^>]*>", text)
+        self.assertIsNotNone(toasts, "toast region must exist")
+        self.assertIn("aria-live", toasts.group(0))
         self.assertIn('role="status"', text)
+        # The run narration log lives inside the #/run SPA view (S3: Run
+        # is its own section, not a static aside), so the invariant moved
+        # with it: app.js must build it as a polite live region.
+        js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn('narration.setAttribute("aria-live", "polite")', js)
+
+
+class RedesignStructureTests(unittest.TestCase):
+    """T2 (S1-S6) structural rules for the SPA redesign.
+
+    Theme support, DOM-built SVG icons, the keyboard-shortcut guard and
+    the no-outbound-reference rule are source-level properties, so they
+    are pinned against the static files directly.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        cls.css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+        cls.html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    def test_css_declares_dark_scheme_and_reduced_motion(self) -> None:
+        # S1: automatic light/dark; motion is opt-out for the whole UI.
+        self.assertIn("@media (prefers-color-scheme: dark)", self.css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", self.css)
+
+    def test_icons_are_dom_created_not_svg_markup_strings(self) -> None:
+        # S3: icons are createElementNS nodes, never markup strings that
+        # could become an injection sink.
+        self.assertIn("createElementNS", self.js)
+        self.assertIn(SVG_NAMESPACE, self.js)
+        self.assertNotIn("<svg", self.js)
+
+    def test_shortcut_guard_ignores_editable_targets_and_open_modal(self) -> None:
+        # S4/P1-FR-19: shortcuts never fire while typing or while the
+        # consent window is open.
+        self.assertIn("function shortcutEnabled(", self.js)
+        start = self.js.index("function shortcutEnabled(")
+        guard = self.js[start : start + 700]
+        for needle in ("INPUT", "TEXTAREA", "SELECT", "modal"):
+            self.assertIn(needle, guard, f"guard must check {needle}")
+
+    def test_no_external_urls_beyond_the_svg_namespace(self) -> None:
+        # S2/P1-FR-17: no outbound reference of any kind in the assets.
+        allowed = {SVG_NAMESPACE}
+        for name, source in (
+            ("index.html", self.html),
+            ("app.css", self.css),
+            ("app.js", self.js),
+        ):
+            found = set(re.findall(r"https?://[^\s\"'<>]+", source))
+            self.assertTrue(
+                found <= allowed,
+                f"{name} references external URLs: {found - allowed}",
+            )
+
+    def test_app_shell_structural_landmarks(self) -> None:
+        # S3: grid app shell (sidebar + header + main) is static markup.
+        for landmark in (
+            'id="sidebar"',
+            'id="nav"',
+            'id="menu-toggle"',
+            'id="section-title"',
+            'id="engine-pill"',
+            'id="run-state-pill"',
+            'id="toasts"',
+            'id="view"',
+        ):
+            self.assertIn(landmark, self.html)
+
+
+class SectionHelpTests(unittest.TestCase):
+    """Every section explains itself: an intro line under each view title,
+    a legend for the six pipeline stages and a note per evidence artifact."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    def _object_keys(self, name: str) -> set[str]:
+        start = self.js.index(f"var {name} = {{")
+        body = self.js[start : self.js.index("\n  };", start)]
+        return set(re.findall(r'^\s{4}"?([A-Za-z_. ]+?)"?:', body, re.MULTILINE))
+
+    def test_every_view_title_has_an_intro(self) -> None:
+        titles = set(re.findall(r'resetView\("([^"]+)"\)', self.js))
+        self.assertTrue(titles, "views must be built through resetView")
+        self.assertEqual(titles - self._object_keys("VIEW_INTROS"), set())
+        start = self.js.index("function resetView(")
+        self.assertIn("VIEW_INTROS[title]", self.js[start : start + 600])
+
+    def test_all_six_stages_are_explained(self) -> None:
+        self.assertEqual(
+            self._object_keys("STAGE_HELP"),
+            {"fetch", "prepare", "audio", "vision", "synthesis", "verify"},
+        )
+        pills = self.js[self.js.index("function stagePills(") :]
+        self.assertIn("STAGE_HELP[stage]", pills[:800])
+        for view, following in (
+            ("function renderRuns(", "function renderRunDetail("),
+            ("function renderRunDetail(", "function failureText("),
+        ):
+            body = self.js[self.js.index(view) : self.js.index(following)]
+            self.assertIn("stageLegend()", body, view)
+
+    def test_every_evidence_artifact_is_explained(self) -> None:
+        self.assertEqual(
+            self._object_keys("ARTIFACT_HELP"),
+            {"video.md", "audio.md", "synthesis.json", "verification.json"},
+        )
+        evidence = self.js[self.js.index("function renderEvidence(") :]
+        self.assertIn("ARTIFACT_HELP[name]", evidence[:6000])
 
 
 class EndpointCoverageTests(StaticHarness):

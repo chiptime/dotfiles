@@ -222,13 +222,13 @@ Return ONE JSON object and nothing else, matching this exact schema:
 {
   "classification": {"root": one of ["tecnología","recurso","educativo","consumo","ruido"], "subgroup": string, "confidence": number 0..1},
   "entities": [{"name": string, "candidate_urls": [string, ...]}, ...],
-  "claims": [{"claim": string, "source": one of ["caption","audio","visual","metadata"], "evidence": [string, ...], "verdict": null or one of ["confirmed","overstated","unverifiable","contradicted","unnamed"], "note": string or null, "candidate_urls": [string, ...]}, ...],
+  "claims": [{"claim": string, "source": one of ["caption","audio","visual","metadata"], "evidence": [string, ...], "verdict": null, "note": string or null, "candidate_urls": [string, ...]}, ...],
   "actionables": [string, ...],
   "fit": string,
   "model": string (your own model identifier),
   "generated_at": string (ISO-8601 timestamp)
 }
-Rules: use ONLY what the evidence text supports; never invent classifications, claims, entities or URLs; mark uncertainty honestly; claim sources must say where each claim came from; candidate_urls may be empty."""
+Rules: use ONLY what the evidence text supports; never invent classifications, claims, entities, URLs, quantities, steps or medical advice. Mark uncertainty honestly; claim sources must say where each claim came from. This synthesis has no external verification: every verdict MUST be null; candidate_urls may be empty. Provide each distinct useful idea as a separate actionable. Exclude engagement-only requests such as following, liking or subscribing; return an empty list if there are no useful ideas. Do not infer facts missing from the evidence."""
 
 
 def build_request_messages(payload: str) -> list[dict[str, str]]:
@@ -237,6 +237,40 @@ def build_request_messages(payload: str) -> list[dict[str, str]]:
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": payload},
     ]
+
+
+_ENGAGEMENT_ONLY = re.compile(
+    r"^\s*(?:(?:seguir\s+a|follow)\s+@[a-z0-9_.]+"
+    r"|suscr[ií]bete|subscribe|dale\s+like|comparte\s+este\s+v[ií]deo|share\s+this\s+video)"
+    r"(?:\s+(?:para\s+m[aá]s\s+(?:consejos|tips|contenido)"
+    r"|for\s+more\s+(?:tips|content)))?[.!]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def normalize_automatic_synthesis(document: dict[str, Any]) -> dict[str, Any]:
+    """Separate model assertions from verification without masking bad input.
+
+    Only obviously engagement-only requests are removed. Other
+    potentially promotional or mixed actions stay visible for human review.
+    Validate and inspect the *original* document before discarding anything,
+    so cleanup cannot hide malformed values or credential-looking material.
+    """
+    from .synthesis import SynthesisDocument, find_credential_leaks
+
+    if find_credential_leaks(document):
+        return document
+    try:
+        SynthesisDocument.from_dict(document)
+    except ValueError:
+        return document
+    result = dict(document)
+    result["claims"] = [dict(claim, verdict=None) for claim in (document.get("claims") or [])]
+    result["actionables"] = [
+        action for action in (document.get("actionables") or [])
+        if not (isinstance(action, str) and _ENGAGEMENT_ONLY.fullmatch(action))
+    ]
+    return result
 
 
 def build_request_body(config: TextApiConfig, messages: list[dict[str, str]]) -> dict[str, Any]:
