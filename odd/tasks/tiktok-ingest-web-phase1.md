@@ -19,12 +19,12 @@ Objective: ROADMAP "Phase 1 — Local web application" per `ai/tiktok-ingest/prd
 | ID | Specs | Task | Route | Status | Evidence |
 |---|---|---|---|---|---|
 | T0 | S1 | Phase 0 checklist evidence audit (read-only, real state) | delegated explorer | done | 8/10 evidenced; 7, 8 unit-test only (see L3) |
-| T1 | S2,S3,S4 | web package: loopback server, token/Host/Origin, static + safe paths, `ti web` | delegated writer | pending | |
-| T2 | S7 | read-only JSON views (collections, runs, blocks, evidence, pending) | delegated, parallel with T4 | pending | |
-| T3 | S7,S8 | backlog review endpoints (record/plan/apply) | delegated after T2 | pending | |
-| T4 | S5,S6,S8 | run runner: worker thread, web consent provider, readiness, SSE, single-writer lock, cooperative cancel | delegated, parallel with T2; launch gated by T0 | pending | |
-| T5 | S6,S7 | frontend SPA (5 views, consent modal, run launch) | delegated after T2–T4 | pending | |
-| T6 | S9 | docs | inline | pending | |
+| T1 | S2,S3,S4 | web package: loopback server, token/Host/Origin, static + safe paths, `ti web` | delegated writer | done | `7ab9484`; RED import; GREEN 1077 OK; parent: `ti` launcher pass-through |
+| T2 | S7 | read-only JSON views (collections, runs, blocks, evidence, pending) | delegated, parallel with T4 | done | `062e9a6`; RED import; GREEN; read-only hash proof; real-state smoke counts match T0 |
+| T3 | S7,S8 | backlog review endpoints (record/plan/apply) | delegated after T2 | done | `c890ff0` + `426a110`; RED import; GREEN; CLI parity on twin states |
+| T4 | S5,S6,S8 | run runner: worker thread, web consent provider, readiness, SSE, single-writer lock, cooperative cancel | delegated, parallel with T2; launch gated by T0 | done | `32f9447`; RED import; GREEN; parent wired SSE streaming in server.py and fixed route precedence (literal beats param, RED first) |
+| T5 | S6,S7 | frontend SPA (5 views, consent modal, run launch) | delegated after T2–T4 | done | `a9f233e`; RED 5 structural tests; GREEN; `node --check` OK |
+| T6 | S9 | docs | inline | done | docs commit |
 | T7 | all | independent verifier (risk: security item 2, concurrency item 4) | delegated | pending | |
 
 ## Log
@@ -33,3 +33,6 @@ Objective: ROADMAP "Phase 1 — Local web application" per `ai/tiktok-ingest/prd
 - L2: explorer map — no web code exists; StageEngine exposes `approve`/`notify`; `install_termination_handlers` is main-thread only, so web runs need cooperative cancellation; reports under `<state>/reports/<collection_key>/<ts>.json`; PRD §12 leaves consent UI design and progress refresh open. ROADMAP Phase 0 checklist: all 10 items unchecked; real state exists in ~/.local/state/tiktok-ingest.
 - L3 (T0 audit): Phase 0 checklist on collection c99f2ad2160a8254 (`salud`, reports 2026-10-12): items 1-6, 9, 10 EVIDENCED from saved reports + backlog (2 pending entries); 7 (only sanitized text reaches the API) and 8 (provider failure keeps resumable progress) PARTIAL — proven by unit tests only, no live artifact. Per S1: build views and review first; web run launching held for a user decision at the end.
 - L4 (T1): `bin/ti`/`bin/tiktok-ingest` always dispatched to `ingest`; parent added a `web` pass-through so `ti web` works.
+- L5: route collision — views' `/api/runs/{key}/{report}` captured `/api/runs/active/events`; parent changed the router so the most specific route wins (literal segment beats parameter), RED test first.
+- L6: parent committed T3 once with 3 failing `RunWebTests` (bare Mock server lacks a real app); fixed in `426a110`.
+- L7: review decisions use the product vocabulary `accepted`/`rejected` (P1-FR-03); apply is bound by `plan_sha256` of the previewed plan because the CLI has no confirmation token.

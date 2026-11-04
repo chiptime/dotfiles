@@ -321,6 +321,7 @@ also accept `--share-root`. Verified command set:
 | `guided-run` | Consent-gated coordination of one tanda through the existing stages (see section 8) |
 | `collection-run <url>` | Phase 0 one-command journey: browser inventory → phase-first resource windows → automatic synthesis → pending entries (see section 9) |
 | `summary [--collection U] [--json] [--report latest\|PATH]` | Read-only per-video stage table + derived next step, from live state or a saved report (see section 9.6) |
+| `web [--port 8484] [--no-browser]` | Local web interface on 127.0.0.1 only (see section 10); `ti web` forwards here |
 
 `verify --force` re-runs verification when fingerprints match; backlog
 appends remain duplicate-guarded (see section 4). `synthesize --force`
@@ -989,3 +990,43 @@ READ-ONLY: it imports no write path and touches no browser, network,
 GPU, container or model. With `--report latest`/`PATH` it reads a saved
 report instead of live state; a saved report records stage snapshots but
 not per-item backlog status, so those rows show `backlog: n/a`.
+
+## 10. Local web interface (`ti web`)
+
+`ti web` (or `python3 -m tiktok_ingest web [--port 8484] [--no-browser]
+[--state-root DIR]`) serves the Phase 1 interface at
+`http://127.0.0.1:8484/` and opens the browser. It binds to 127.0.0.1 only;
+a busy port fails loudly, with no fallback. Ctrl+C stops it; an active web
+run is cancelled and joined first so the GPU lease cleanup runs.
+
+Views (all read from disk on every request, nothing cached as authority):
+Collections (declared vs observed counts, status, end-of-list evidence,
+access markers, plan), Runs (saved reports), Blocks (blocked stages with the
+same `next` line `summary` prints, plus run-level stop reasons), Evidence
+(video status and allow-listed artifacts) and Review (pending backlog).
+
+Review mirrors the CLI: a decision (`accepted` or `rejected`, a rejection
+needs a reason) is bound to the entry hash shown in the detail; "Preview
+plan" shows what apply would do and "Apply" is bound to that previewed plan
+(a changed plan is refused). Web decisions go to
+`<state-root>/reviews/web-decisions.jsonl`. Decisions and apply are refused
+while a web run is active. A CLI writer running at the same time is only
+covered by the review module's hash checks, as in the terminal.
+
+Runs: launching `ingest` from the web is built but OFF in this phase
+(`POST /api/runs` answers 409) until the Phase 0 acceptance checklist is
+closed; items 7 and 8 still lack live evidence. When enabled, each consent
+window appears as a modal with the exact CLI fields and only Authorize or
+Deny; browser login readiness is a "Ready" button. Narration streams over
+server-sent events with the same lines the CLI prints. Cancel is
+cooperative: it denies a pending window or interrupts at the next narration
+line; a long stage call finishes first, bounded by its own timeout. Only one
+run at a time, and a GPU lease held by another live process refuses the start.
+
+Security: every non-GET request needs the per-start token from the page
+(`X-TI-Token`); `Host` and `Origin` must be the loopback address; responses
+carry a strict Content-Security-Policy, no-store, nosniff and frame denial.
+This protects against other web pages in your browser, not against other
+users or processes on the same machine (accepted single-operator boundary,
+PRD section 12).
+

@@ -471,6 +471,12 @@ Key boundaries:
 Exit codes: 0 success; 1 failures/interruption/hard blocks; 2 usage
 errors (invalid or missing URL rejected BEFORE any effect).
 
+## Local web interface (`ti web`)
+
+`src/tiktok_ingest/web/` serves a loopback-only interface over the same
+state: collections, runs, blocks, evidence and backlog review. It adds no
+engine and no storage; see OPERATIONS.md section 10.
+
 ## Reading a run later (`summary`)
 
 `summary` is a READ-ONLY view of the durable per-video stage state. It

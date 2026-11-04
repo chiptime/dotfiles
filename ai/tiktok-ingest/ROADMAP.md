@@ -236,6 +236,11 @@ failure branches and on curses terminal handling.
 
 ## Phase 1 — Local web application
 
+Status (2026-11-04): `ti web` serves every minimum view below and backlog
+review; launching runs from the web is built but disabled until the Phase 0
+acceptance checklist is closed (items 7 and 8 lack live evidence). See
+`OPERATIONS.md` section 10 and `odd/tasks/tiktok-ingest-web-phase1.md`.
+
 **Outcome:** replace terminal ceremony with a loopback-only, single-user interface
 without replacing the Phase 0 engine.
 
