@@ -406,6 +406,11 @@ class RunWebTests(unittest.TestCase):
         self.state_root = StateRoot(Path(self._tmp.name) / "state")
         self.fake_server = mock.Mock()
         self.fake_server.server_port = 8484
+        # run_web registers the run and review routes on the server's app,
+        # so the fake carries a real one.
+        self.fake_server.app = create_app(
+            ServerState(state_root=self.state_root, token="t")
+        )
 
     def _run(self, **kwargs) -> tuple[int, str]:
         stdout = io.StringIO()
