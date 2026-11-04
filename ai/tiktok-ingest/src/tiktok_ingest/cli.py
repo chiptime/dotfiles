@@ -950,7 +950,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.video_id,
                 state=state,
                 force=args.force,
-                swap_limit_mib=args.swap_limit_mib,
             )
             print(json.dumps(outcome.__dict__, indent=2, sort_keys=True, default=str))
             return 0 if outcome.outcome == "complete" else 1

@@ -21,12 +21,12 @@ from pathlib import Path
 # Models and language (P1, P2)
 # --------------------------------------------------------------------------
 
-# Adopted default vision model.
-VISION_MODEL = "qwen3.5:9b"
+# llm-hub (~/Code/personal/llm-hub) serves every model call: one resident
+# multimodal Qwen3.8-27B (llama.cpp + mmproj) for vision AND synthesis.
+LLM_HUB_CHAT_API_BASE = "http://127.0.0.1:8081/v1"
 
-# Reserved for high-density frame rereads only. It is NOT the default and is
-# never selected automatically (no automatic escalation between models).
-HIGH_DENSITY_VISION_MODEL = "qwen3.8:27b"
+# Vision model alias served by llm-hub llama-chat.
+VISION_MODEL = "qwen-3.8-27b"
 
 WHISPER_MODEL = "large-v3"
 
@@ -157,13 +157,11 @@ OEMBED_ENDPOINT = "https://www.tiktok.com/oembed"
 # Milestone 2: FFmpeg container image
 # --------------------------------------------------------------------------
 
-# CPU-only FFmpeg/ffprobe execute inside this existing local image via
-# podman, always network-isolated. The benchmark recorded version
-# 4.4.2-0ubuntu0.22.04.1 with image ID prefix below; the pipeline resolves
-# and records the FULL immutable image ID read-only at runtime and never
-# invents a digest from the prefix (MVP-PRD section 3.B).
-FFMPEG_IMAGE_REF = "localhost/voice-assistant_whisper:latest"
-FFMPEG_IMAGE_ID_PREFIX = "51b152706d"
+# CPU-only FFmpeg/ffprobe execute inside llm-hub's whisper image via
+# podman, always network-isolated (ffmpeg 4.4.2-0ubuntu0.22.04.1, the
+# benchmark version). The pipeline resolves and records the FULL immutable
+# image ID read-only at runtime (MVP-PRD section 3.B).
+FFMPEG_IMAGE_REF = "localhost/llm-hub_whisper-service:latest"
 
 # --------------------------------------------------------------------------
 # Budgets (P4)
@@ -182,7 +180,9 @@ class Budgets:
     metadata_ttl_seconds: int = 24 * 3600  # 24 hours
     cpu_prep_deadline_seconds: int = 1200  # 20 minutes
     cpu_prep_max_bytes: int = 2 * 1024 * 1024 * 1024  # 2 GiB derived outputs
-    vision_stage_deadline_seconds: int = 600  # 10 minutes
+    # 15 min: on llm-hub every frame goes to the 27B (~9 s each, measured
+    # 58 frames in 534 s); 64 frames + 8 rereads must fit.
+    vision_stage_deadline_seconds: int = 900
     audio_stage_deadline_seconds: int = 600  # 10 minutes
     working_cache_bytes: int = 10 * 1024 * 1024 * 1024  # 10 GiB
 
@@ -297,11 +297,11 @@ OLLAMA_API_BASE = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}"
 GLOBAL_OLLAMA_STORE = Path.home() / ".ollama" / "models"
 
 # --------------------------------------------------------------------------
-# Milestone 3: reused whisper WS service endpoints (PRD sections 4.1, 6.4)
+# llm-hub-whisper WS service endpoints (faster-whisper large-v3, CUDA float16)
 # --------------------------------------------------------------------------
 
 WHISPER_WS_HOST = "127.0.0.1"
-WHISPER_WS_PORT = 8767
+WHISPER_WS_PORT = 8765
 WHISPER_WS_PATH = "/ws/transcribe"
 WHISPER_HEALTH_PORT = 8766
 WHISPER_WS_URL = f"ws://{WHISPER_WS_HOST}:{WHISPER_WS_PORT}{WHISPER_WS_PATH}"

@@ -1,5 +1,5 @@
 [Unit]
-Description=llm-hub chat backend (TikTok ingest synthesis) — start existing container
+Description=llm-hub chat backend (TikTok ingest vision + synthesis) — start existing container
 Documentation=file://%h/.dotfiles/ai/tiktok-ingest/OPERATIONS.md
 Wants=network-online.target
 After=network-online.target

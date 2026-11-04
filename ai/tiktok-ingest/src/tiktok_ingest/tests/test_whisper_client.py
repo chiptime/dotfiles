@@ -327,7 +327,7 @@ class SessionTests(unittest.TestCase):
 
 class ContractConstantsTests(unittest.TestCase):
     def test_recorded_endpoints_match_prd_section_6_4(self) -> None:
-        self.assertEqual(config.WHISPER_WS_URL, "ws://127.0.0.1:8767/ws/transcribe")
+        self.assertEqual(config.WHISPER_WS_URL, "ws://127.0.0.1:8765/ws/transcribe")
         self.assertEqual(config.WHISPER_HEALTH_URL, "http://127.0.0.1:8766/health")
         self.assertEqual(config.WHISPER_LANGUAGE, "es")
 
@@ -399,7 +399,7 @@ class TranscribeTests(unittest.TestCase):
         self.assertEqual(result.completion_mode, "client_close_after_response")
         self.assertFalse(result.close_frame)
         # Host and port come from the recorded contract.
-        self.assertEqual(service.connections, [(config.WHISPER_WS_HOST, 8767)])
+        self.assertEqual(service.connections, [(config.WHISPER_WS_HOST, 8765)])
         # The audio went out as ONE masked binary message, followed by the
         # client-initiated close frame.
         self.assertEqual(bytes(service.socket.sent), self.expected_client_bytes(AUDIO_BYTES))

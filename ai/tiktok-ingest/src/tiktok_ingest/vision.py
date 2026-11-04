@@ -1,36 +1,22 @@
-"""Bounded vision stage over the isolated Ollama runtime (Milestone 3).
+"""Bounded vision stage over llm-hub's resident multimodal chat model.
 
-Boundaries implemented here (MVP-PRD sections 3.B and 5, methodology
-sections 5-6):
+Boundaries implemented here:
 
-- The harmonized payload is EXACTLY the benchmark payload (one base64
-  image, ``stream=false``, ``keep_alive=15m``, ``think=false``, options
-  ``temperature 0.1 / num_predict 1024 / num_ctx 4096``) with the fixed
-  OCR/extraction prompt from ``benchmark/scripts/run_vision.py``.
-- PRECONDITIONS, fail closed: the whisper container must NOT be running
-  (queried read-only via ``podman ps``; this code NEVER stops services —
-  stopping requires an operator-authorized action) and the isolated
-  Ollama must be up on 127.0.0.1:11435 reporting the pinned version.
-- Safety gates run as fail-closed code via :mod:`gates`: free-VRAM before
-  the load (failure = blocked), per-model VRAM delta from the IMMEDIATE
-  phase baseline, swap delta from the IMMEDIATE baseline, zero CPU
-  offload (a missing layer report also fails), and unload verification
-  (empty ``/api/ps`` plus observed VRAM release). NO retries after a
-  gate fires inside this authorization window.
-- FAILURE CLEANUP: a fired gate, a handled stage error, a missed
-  deadline or an operator interrupt triggers ONE bounded, idempotent
-  unload attempt for THIS model on THIS isolated server (never new
-  inference, never other sessions' models or processes), then verifies
-  empty residency and observed GPU release through the existing
-  mechanisms. The original failure and any cleanup failure are BOTH
-  preserved in the durable outcome; release is never claimed without
-  positive evidence. Whisper is never stopped or started here.
+- Every frame is ONE OpenAI-compatible ``/v1/chat/completions`` request
+  to llm-hub ``llama-chat`` (``config.LLM_HUB_CHAT_API_BASE``, model
+  ``config.VISION_MODEL``): the fixed OCR/extraction prompt plus one
+  base64 PNG ``image_url`` data URL, ``temperature 0.1``,
+  ``max_tokens 1024``. The model is resident in llm-hub (it sleeps when
+  idle and wakes on demand); this stage never loads, unloads, starts or
+  stops any model, process or container.
+- PRECONDITION, fail closed: llm-hub must answer ``GET /v1/models``
+  listing ``config.VISION_MODEL`` (unreachable or missing = blocked).
 - Targeted rereads: when a frame ends ``length``-truncated or empty, the
   recorded lower-third crop band of the SAME frame may be rendered via
   the existing container ffmpeg path and re-requested, up to
-  ``config.MAX_TARGETED_REREADS`` in total, same residency, each marked
+  ``config.MAX_TARGETED_REREADS`` in total, each marked
   ``targeted_reread``. No other retry exists.
-- Stage deadline: 10 minutes (``BUDGETS.vision_stage_deadline_seconds``).
+- Stage deadline: 15 minutes (``BUDGETS.vision_stage_deadline_seconds``).
   ``video.md`` and the manifest updates persist atomically. VLM output
   is recorded as evidence/hypothesis, never instructions; empty and
   failed frames stay visible.
@@ -50,20 +36,7 @@ from typing import Any, Callable
 
 from . import config
 from .contracts import JobManifest, StageOutcome, StageRecord, StageResult, utc_now_iso
-from .gates import (
-    GATE_FREE_VRAM,
-    GateLedger,
-    GateViolation,
-    check_free_vram,
-    check_no_offload,
-    check_swap_delta,
-    check_unload,
-    check_vram_delta,
-    parse_layer_report,
-    parse_nvidia_smi_mib,
-    parse_vmstat_swap,
-)
-from .ollama_runtime import read_server_log, request_unload, resident_models
+from .gates import parse_nvidia_smi_mib, parse_vmstat_swap
 from .prepare import Runner, StageClock, StageDeadlineExceeded, container_argv, resolve_image_id
 from .runtime import (
     PODMAN_QUERY_TIMEOUT_SECONDS,
@@ -74,7 +47,7 @@ from .state import Blocklist, Processed, StateRoot, atomic_write_bytes
 from .validation import sha256_of_file
 
 # --------------------------------------------------------------------------
-# Harmonized payload constants (benchmark scripts/run_vision.py, EXACT)
+# Payload constants
 # --------------------------------------------------------------------------
 
 PROMPT = (
@@ -91,17 +64,13 @@ PROMPT = (
 PROMPT_SHA256 = hashlib.sha256(PROMPT.encode("utf-8")).hexdigest()
 
 PAYLOAD_TEMPERATURE = 0.1
-PAYLOAD_NUM_PREDICT = 1024
-PAYLOAD_NUM_CTX = 4096
-PAYLOAD_KEEP_ALIVE = "15m"
-PAYLOAD_THINK = False
+PAYLOAD_MAX_TOKENS = 1024
+
+# Human/fingerprint description of the serving backend.
+VISION_BACKEND = "llm-hub llama-chat (llama.cpp, OpenAI chat completions)"
 
 _GENERATE_TIMEOUT_SECONDS = 300.0
-
-# Bounded failure-cleanup timeouts: the unload must never become new
-# inference and must never hang the stage teardown.
-_CLEANUP_UNLOAD_TIMEOUT_SECONDS = 30.0
-_CLEANUP_RESIDENCY_TIMEOUT_SECONDS = 10.0
+_READINESS_TIMEOUT_SECONDS = 10.0
 
 # Bounded heuristics for the dense/repetitive flags. They are REVIEW flags
 # recorded in video.md, never quality verdicts.
@@ -127,45 +96,61 @@ def build_payload(
     image_base64: str,
     *,
     model: str = config.VISION_MODEL,
-    num_ctx: int = PAYLOAD_NUM_CTX,
 ) -> dict[str, Any]:
-    """One harmonized request: single image, no transcript hints."""
+    """One chat request: the fixed prompt plus a single PNG, no transcript hints."""
     return {
         "model": model,
-        "prompt": PROMPT,
-        "images": [image_base64],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64," + image_base64},
+                    },
+                ],
+            }
+        ],
         "stream": False,
-        "keep_alive": PAYLOAD_KEEP_ALIVE,
-        "think": PAYLOAD_THINK,
-        "options": {
-            "temperature": PAYLOAD_TEMPERATURE,
-            "num_predict": PAYLOAD_NUM_PREDICT,
-            "num_ctx": num_ctx,
-        },
+        "temperature": PAYLOAD_TEMPERATURE,
+        "max_tokens": PAYLOAD_MAX_TOKENS,
     }
 
 
 def redact_payload(payload: dict[str, Any], image_sha256: str) -> dict[str, Any]:
     """Return a persistable copy: the base64 image replaced by its sha256."""
-    redacted = dict(payload)
-    redacted["images"] = ["base64:sha256:" + image_sha256]
+    redacted = json.loads(json.dumps(payload))
+    for message in redacted.get("messages", []):
+        for part in message.get("content", []):
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                part["image_url"] = {"url": "base64:sha256:" + image_sha256}
     return redacted
 
 
-def parse_generate_response(raw_text: str) -> dict[str, Any]:
-    """Extract the fields the stage records from an /api/generate reply."""
+def parse_chat_response(raw_text: str) -> dict[str, Any]:
+    """Extract the fields the stage records from a chat completions reply."""
     try:
         document = json.loads(raw_text or "")
     except json.JSONDecodeError as exc:
-        raise VisionError(f"Ollama reply is not valid JSON: {exc}") from exc
+        raise VisionError(f"llm-hub reply is not valid JSON: {exc}") from exc
     if not isinstance(document, dict):
-        raise VisionError("Ollama reply is not a JSON object")
+        raise VisionError("llm-hub reply is not a JSON object")
+    choices = document.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise VisionError("llm-hub reply has no choices")
+    choice = choices[0]
+    message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+    content = message.get("content")
+    usage = document.get("usage") if isinstance(document.get("usage"), dict) else {}
+    timings = document.get("timings") if isinstance(document.get("timings"), dict) else {}
     return {
-        "response_text": document.get("response", ""),
-        "done_reason": document.get("done_reason"),
-        "load_duration_ns": document.get("load_duration"),
-        "prompt_eval_duration_ns": document.get("prompt_eval_duration"),
-        "eval_duration_ns": document.get("eval_duration"),
+        "response_text": content if isinstance(content, str) else "",
+        "done_reason": choice.get("finish_reason"),
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "prompt_ms": timings.get("prompt_ms"),
+        "predicted_ms": timings.get("predicted_ms"),
     }
 
 
@@ -305,31 +290,37 @@ def assert_whisper_stopped(runner: Runner) -> None:
         )
 
 
-def assert_isolated_ollama_ready(
+def assert_llm_hub_ready(
     *,
     urlopen: Callable[..., Any],
-    base_url: str = config.OLLAMA_API_BASE,
-) -> str:
-    """Fail closed unless the ISOLATED server answers with the pinned version."""
-    url = f"{base_url.rstrip('/')}/api/version"
+    base_url: str = config.LLM_HUB_CHAT_API_BASE,
+    model: str = config.VISION_MODEL,
+) -> None:
+    """Fail closed unless llm-hub answers and serves the vision model."""
+    url = f"{base_url.rstrip('/')}/models"
     req = urllib.request.Request(url, method="GET")
     try:
-        with urlopen(req, timeout=5.0) as response:
+        with urlopen(req, timeout=_READINESS_TIMEOUT_SECONDS) as response:
             document = json.loads(response.read().decode("utf-8"))
     except (OSError, ValueError) as exc:
         raise VisionError(
-            f"isolated Ollama is not reachable at {base_url}; start it "
-            "explicitly before running the vision stage "
-            f"({exc}); failing closed"
+            f"llm-hub chat is not reachable at {base_url} ({exc}); start it "
+            "with `systemctl --user start llm-hub-chat` and retry"
         ) from exc
-    version = document.get("version") if isinstance(document, dict) else None
-    if version != config.GATES.isolated_ollama_version:
+    served: list[str] = []
+    if isinstance(document, dict):
+        for key in ("data", "models"):
+            for item in document.get(key) or []:
+                if isinstance(item, dict):
+                    for field_name in ("id", "name", "model"):
+                        value = item.get(field_name)
+                        if isinstance(value, str):
+                            served.append(value)
+    if model not in served:
         raise VisionError(
-            f"isolated Ollama reports version {version!r}, expected "
-            f"{config.GATES.isolated_ollama_version!r} (the host global "
-            "install is incompatible with qwen3.5+); failing closed"
+            f"llm-hub at {base_url} does not serve model {model!r} "
+            f"(serves {sorted(set(served))}); failing closed"
         )
-    return version
 
 
 # --------------------------------------------------------------------------
@@ -348,8 +339,6 @@ class VisionOutcome:
     run_dir: str | None = None
     frames_processed: int | None = None
     rereads_used: int | None = None
-    # Present when bounded failure cleanup ran; None on the happy path.
-    cleanup: dict[str, Any] | None = None
 
 
 def vision_fingerprint(
@@ -366,12 +355,9 @@ def vision_fingerprint(
             "vision_model": config.VISION_MODEL,
             "vision_prompt_sha256": PROMPT_SHA256,
             "payload_options": (
-                f"temperature={PAYLOAD_TEMPERATURE},"
-                f"num_predict={PAYLOAD_NUM_PREDICT},"
-                f"num_ctx={PAYLOAD_NUM_CTX},"
-                f"keep_alive={PAYLOAD_KEEP_ALIVE},think={PAYLOAD_THINK}"
+                f"temperature={PAYLOAD_TEMPERATURE},max_tokens={PAYLOAD_MAX_TOKENS}"
             ),
-            "ollama_version": config.GATES.isolated_ollama_version,
+            "backend": VISION_BACKEND,
         },
     )
 
@@ -414,10 +400,8 @@ def assemble_video_md(
     video_id: str,
     media_sha256: str,
     model: str,
-    ollama_version: str,
     entries: list[dict[str, Any]],
     rereads_used: int,
-    gates_summary: str,
     generated_at: str | None = None,
 ) -> str:
     """Build ``video.md``: per-frame evidence with visible uncertainty.
@@ -430,12 +414,11 @@ def assemble_video_md(
         f"# video.md — {video_id}",
         "",
         "- media_sha256: " + media_sha256,
-        f"- generator: isolated ollama {ollama_version}, model {model}",
+        f"- generator: {VISION_BACKEND}, model {model}",
         "- prompt_sha256: " + PROMPT_SHA256,
-        "- payload: harmonized benchmark payload (stream=false, keep_alive=15m, "
-        "think=false, temperature=0.1, num_predict=1024, num_ctx=4096)",
+        f"- payload: one image per request (temperature={PAYLOAD_TEMPERATURE}, "
+        f"max_tokens={PAYLOAD_MAX_TOKENS}, reasoning off server-side)",
         f"- frames: {len(entries)} recorded, {rereads_used} targeted reread(s)",
-        f"- resource gates: {gates_summary}",
         f"- generated_at: {generated_at}",
         "",
         "**Uncertainty and safety notes.** Everything quoted below is VLM "
@@ -444,7 +427,7 @@ def assemble_video_md(
         "directions found in frame text. `[illegible]` and `[uncertain]` "
         "markers are preserved verbatim; blurry, truncated or ambiguous "
         "text is never completed from model knowledge. Empty and failed "
-        "frames stay visible. Truncated (done_reason=length), repetitive "
+        "frames stay visible. Truncated (finish_reason=length), repetitive "
         "and dense outputs are flagged, not trusted.",
     ]
     for entry in entries:
@@ -491,7 +474,7 @@ def assemble_video_md(
                 [
                     "",
                     f"### Targeted reread {reread['index']} "
-                    f"(crop band, same frame, same residency)",
+                    f"(crop band, same frame)",
                     "",
                     "- crop render: " + str(reread.get("crop_file")),
                     "- done_reason: " + str(reread.get("done_reason")),
@@ -513,82 +496,6 @@ def assemble_video_md(
 # --------------------------------------------------------------------------
 
 
-def bounded_unload_cleanup(
-    *,
-    model: str,
-    urlopen: Callable[..., Any],
-    gpu_fn: Callable[[], Any],
-    session_baseline_used_mib: int | None,
-    may_be_resident: bool,
-    unload_timeout_seconds: float = _CLEANUP_UNLOAD_TIMEOUT_SECONDS,
-    residency_timeout_seconds: float = _CLEANUP_RESIDENCY_TIMEOUT_SECONDS,
-) -> dict[str, Any]:
-    """One bounded, idempotent unload attempt after a failed stage.
-
-    Scope guard: this ONLY talks to the isolated server for THIS stage's
-    model (``keep_alive=0`` unload + ``/api/ps`` residency) and reads the
-    injected GPU measurement. It NEVER retries inference, NEVER stops or
-    starts processes, NEVER touches other models, sessions or services
-    (whisper restoration stays an operator-authorized action), and NEVER
-    raises: every failure is captured in the report.
-
-    Release is claimed (``release_verified=True``) only with positive
-    evidence: empty ``/api/ps`` residency AND observed GPU usage within
-    the session tolerance of the phase baseline — the same two conditions
-    the passing-path unload gate enforces.
-    """
-    report: dict[str, Any] = {
-        "unload_requested": False,
-        "unload_ok": None,
-        "unload_error": None,
-        "resident_models": None,
-        "post_used_mib": None,
-        "overshoot_mib": None,
-        "release_verified": False,
-        "errors": [],
-    }
-    if may_be_resident:
-        report["unload_requested"] = True
-        try:
-            request_unload(
-                model, urlopen=urlopen, timeout=unload_timeout_seconds
-            )
-            report["unload_ok"] = True
-        except Exception as exc:  # noqa: BLE001 - cleanup must never raise
-            report["unload_ok"] = False
-            report["unload_error"] = (
-                f"unload request failed: {type(exc).__name__}: {exc}"
-            )
-            report["errors"].append(report["unload_error"])
-    try:
-        resident = resident_models(
-            urlopen=urlopen, timeout=residency_timeout_seconds
-        )
-        report["resident_models"] = [
-            entry.get("name") for entry in resident
-        ]
-    except Exception as exc:  # noqa: BLE001 - cleanup must never raise
-        report["errors"].append(
-            f"residency check failed: {type(exc).__name__}: {exc}"
-        )
-    try:
-        gpu = gpu_fn()
-        report["post_used_mib"] = int(gpu.used_mib)
-        if session_baseline_used_mib is not None:
-            report["overshoot_mib"] = (
-                report["post_used_mib"] - session_baseline_used_mib
-            )
-    except Exception as exc:  # noqa: BLE001 - cleanup must never raise
-        report["errors"].append(f"GPU query failed: {type(exc).__name__}: {exc}")
-    report["release_verified"] = bool(
-        report["resident_models"] == []
-        and report["post_used_mib"] is not None
-        and report["overshoot_mib"] is not None
-        and report["overshoot_mib"] <= config.GATES.session_vram_tolerance_mib
-    )
-    return report
-
-
 def run_vision_stage(
     video_id: str,
     *,
@@ -596,39 +503,17 @@ def run_vision_stage(
     runner: Runner = subprocess_runner,
     urlopen: Callable[..., Any] = default_urlopen,
     force: bool = False,
-    gpu_fn: Callable[[], Any] | None = None,
-    vmstat_fn: Callable[[], Any] | None = None,
-    read_log_fn: Callable[[], str] | None = None,
     post_json_fn: Callable[[str, dict[str, Any], float], tuple[str, float]] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
-    swap_limit_mib: int | None = None,
 ) -> VisionOutcome:
-    """Run the gated vision stage for one prepared video.
+    """Run the vision stage for one prepared video against llm-hub.
 
-    Preconditions fail closed (blocklist, prepare incomplete, whisper up,
-    isolated Ollama down). All benchmark gates are enforced via
-    :class:`gates.GateLedger`; a fired gate ends the authorization window.
-
-    ``swap_limit_mib`` is an explicit OPERATOR-AUTHORIZED budget change for
-    this run only (PRD section 5 escape hatch); it must be ABOVE the
-    configured default to take effect and is recorded in the durable gate
-    report as a deviation, never silently applied.
-
-    Failure cleanup: when the stage ends in any non-complete outcome
-    (fired gate, handled stage error, missed deadline, operator
-    interrupt), ONE bounded unload attempt is made for this stage's model
-    and residency/release are verified through the existing mechanisms.
-    The cleanup report lands in ``resource_gates["vision"]["cleanup"]``
-    and in :attr:`VisionOutcome.cleanup`; the original failure reason is
-    preserved first, and an unverified release is stated as such — a
-    cleanup failure never hides the failure that caused it, and a
-    successful-looking reason is never emitted without evidence.
+    Preconditions fail closed (blocklist, prepare incomplete, llm-hub not
+    serving the vision model). A failed request ends the stage: no
+    automatic retry exists beyond the bounded targeted rereads.
     """
-    gpu_fn = gpu_fn or (lambda: query_gpu(runner))
-    vmstat_fn = vmstat_fn or default_vmstat_fn
-    read_log_fn = read_log_fn or read_server_log
     post_json_fn = post_json_fn or default_post_json
-    generate_url = f"{config.OLLAMA_API_BASE}/api/generate"
+    generate_url = f"{config.LLM_HUB_CHAT_API_BASE.rstrip('/')}/chat/completions"
 
     state.ensure_layout()
     if Blocklist(state).is_blocked(video_id):
@@ -711,10 +596,9 @@ def run_vision_stage(
             run_dir=str(run_dir),
         )
 
-    # -- preconditions (fail closed) -------------------------------------
+    # -- precondition (fail closed) --------------------------------------
     try:
-        assert_whisper_stopped(runner)
-        ollama_version = assert_isolated_ollama_ready(urlopen=urlopen)
+        assert_llm_hub_ready(urlopen=urlopen)
     except VisionError as exc:
         return VisionOutcome(
             outcome=StageOutcome.BLOCKED.value,
@@ -732,89 +616,12 @@ def run_vision_stage(
         label="Vision stage",
         monotonic=monotonic,
     )
-    ledger = GateLedger()
     entries: list[dict[str, Any]] = []
     rereads_used = 0
-    session_baseline_used: int | None = None
-    # Set before ANY inference attempt: an attempted request may have
-    # (partially) loaded the model server-side even when this client
-    # never sees a response — failure cleanup must request the unload.
-    model_loaded = False
-    cleanup: dict[str, Any] | None = None
     outcome_value = StageOutcome.COMPLETE.value
     reason = ""
-    gates_detail: dict[str, Any] = {}
 
     try:
-        # IMMEDIATE phase baselines (methodology 6.2/6.4: never an older one).
-        session_gpu = gpu_fn()
-        session_baseline_used = session_gpu.used_mib
-        swap_baseline = vmstat_fn()
-        # S5 rate anchor: the first per-frame sample measures its recent
-        # rate from THIS baseline sample and its monotonic time.
-        swap_prev_bytes = swap_baseline.swap_io_bytes
-        swap_prev_t = monotonic()
-        ledger.record(
-            check_free_vram(session_gpu, config.GATES.free_vram_gate_mib)
-        )
-
-        limit_mib = config.GATES.vram_delta_limit_mib.get(config.VISION_MODEL)
-        if limit_mib is None:
-            raise VisionError(
-                f"no VRAM delta limit recorded for {config.VISION_MODEL}; "
-                "refusing to run ungated (fail closed)"
-            )
-        swap_default_mib = config.GATES.swap_delta_limit_mib
-        if swap_limit_mib is not None and swap_limit_mib > swap_default_mib:
-            swap_limit_bytes = swap_limit_mib * 1024 * 1024
-        else:
-            swap_limit_bytes = swap_default_mib * 1024 * 1024
-            swap_limit_mib = swap_default_mib
-        # S5 layered rule: sustained-rate tolerance (shared with the
-        # swap-retry cooldown watcher's quiet threshold) plus the
-        # always-trip ceiling. An operator --swap-limit-mib above the
-        # ceiling keeps its previous meaning: anything over the authorized
-        # budget trips, whatever the rate.
-        swap_rate_limit_bytes_per_s = (
-            config.GATES.swap_rate_limit_mib_per_s * 1024 * 1024
-        )
-        swap_ceiling_bytes = max(
-            config.GATES.swap_delta_ceiling_mib * 1024 * 1024,
-            swap_limit_bytes + 1,
-        )
-
-        def record_swap_gate() -> None:
-            """One per-frame swap reading under the S5 layered rule.
-
-            The DELTA stays measured from the IMMEDIATE phase baseline;
-            the recent RATE spans the previous per-frame sample (the
-            phase baseline for the first frame) and this one, over
-            elapsed monotonic seconds. The sample anchors advance even
-            when the gate fires, so the recorded detail always carries
-            the measurement that fired it.
-            """
-            nonlocal swap_prev_bytes, swap_prev_t
-            snapshot = vmstat_fn()
-            now = monotonic()
-            elapsed = now - swap_prev_t
-            rate = (
-                (snapshot.swap_io_bytes - swap_prev_bytes) / elapsed
-                if elapsed > 0
-                else None
-            )
-            ledger.record(
-                check_swap_delta(
-                    snapshot.swap_io_bytes,
-                    swap_baseline.swap_io_bytes,
-                    swap_limit_bytes,
-                    rate_bytes_per_s=rate,
-                    rate_limit_bytes_per_s=swap_rate_limit_bytes_per_s,
-                    ceiling_bytes=swap_ceiling_bytes,
-                )
-            )
-            swap_prev_bytes = snapshot.swap_io_bytes
-            swap_prev_t = now
-
         for frame in frames:
             clock.check()
             filename = str(frame["filename"])
@@ -835,9 +642,6 @@ def run_vision_stage(
                 + b"\n",
             )
 
-            # Mark BEFORE the attempt: a request that dies mid-flight may
-            # still have loaded the model on the server (partial load).
-            model_loaded = True
             try:
                 raw, elapsed = post_json_fn(
                     generate_url,
@@ -847,37 +651,26 @@ def run_vision_stage(
             except VisionError:
                 raise
             except Exception as exc:  # noqa: BLE001 - normalized into a stage outcome
-                entry_record = {
-                    "index": index,
-                    "frame": filename,
-                    "pts": frame.get("pts"),
-                    "timestamp_seconds": frame.get("timestamp_seconds"),
-                    "sha256": image_sha256,
-                    "payload_file": payload_file.name,
-                    "raw_response_file": raw_file.name,
-                    "flags": frame_flags("", None),
-                    "targeted_rereads": [],
-                    "error": f"generate request failed: {exc}",
-                }
-                entries.append(entry_record)
+                entries.append(
+                    {
+                        "index": index,
+                        "frame": filename,
+                        "pts": frame.get("pts"),
+                        "timestamp_seconds": frame.get("timestamp_seconds"),
+                        "sha256": image_sha256,
+                        "payload_file": payload_file.name,
+                        "raw_response_file": raw_file.name,
+                        "flags": frame_flags("", None),
+                        "targeted_rereads": [],
+                        "error": f"chat request failed: {exc}",
+                    }
+                )
                 raise VisionError(
-                    f"generate request for frame {index} failed: {exc}; no "
+                    f"chat request for frame {index} failed: {exc}; no "
                     "automatic retry exists"
                 ) from exc
             atomic_write_bytes(raw_file, raw.encode("utf-8"))
-            parsed = parse_generate_response(raw)
-            model_loaded = True
-
-            # Gates after EVERY request, from the IMMEDIATE baselines.
-            after_gpu = gpu_fn()
-            ledger.record(
-                check_vram_delta(
-                    after_gpu.used_mib, session_baseline_used, limit_mib
-                )
-            )
-            record_swap_gate()
-            if not entries:  # first response: the load report is now available
-                ledger.record(check_no_offload(parse_layer_report(read_log_fn())))
+            parsed = parse_chat_response(raw)
 
             response_text = str(parsed["response_text"])
             entry_record = {
@@ -891,18 +684,18 @@ def run_vision_stage(
                 "response_text": response_text,
                 "done_reason": parsed["done_reason"],
                 "elapsed_seconds": round(elapsed, 3),
-                "load_duration_ns": parsed["load_duration_ns"],
-                "prompt_eval_duration_ns": parsed["prompt_eval_duration_ns"],
-                "eval_duration_ns": parsed["eval_duration_ns"],
-                "vram_after_used_mib": after_gpu.used_mib,
+                "prompt_tokens": parsed["prompt_tokens"],
+                "completion_tokens": parsed["completion_tokens"],
+                "prompt_ms": parsed["prompt_ms"],
+                "predicted_ms": parsed["predicted_ms"],
                 "flags": frame_flags(response_text, parsed["done_reason"]),
                 "targeted_rereads": [],
             }
             entries.append(entry_record)
 
-            # Bounded targeted rereads: same frame, crop band, same residency.
-            # At most ONE reread per frame, MAX_TARGETED_REREADS in total;
-            # a skipped or still-truncated reread is never retried again.
+            # Bounded targeted rereads: same frame, crop band. At most ONE
+            # reread per frame, MAX_TARGETED_REREADS in total; a skipped or
+            # still-truncated reread is never retried again.
             if (
                 (entry_record["flags"]["truncated"] or entry_record["flags"]["empty"])
                 and rereads_used < config.MAX_TARGETED_REREADS
@@ -920,95 +713,29 @@ def run_vision_stage(
                 if reread is not None:
                     rereads_used += 1
                     entry_record["targeted_rereads"].append(reread)
-                    after_gpu = gpu_fn()
-                    ledger.record(
-                        check_vram_delta(
-                            after_gpu.used_mib, session_baseline_used, limit_mib
-                        )
-                    )
-                    record_swap_gate()
-
-        # -- unload verification ------------------------------------------
-        try:
-            request_unload(config.VISION_MODEL, urlopen=urlopen)
-            resident = resident_models(urlopen=urlopen)
-            post_gpu = gpu_fn()
-        except Exception as exc:  # noqa: BLE001 - normalized into a stage outcome
-            raise VisionError(
-                "unload verification transport failed: "
-                f"{type(exc).__name__}: {exc}"
-            ) from exc
-        ledger.record(
-            check_unload(
-                resident,
-                post_gpu.used_mib,
-                session_baseline_used,
-                config.GATES.session_vram_tolerance_mib,
-            )
-        )
 
     except StageDeadlineExceeded as exc:
         outcome_value = StageOutcome.BUDGET_EXCEEDED.value
-        reason = str(exc)
-    except GateViolation as exc:
-        # Free-VRAM is a hard requirement (blocked); every other gate is a
-        # failed run. Either way the authorization window is closed: the
-        # loop above cannot continue, and nothing retries.
-        outcome_value = (
-            StageOutcome.BLOCKED.value if exc.gate == GATE_FREE_VRAM
-            else StageOutcome.FAILED.value
-        )
         reason = str(exc)
     except VisionError as exc:
         outcome_value = StageOutcome.FAILED.value
         reason = str(exc)
     except KeyboardInterrupt:
-        # A managed operator interrupt still gets the bounded cleanup and
-        # the durable failure record before the process exits non-zero.
         outcome_value = StageOutcome.FAILED.value
-        reason = (
-            "vision stage interrupted by the operator; authorization "
-            "window closed"
-        )
+        reason = "vision stage interrupted by the operator"
 
-    # -- bounded failure cleanup (never inference, never other processes) -
-    if outcome_value != StageOutcome.COMPLETE.value:
-        cleanup = bounded_unload_cleanup(
-            model=config.VISION_MODEL,
-            urlopen=urlopen,
-            gpu_fn=gpu_fn,
-            session_baseline_used_mib=session_baseline_used,
-            may_be_resident=model_loaded,
-        )
-        if cleanup["release_verified"]:
-            note = (
-                "unload requested; release verified"
-                if cleanup["unload_requested"]
-                else "no load was attempted; residency verified empty"
-            )
-            reason = f"{reason} [cleanup: {note}]"
-        else:
-            suffix = "[cleanup: model release NOT verified"
-            if cleanup["errors"]:
-                suffix += ": " + "; ".join(cleanup["errors"])
-            reason = f"{reason} {suffix}]"
-
-    gates_detail = {
+    run_detail = {
         "stage": "vision",
         "model": config.VISION_MODEL,
-        "session_baseline_used_mib": session_baseline_used,
-        "gates": ledger.to_jsonable(),
+        "backend": VISION_BACKEND,
+        "endpoint": generate_url,
         "rereads_used": rereads_used,
-        "swap_limit_mib": swap_limit_mib,
-        "swap_limit_default_mib": config.GATES.swap_delta_limit_mib,
-        "swap_limit_override": bool(swap_limit_mib != config.GATES.swap_delta_limit_mib),
-        "cleanup": cleanup,
     }
     records_path = vision_dir / _RECORDS_NAME
     atomic_write_bytes(
         records_path,
         json.dumps(
-            {"status": outcome_value, "gates": gates_detail, "frames": entries},
+            {"status": outcome_value, "run": run_detail, "frames": entries},
             ensure_ascii=False,
             indent=2,
             sort_keys=True,
@@ -1017,17 +744,14 @@ def run_vision_stage(
     )
 
     finished_at = utc_now_iso()
-    manifest.resource_gates["vision"] = gates_detail
+    manifest.resource_gates["vision"] = run_detail
     if outcome_value == StageOutcome.COMPLETE.value:
-        gates_summary = f"all {len(ledger.results)} gate checks passed"
         video_md = assemble_video_md(
             video_id=video_id,
             media_sha256=entry.media_sha256,
             model=config.VISION_MODEL,
-            ollama_version=ollama_version,
             entries=entries,
             rereads_used=rereads_used,
-            gates_summary=gates_summary,
         )
         atomic_write_bytes(video_md_path, video_md.encode("utf-8"))
         output_sha256 = sha256_of_file(video_md_path)
@@ -1036,8 +760,7 @@ def run_vision_stage(
             result=StageResult(
                 outcome=StageOutcome.COMPLETE,
                 reason=f"observed {len(entries)} frames with {rereads_used} "
-                "targeted reread(s); all resource gates passed; model "
-                "unloaded and residency verified empty",
+                "targeted reread(s) on llm-hub",
             ),
             fingerprint=fingerprint,
             input_sha256=sampling_manifest_sha256,
@@ -1086,7 +809,6 @@ def run_vision_stage(
         run_dir=str(run_dir),
         frames_processed=len(entries),
         rereads_used=rereads_used,
-        cleanup=cleanup,
     )
 
 
@@ -1163,7 +885,7 @@ def _render_and_reread(
         max(1.0, min(_GENERATE_TIMEOUT_SECONDS, clock.remaining())),
     )
     atomic_write_bytes(raw_file, raw.encode("utf-8"))
-    parsed = parse_generate_response(raw)
+    parsed = parse_chat_response(raw)
     response_text = str(parsed["response_text"])
     return {
         "index": reread_index,

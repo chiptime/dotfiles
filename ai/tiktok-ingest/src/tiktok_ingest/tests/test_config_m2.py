@@ -46,11 +46,10 @@ class SamplingConfigTests(unittest.TestCase):
 
 
 class ContainerConfigTests(unittest.TestCase):
-    def test_image_ref_and_prefix_are_recorded(self) -> None:
+    def test_image_ref_is_llm_hub_whisper_image(self) -> None:
         self.assertEqual(
-            config.FFMPEG_IMAGE_REF, "localhost/voice-assistant_whisper:latest"
+            config.FFMPEG_IMAGE_REF, "localhost/llm-hub_whisper-service:latest"
         )
-        self.assertEqual(config.FFMPEG_IMAGE_ID_PREFIX, "51b152706d")
 
 
 class BudgetConfigTests(unittest.TestCase):

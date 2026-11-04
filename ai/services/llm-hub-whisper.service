@@ -1,0 +1,17 @@
+[Unit]
+Description=llm-hub whisper backend (TikTok ingest transcription) — start existing container
+Documentation=file://%h/.dotfiles/ai/tiktok-ingest/OPERATIONS.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Starts ONLY llm-hub-whisper (created by llm-hub's podman-compose). Unlike
+# podman-restart.service, it never starts unrelated restart:always containers.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/podman start llm-hub-whisper
+ExecStop=/usr/bin/podman stop -t 30 llm-hub-whisper
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

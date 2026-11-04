@@ -9,10 +9,9 @@ from tiktok_ingest import config
 
 
 class AdoptedDefaultsTests(unittest.TestCase):
-    def test_p1_vision_models(self) -> None:
-        self.assertEqual(config.VISION_MODEL, "qwen3.5:9b")
-        self.assertEqual(config.HIGH_DENSITY_VISION_MODEL, "qwen3.8:27b")
-        self.assertNotEqual(config.VISION_MODEL, config.HIGH_DENSITY_VISION_MODEL)
+    def test_p1_vision_model_is_llm_hub_chat(self) -> None:
+        self.assertEqual(config.VISION_MODEL, "qwen-3.8-27b")
+        self.assertEqual(config.LLM_HUB_CHAT_API_BASE, "http://127.0.0.1:8081/v1")
 
     def test_p2_transcript_policy(self) -> None:
         self.assertEqual(config.WHISPER_MODEL, "large-v3")
@@ -34,7 +33,7 @@ class AdoptedDefaultsTests(unittest.TestCase):
         self.assertEqual(budgets.metadata_ttl_seconds, 24 * 3600)
         self.assertEqual(budgets.cpu_prep_deadline_seconds, 1200)
         self.assertEqual(budgets.cpu_prep_max_bytes, 2 * 1024 * 1024 * 1024)
-        self.assertEqual(budgets.vision_stage_deadline_seconds, 600)
+        self.assertEqual(budgets.vision_stage_deadline_seconds, 900)
         self.assertEqual(budgets.audio_stage_deadline_seconds, 600)
         self.assertEqual(budgets.working_cache_bytes, 10 * 1024 * 1024 * 1024)
 

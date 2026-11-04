@@ -1,25 +1,35 @@
 #!/usr/bin/env bash
 # Idempotent host setup for TikTok ingest on-demand runs:
-#   1. Link and enable llm-hub-chat.service so the synthesis backend comes back
-#      after a WSL/host restart. Deliberately NOT podman-restart.service: that
-#      one starts every restart:always container on the machine.
-#   2. Report whether the synthesis backend answers.
-# Prerequisite: the llm-hub-chat container exists
-#   (cd ~/Code/personal/llm-hub && podman-compose -f podman-compose.yml up -d llama-chat).
+#   1. Link and enable llm-hub-chat.service (vision + synthesis) and
+#      llm-hub-whisper.service (transcription) so llm-hub comes back after a
+#      WSL/host restart. Deliberately NOT podman-restart.service: that one
+#      starts every restart:always container on the machine.
+#   2. Report whether both backends answer.
+# Prerequisite: the llm-hub containers exist
+#   (cd ~/Code/personal/llm-hub && podman-compose -f podman-compose.yml up -d --no-deps llama-chat whisper-service).
 # Synthesis env vars live in shell/exports.sh. Safe to run multiple times.
 set -euo pipefail
 
 DOTFILES="$HOME/.dotfiles"
-UNIT=llm-hub-chat.service
+UNITS=(llm-hub-chat.service llm-hub-whisper.service)
 
 mkdir -p "$HOME/.config/systemd/user"
-ln -sfn "$DOTFILES/ai/services/$UNIT" "$HOME/.config/systemd/user/$UNIT"
+for unit in "${UNITS[@]}"; do
+  ln -sfn "$DOTFILES/ai/services/$unit" "$HOME/.config/systemd/user/$unit"
+done
 systemctl --user daemon-reload
-systemctl --user enable --now "$UNIT"
-systemctl --user is-active "$UNIT"
+for unit in "${UNITS[@]}"; do
+  systemctl --user enable --now "$unit"
+  systemctl --user is-active "$unit"
+done
 
 if curl -sf --max-time 5 "${TIKTOK_INGEST_TEXT_API_BASE_URL:-http://127.0.0.1:8081/v1}/models" >/dev/null; then
-  echo "synthesis backend: reachable"
+  echo "llm-hub chat (vision + synthesis): reachable"
 else
-  echo "synthesis backend: NOT reachable yet (it may still be loading); check: podman logs llm-hub-chat"
+  echo "llm-hub chat: NOT reachable yet (it may still be loading); check: podman logs llm-hub-chat"
+fi
+if curl -sf --max-time 5 "http://127.0.0.1:8766/health" >/dev/null; then
+  echo "llm-hub whisper (transcription): reachable"
+else
+  echo "llm-hub whisper: NOT reachable yet (it may still be loading); check: podman logs llm-hub-whisper"
 fi

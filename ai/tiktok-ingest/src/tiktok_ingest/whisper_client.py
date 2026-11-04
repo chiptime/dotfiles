@@ -3,7 +3,7 @@
 Implements the recorded contract from PRD section 6.4 EXACTLY — no
 invented protocol fields:
 
-    ws://127.0.0.1:8767/ws/transcribe        (host-published port)
+    ws://127.0.0.1:8765/ws/transcribe        (llm-hub-whisper, host-published)
     → (optional) text {"type":"initial_prompt"}   — omitted by this MVP
     ← {"type":"ack",...}
     → binary WAV frames (16 kHz mono s16le) in bounded chunks
@@ -428,7 +428,7 @@ def transcribe_audio(
     """Send the normalized WAV over ONE connection; collect the response.
 
     REAL service contract, read from the actual implementation
-    (voice-assistant/whisper-service/server.py, per PRD section 12.1):
+    (llm-hub/whisper-service/server.py, ported from voice-assistant):
     each BINARY message is written to a temp .wav file and transcribed
     WHOLE — request-response per message, not a streaming chunk protocol
     (the historical sketch was wrong about framing). ``max_size=None``
@@ -655,7 +655,7 @@ def assemble_audio_md(
         "",
         "- media_sha256: " + media_sha256,
         "- audio_sha256: " + audio_sha256,
-        "- method: reused whisper WebSocket service (faster-whisper "
+        "- method: llm-hub-whisper WebSocket service (faster-whisper "
         "large-v3, CUDA float16, beam 3) over "
         f"ws://{config.WHISPER_WS_HOST}:{config.WHISPER_WS_PORT}"
         f"{config.WHISPER_WS_PATH}",
@@ -752,7 +752,7 @@ def audio_fingerprint(media_sha256: str, audio_sha256: str) -> dict[str, Any]:
             "media_sha256": media_sha256,
             "whisper_model": config.WHISPER_MODEL,
             "language": config.WHISPER_LANGUAGE,
-            "service": "voice-assistant-whisper WS (faster-whisper large-v3 float16 beam 3)",
+            "service": "llm-hub-whisper WS (faster-whisper large-v3 float16 beam 3)",
             "transport": "ws-binary-wav-single-message",
             "transcript_policy": config.TRANSCRIPT_POLICY,
         },
@@ -935,7 +935,7 @@ def run_audio_stage(
     finished_at = utc_now_iso()
     manifest.resource_gates["audio"] = {
         "stage": "audio",
-        "service": "voice-assistant-whisper WS",
+        "service": "llm-hub-whisper WS",
         "health_precheck": detail[:120],
         "completion_mode": result.completion_mode,
         "message_types_observed": result.message_types_observed,
