@@ -82,7 +82,7 @@ Kept consistent across all phase PRDs:
 
 **Non-goals** (deferred by [ROADMAP.md](../ROADMAP.md))
 
-- Web interface (Phase 1) and destination adapters (Phase 2).
+- Web interface (Phase 1) and destination adapters (Phase 3).
 - Unattended or scheduled runs; multi-user or remote hosting.
 - Automatic acceptance, rejection, or publication.
 - Other platforms, comments, photo-slide ingestion, bilingual processing.
@@ -349,4 +349,4 @@ and proven resume behavior.
   bounded operating limits.
 - [README.md](../README.md) / [OPERATIONS.md](../OPERATIONS.md) — current
   implemented commands and operational procedures.
-- [Phase 1 PRD](PHASE-1-LOCAL-WEB-PRD.md) / [Phase 2 PRD](PHASE-2-DESTINATIONS-PRD.md).
+- [Phase 1 PRD](PHASE-1-LOCAL-WEB-PRD.md) / [Phase 3 PRD](PHASE-3-DESTINATIONS-PRD.md).

@@ -1,4 +1,4 @@
-# PRD — Phase 2: Accepted-Entry Destination Adapters
+# PRD — Phase 3: Accepted-Entry Destination Adapters
 
 **Status:** Planning documentation only. This PRD records product requirements;
 it authorizes no implementation, execution, service operation, network, browser
@@ -9,7 +9,9 @@ restated here and are not re-opened.
 **Context:** [PRD.md](../PRD.md) (original product requirements; manual
 handoff position), [MVP-PRD.md](../MVP-PRD.md), [README.md](../README.md) and
 [OPERATIONS.md](../OPERATIONS.md) (implemented contracts),
-[Phase 0 PRD](PHASE-0-ONE-COMMAND-PRD.md), [Phase 1 PRD](PHASE-1-LOCAL-WEB-PRD.md).
+[Phase 0 PRD](PHASE-0-ONE-COMMAND-PRD.md), [Phase 1 PRD](PHASE-1-LOCAL-WEB-PRD.md),
+[Phase 2 PRD](PHASE-2-PERSONAL-LIBRARY-PRD.md). This phase was numbered Phase 2
+until 2026-11-04.
 
 ## 1. Outcome
 
@@ -51,9 +53,9 @@ Kept consistent across all phase PRDs:
   evidence and verdicts exist only as produced by the bounded verification
   flow, and delivery carries them unchanged.
 
-## 4. Current behavior vs Phase 2 target
+## 4. Current behavior vs Phase 3 target
 
-| Area | Today (implemented) | Phase 2 target |
+| Area | Today (implemented) | Phase 3 target |
 |---|---|---|
 | Downstream use of accepted entries | Manual, operator-controlled copy; the pipeline never writes to external systems | Optional adapters deliver explicitly selected accepted entries, per-destination authorized, with receipts |
 | Delivery record | None (manual handoff is unrecorded) | Durable per-entry receipts with idempotency keys, locally stored |
@@ -99,7 +101,7 @@ Kept consistent across all phase PRDs:
   Phase 1 UI). Without accepted entries there is nothing eligible to deliver.
 - Phase 0 acceptance is complete. Phase 1 is not a dependency: adapters
   consume accepted local entries regardless of whether review happened
-  through the CLI or the UI. Phase 1 MAY expose delivery flows later; Phase 2
+  through the CLI or the UI. Phase 1 MAY expose delivery flows later; Phase 3
   remains separately operable and MUST NOT block Phase 1 operation.
 - Each destination requires its own explicit authorization from the operator
   before any delivery, and before any adapter is even configured with real
@@ -294,10 +296,10 @@ Confirmed decisions are not re-opened; these are genuine open points.
 
 ## 14. Handoff and exit
 
-Phase 2 exits when the acceptance criteria above hold for at least one real
+Phase 3 exits when the acceptance criteria above hold for at least one real
 destination adapter. Everything deferred by [ROADMAP.md](../ROADMAP.md)
 (unattended runs, multi-user hosting, automatic decisions or publication,
-other platforms, and the rest) remains deferred; no Phase 2 capability
+other platforms, and the rest) remains deferred; no Phase 3 capability
 reopens those decisions. If further destinations are added later, each is a
 new adapter under this same contract with its own authorization and proofs.
 
@@ -311,5 +313,5 @@ new adapter under this same contract with its own authorization and proofs.
   entries adapters consume; concurrency limits.
 - [Phase 0 PRD](PHASE-0-ONE-COMMAND-PRD.md) — engine and state authority.
 - [Phase 1 PRD](PHASE-1-LOCAL-WEB-PRD.md) — review UI that MAY surface
-  delivery later; not a dependency of this phase, and Phase 2 must not block
+  delivery later; not a dependency of this phase, and Phase 3 must not block
   its operation.

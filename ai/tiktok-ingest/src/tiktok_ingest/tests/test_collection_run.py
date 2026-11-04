@@ -202,6 +202,22 @@ class RecordingConsent:
         return [w for w in self.windows if w.kind == kind]
 
 
+class SeedingConsent(RecordingConsent):
+    """RecordingConsent double that also accepts dashboard seeding.
+
+    Mirrors the optional ``seed_prior_state`` hook of the curses
+    provider so the resume path can be asserted without a TTY.
+    """
+
+    def __init__(self, deny: set[str] | None = None, *, ready: bool = True) -> None:
+        super().__init__(deny, ready=ready)
+        self.seeded: dict[str, dict[str, str]] = {}
+
+    def seed_prior_state(self, items) -> None:
+        for video_id, stages in items:
+            self.seeded[video_id] = dict(stages)
+
+
 KNOWN_INFO = WhisperServiceInfo(
     name="voice-assistant-whisper",
     image="localhost/voice-assistant_whisper:latest",
@@ -723,6 +739,27 @@ class TestHappyPath(CollectionRunTestCase):
         self.assertEqual(batch_ids, [fake_id(0)])
         self.assertEqual(report["run_plan"]["frozen_ids"], [fake_id(0)])
         self.assertEqual(len(Backlog(self.state).entries()), 1)
+
+    def test_resume_seeds_dashboard_with_prior_stage_states(self) -> None:
+        seed_scan_for_run(self.state, [0])
+        seed_job(
+            self.state,
+            fake_id(0),
+            complete=("fetch", "prepare", "vision", "audio"),
+            evidence=True,
+        )
+        stages = CollectionStages()
+        consent = SeedingConsent()
+        code, report, _ = self.run_collection(
+            stages, consent, browser_html=page_html(1)
+        )
+        self.assertEqual(code, 0, report.get("hard_stop_reason"))
+        self.assertEqual(
+            consent.seeded.get(fake_id(0), {}).get("fetch"), "complete"
+        )
+        self.assertEqual(
+            consent.seeded.get(fake_id(0), {}).get("verify"), "pending"
+        )
 
     def test_resume_reuses_valid_completed_stages(self) -> None:
         seed_scan_for_run(self.state, [0])

@@ -73,6 +73,7 @@ consolidates that confirmed design into requirements.
 | **D-08** | Deadline/cap exhaustion means the retry is NOT executed (the video stays pending, resumable). A failed second attempt ends the matter for this invocation: no third attempt, no re-prompt; state stays resumable and the status is explained. Minimal default: remaining same-GPU-window IDs are not executed after the gate fired — no silent skip, reorder, or automatic retry. Do not claim `collection-run --ids` exists (it does not; `--ids` exists only on `guided-run`, `src/tiktok_ingest/cli.py:624-630` vs `cli.py:656-718`); no invented workaround flags. How subsequent frozen batches and the current driver interact is an OPEN implementation detail if uncertain — without newly authorizing extra model loads after the final window. No global hard-stop expansion beyond the original draft unless separately approved; retry exhaustion (video/window-scoped) is distinct from service-restoration hard-stop (global). |
 | **D-09** | Truthful UX: the initial pause states reason, video ID and budget; every 15 s the measured swap rate, the stable-interval count and the remaining time are reported; if the rate stays above threshold the output says it has NOT recovered; instability resets the stable count, never the 180 s cap; unavailable measurement is reported distinctly; expiry reports "retry not executed, video pending"; a failed second attempt reports "retry exhausted"; the actual re-attempt reports real start/finish durations and outcome. No fake percentages or heartbeat promises. Narration goes to stderr; the final stdout structured JSON keeps its current parseability. |
 | **D-10** | No unattended workload cleanup: never `swapoff`, `drop_caches`, killing arbitrary containers, model switching, or gate relaxation — resource decisions belong to the operator. Only the specific approved Whisper lifecycle mutations are performed. Consent EOF/non-TTY fails closed; interrupted cleanup keeps UNKNOWN semantics; the current grouped verification may not proceed after a global restoration hard stop. |
+| **D-11** | Batched retry window (2026-11-04, measured on the live `series-7455…` run): when a batch leaves more than one id retry-eligible, ONE retry window covers ALL eligible ids — one consent ask naming every id, one read-only cooldown, one Whisper stop, ONE isolated-Ollama start (the model loads once for the whole window), the vision re-run per covered id sequentially, then one Ollama stop and one Whisper restore. Per-id semantics are unchanged: at most one attempt per id per invocation (D-02), per-id records and terminal states keep their shapes. A mid-window gate trip closes the window at that id; remaining covered ids stay pending/resumable and are NOT retried in a new window this invocation. Single-id batches keep today's exact window shape. Rationale: per-video cycles paid a full model reload per id (isolated `llama-server` started ~20 times in one afternoon; a 47-frame video took 2 h wall for ~90 s inference). |
 
 ## 3. Objectives and non-objectives
 
@@ -212,10 +213,13 @@ cites current evidence; anything not evidenced here is an ASSUMPTION
   one-attempt contract `src/tiktok_ingest/collection_run.py:515-527`
   ("a failed id is never reattempted this invocation"; "no automatic retry
   of any operation").
-- **FR-03 (D-02, D-09)** The retry MUST sit behind a NEW explicit consent
-  window that names: the video ID, the failed gate and its measured
+- **FR-03 (D-02, D-09, D-11)** The retry MUST sit behind a NEW explicit consent
+  window that names: every video ID the window covers (one, or all eligible
+  ids of the batch under D-11), the failed gate and its measured
   overshoot in MiB, the full budget (cooldown bounds, gates, stage deadline),
-  the Whisper stop/restore operations under the retry authority, and the
+  the Whisper stop/restore operations under the retry authority, the shared
+  isolated-Ollama lifecycle when the window covers more than one id (one
+  model load for all of them), and the
   effects of a second failure. EOF, denial or a non-interactive environment
   MUST stop without assuming consent. *Evidence:* consent window shape
   `src/tiktok_ingest/guided.py:103` and usage
@@ -352,8 +356,20 @@ cites current evidence; anything not evidenced here is an ASSUMPTION
   verification MUST NOT proceed after a global restoration hard stop.
   *Evidence:* P0-FR-06/P0-FR-11 interrupt semantics,
   [PHASE-0-ONE-COMMAND-PRD.md](PHASE-0-ONE-COMMAND-PRD.md) sections 8–10.
+- **FR-26 (D-11)** When a batch leaves more than one id retry-eligible, the
+  retry MUST be executed as ONE batched window: one consent ask (FR-03), one
+  read-only cooldown and re-admission, one Whisper stop, ONE isolated-Ollama
+  start shared by every covered id, the vision re-run per covered id in
+  sequence, then one Ollama stop and one Whisper restore. The window MUST
+  close at the first in-window gate failure: the failing id keeps its failed
+  attempt evidence, remaining covered ids stay pending/resumable, and no
+  second window is opened this invocation. With exactly one eligible id the
+  window MUST keep the single-id shape unchanged. *Evidence:* per-video
+  window loop `src/tiktok_ingest/collection_run.py:2031-2036` (pre-D-11);
+  reload cost measured 2026-11-04 (~20 isolated `llama-server` starts, one
+  47-frame video at 2 h wall for ~90 s inference).
 
-**Requirement count:** 25 (FR-01..FR-25).
+**Requirement count:** 26 (FR-01..FR-26).
 
 ## 7. Security and threat modeling
 
@@ -581,7 +597,7 @@ symbols are invented here:
 - [OPERATIONS.md](../OPERATIONS.md) — implemented gate/window/whisper
   contracts and their honesty rules.
 - [PHASE-1-LOCAL-WEB-PRD.md](PHASE-1-LOCAL-WEB-PRD.md) /
-  [PHASE-2-DESTINATIONS-PRD.md](PHASE-2-DESTINATIONS-PRD.md) — later phases,
+  [PHASE-3-DESTINATIONS-PRD.md](PHASE-3-DESTINATIONS-PRD.md) — later phases,
   unaffected.
 
 **End of DRAFT — no implementation is authorized by this document.**

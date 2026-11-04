@@ -621,7 +621,7 @@ class TestConsentAuthority(SwapRetryTestCase):
         authorization = cr.RunScopedAuthorization(
             human=RecordingConsent(), plan=plan
         )
-        window = cr._build_swap_retry_window(video_id, elig, plan)
+        window = cr._build_swap_retry_window([elig], plan)
         granted = authorization.ask(window)
         self.assertTrue(granted, "granted by the recording double's human")
         decisions = authorization.authorization_log
@@ -639,7 +639,7 @@ class TestConsentAuthority(SwapRetryTestCase):
     def test_window_names_id_gate_overshoot_budget_and_lifecycle(self) -> None:
         video_id = self.seed_failed_job()
         elig = cr._swap_retry_eligibility(self.state, video_id)
-        window = cr._build_swap_retry_window(video_id, elig, build_plan())
+        window = cr._build_swap_retry_window([elig], build_plan())
         text = " ".join(
             [window.title, *window.operations, *window.limits, *window.effects]
         )
@@ -656,6 +656,124 @@ class TestConsentAuthority(SwapRetryTestCase):
 # --------------------------------------------------------------------------
 # V2 FSM harness: T1–T16 end to end through the REAL coordinator
 # --------------------------------------------------------------------------
+
+
+class TestBatchedWindow(SwapRetryTestCase):
+    """D-11/FR-26: one retry window covers every eligible id of a batch."""
+
+    def test_two_eligible_ids_share_one_window_lifecycle(self) -> None:
+        self.seed_failed_job(1)
+        self.seed_failed_job(2)
+        stages = SwapRetryStages()
+        consent = self.run_flow(
+            stages, batch_ids=[fake_id(1), fake_id(2)]
+        )
+        # ONE ask naming BOTH ids, stating the shared lifecycle.
+        self.assertEqual(consent.kinds, ["vision-swap-retry"])
+        window = consent.windows[0]
+        self.assertEqual(window.ids, (fake_id(1), fake_id(2)))
+        joined = " ".join(window.operations).lower()
+        self.assertIn("shared", joined)
+        self.assertIn("one server start", joined)
+        # ONE cooldown, ONE ollama start/stop, TWO vision re-runs.
+        self.assertEqual(
+            [c for c in stages.calls if c == "ollama-start"], ["ollama-start"]
+        )
+        self.assertEqual(
+            [c for c in stages.calls if c == "ollama-stop"], ["ollama-stop"]
+        )
+        self.assertEqual(
+            [c for c in stages.calls if c.startswith("vision:")],
+            [f"vision:{fake_id(1)}", f"vision:{fake_id(2)}"],
+        )
+        # Per-id records keep their shapes and terminal states.
+        records = self.report["swap_retries"]
+        self.assertEqual(len(records), 2)
+        self.assertEqual(
+            [r["state"] for r in records],
+            ["retry_complete", "retry_complete"],
+        )
+        self.assertEqual(
+            records[0]["window_ids"], [fake_id(1), fake_id(2)]
+        )
+        for record in records:
+            self.assertEqual(record["attempt"]["outcome"], "complete")
+
+    def test_mid_window_gate_trip_closes_the_window(self) -> None:
+        self.seed_failed_job(1)
+        self.seed_failed_job(2)
+        stages = SwapRetryStages(
+            vision_outcomes=["failed", "complete"]
+        )
+        self.run_flow(stages, batch_ids=[fake_id(1), fake_id(2)])
+        records = self.report["swap_retries"]
+        self.assertEqual(records[0]["state"], "retry_exhausted")
+        self.assertEqual(
+            records[1]["state"], "retry_not_executed_pending"
+        )
+        self.assertIn("window closed", records[1]["message"])
+        # The remaining id was NOT attempted.
+        self.assertEqual(
+            [c for c in stages.calls if c.startswith("vision:")],
+            [f"vision:{fake_id(1)}"],
+        )
+        # The lifecycle still closed exactly once.
+        self.assertEqual(
+            [c for c in stages.calls if c == "ollama-stop"], ["ollama-stop"]
+        )
+
+    def test_single_eligible_id_keeps_the_single_id_window(self) -> None:
+        self.seed_failed_job(1)
+        self.seed_failed_job(2)  # not eligible: not in batch_ids
+        stages = SwapRetryStages()
+        consent = self.run_flow(stages, batch_ids=[fake_id(1)])
+        self.assertEqual(consent.windows[0].ids, (fake_id(1),))
+        self.assertEqual(
+            [c for c in stages.calls if c == "ollama-start"], ["ollama-start"]
+        )
+        self.assertEqual(
+            self.report["swap_retries"][0]["state"], "retry_complete"
+        )
+
+    def test_drifted_id_drops_from_the_window_at_readmission(self) -> None:
+        self.seed_failed_job(1)
+        self.seed_failed_job(2)
+
+        def drift_id2() -> None:
+            manifest = self.manifest_of(fake_id(2))
+            # Flip the FIRST hex character: a VALID digest that differs
+            # from the consented scope (an invalid value would corrupt
+            # the manifest and fail the whole window closed).
+            current = manifest.media_sha256 or ""
+            flipped = ("0" if current[:1] != "0" else "1") + current[1:]
+            manifest.media_sha256 = flipped
+            path = _run_dir_of(self.state, fake_id(2)) / "meta.json"
+            path.write_text(json.dumps(manifest.to_dict(), indent=2))
+
+        class DriftingConsent(RecordingConsent):
+            def ask(self, window: Any) -> bool:
+                granted = super().ask(window)
+                drift_id2()
+                return granted
+
+        stages = SwapRetryStages()
+        self.run_flow(
+            stages,
+            DriftingConsent(),
+            batch_ids=[fake_id(1), fake_id(2)],
+        )
+        records = self.report["swap_retries"]
+        self.assertEqual(records[0]["state"], "retry_complete")
+        self.assertEqual(
+            records[1]["state"], "retry_not_executed_pending"
+        )
+        self.assertIn(
+            "scope fingerprints changed", records[1]["message"]
+        )
+        self.assertEqual(
+            [c for c in stages.calls if c.startswith("vision:")],
+            [f"vision:{fake_id(1)}"],
+        )
 
 
 class TestV2FsmHarness(SwapRetryTestCase):
@@ -680,7 +798,7 @@ class TestV2FsmHarness(SwapRetryTestCase):
         )
         self.assertEqual(
             self.decisions[-1]["basis"],
-            "human decision: ONE bounded vision swap-retry (new scope, "
+            "human decision: ONE bounded vision swap-retry window (new scope, "
             "never covered by the run-plan grant)",
         )
         # Truthful narration: pause, 15s cadence, admission, stop, restore.
@@ -1142,7 +1260,7 @@ class TestV2FsmHarness(SwapRetryTestCase):
         self.assertLess(max(resample_elapsed), 180.0)
 
     # FR-02: exactly ONE ask per video per invocation (denial included)
-    def test_one_ask_per_video_per_invocation(self) -> None:
+    def test_one_ask_per_window_per_invocation(self) -> None:
         video1 = self.seed_failed_job(1)
         video2 = self.seed_failed_job(2)
         offered: set[str] = set()
@@ -1153,11 +1271,14 @@ class TestV2FsmHarness(SwapRetryTestCase):
             batch_ids=[video1, video2],
             offered=offered,
         )
+        # D-11/FR-26: ONE dedicated ask covers every eligible id of the
+        # batch (one window); both ids appear in that single window.
         self.assertEqual(
             [w.kind for w in consent.windows],
-            ["vision-swap-retry", "vision-swap-retry"],
-            "one dedicated ask per eligible video (no pooling)",
+            ["vision-swap-retry"],
+            "one dedicated ask per retry window",
         )
+        self.assertEqual(consent.windows[0].ids, (video1, video2))
         # A second pass over the same ids never re-asks.
         self.run_flow(
             SwapRetryStages(),
@@ -1165,7 +1286,7 @@ class TestV2FsmHarness(SwapRetryTestCase):
             batch_ids=[video1, video2],
             offered=offered,
         )
-        self.assertEqual(len(consent.windows), 2)
+        self.assertEqual(len(consent.windows), 1)
         self.assertEqual(offered, {video1, video2})
 
     # FR-20: a preexisting isolated server is never adopted (honest pending)

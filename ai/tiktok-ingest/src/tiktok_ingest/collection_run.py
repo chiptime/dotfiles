@@ -1258,67 +1258,94 @@ def _overshoot_text(overshoot_mib: float | None) -> str:
 
 
 def _build_swap_retry_window(
-    video_id: str, elig: SwapRetryEligibility, plan: RunPlan
+    eligs: Sequence[SwapRetryEligibility], plan: RunPlan
 ) -> ConsentWindow:
-    """The DEDICATED new consent (D-02): never covered by the run plan."""
+    """The DEDICATED new consent (D-02/D-11): never covered by the run
+    plan. One window names EVERY covered id; with more than one id the
+    shared isolated-Ollama lifecycle (one model load) is stated
+    explicitly (FR-26)."""
     whisper_bound = plan.whisper_bound or "(whisper identity not bound)"
+    ids = tuple(elig.video_id for elig in eligs)
+    shared = len(eligs) > 1
+    operations = [
+        "RE-RUN of the vision stage ONLY for the listed id(s): valid fetch "
+        "and prepare results are reused; completed audio, synthesis and "
+        "verification are never repeated",
+        "read-only cooldown sampling of the systemwide cumulative "
+        f"swap I/O counters every {config.SWAP_RETRY_COOLDOWN_INTERVAL_SECONDS:.0f}s "
+        "BEFORE the retry (no mutation of any kind while sampling)",
+        f"stop the SAME known whisper service again ({whisper_bound}) "
+        "for the retry window and restore it afterwards — THIS "
+        "consent is that named lifecycle authority",
+        "start a new isolated Ollama instance only if none answers on "
+        f"{config.OLLAMA_API_BASE} (a preexisting one is never adopted)",
+    ]
+    if shared:
+        operations.append(
+            "the isolated Ollama instance and its model load are SHARED "
+            "by every listed id: one server start for the whole window, "
+            "one stop at the end (D-11)"
+        )
+    limits = [
+        "exactly ONE extra vision attempt per listed id THIS invocation: "
+        "no third attempt and no re-prompt after a failed second "
+        "attempt; every listed id stays pending and resumable",
+        f"cooldown bounds: admission no earlier than "
+        f"{config.SWAP_RETRY_COOLDOWN_FLOOR_SECONDS:.0f}s, hard cap "
+        f"{config.SWAP_RETRY_COOLDOWN_CAP_SECONDS:.0f}s from cooldown "
+        "start (never restarted), stability = "
+        f"{config.SWAP_RETRY_COOLDOWN_STABLE_INTERVALS} consecutive "
+        f"intervals <= {config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S:.2f} MiB/s; "
+        "unreadable or implausible counters fail closed",
+        f"gates UNCHANGED for the retry attempt: free VRAM >= "
+        f"{config.GATES.free_vram_gate_mib} MiB, swap I/O delta <= "
+        f"{config.GATES.swap_delta_limit_mib} MiB per attempt, zero "
+        "CPU offload, vision stage deadline "
+        f"{config.BUDGETS.vision_stage_deadline_seconds}s (fresh "
+        "immediate baseline only at the window's own start)",
+    ]
+    for elig in eligs:
+        prefix = f"id {elig.video_id}: " if shared else ""
+        limits.append(
+            f"{prefix}measured failure being retried: swap_delta gate, "
+            f"{_overshoot_text(elig.overshoot_mib)}"
+        )
+        limits.append(
+            f"{prefix}scope fingerprints (exact — any change is a NEW "
+            f"authorization question): model {elig.scope.get('vision_model')}, "
+            f"media {elig.scope.get('media_sha256')}, sampling "
+            f"{elig.scope.get('sampling_manifest_sha256')}"
+        )
+    if shared:
+        limits.append(
+            "the window CLOSES at the first listed id whose re-run fails "
+            "the swap gate again: the remaining listed ids stay pending "
+            "(resumable by re-invoking), no second window this invocation"
+        )
+    effects = [
+        "a failed second attempt ends retrying for that id this "
+        "invocation (retry exhausted, video/window-scoped — NOT the "
+        "global service-restoration hard stop)",
+        "the remaining ids of the original GPU window stay PENDING "
+        "even if this retry succeeds: no silent skip, no reorder",
+        "the original failure evidence and its partial artifacts are "
+        "archived unmodified first; the retry is recorded as "
+        "additional evidence, never as a replacement",
+        "progress narration goes to stderr; the final stdout JSON "
+        "report gains an additive per-video retry object",
+    ]
     return ConsentWindow(
         kind="vision-swap-retry",
         title=(
-            "ONE bounded vision retry after a measured swap_delta gate "
-            "failure (new scope: the run-plan grant does NOT cover this)"
+            "ONE bounded vision retry window after a measured swap_delta "
+            "gate failure (new scope: the run-plan grant does NOT cover "
+            "this)"
         ),
-        ids=(video_id,),
+        ids=ids,
         destinations=(whisper_bound,),
-        operations=(
-            "RE-RUN of the vision stage ONLY for this id: valid fetch and "
-            "prepare results are reused; completed audio, synthesis and "
-            "verification are never repeated",
-            "read-only cooldown sampling of the systemwide cumulative "
-            f"swap I/O counters every {config.SWAP_RETRY_COOLDOWN_INTERVAL_SECONDS:.0f}s "
-            "BEFORE the retry (no mutation of any kind while sampling)",
-            f"stop the SAME known whisper service again ({whisper_bound}) "
-            "for the retry window and restore it afterwards — THIS "
-            "consent is that named lifecycle authority",
-            "start a new isolated Ollama instance only if none answers on "
-            f"{config.OLLAMA_API_BASE} (a preexisting one is never adopted)",
-        ),
-        limits=(
-            "exactly ONE extra vision attempt for this id THIS invocation: "
-            "no third attempt and no re-prompt after a failed second "
-            "attempt; the video stays pending and resumable",
-            f"cooldown bounds: admission no earlier than "
-            f"{config.SWAP_RETRY_COOLDOWN_FLOOR_SECONDS:.0f}s, hard cap "
-            f"{config.SWAP_RETRY_COOLDOWN_CAP_SECONDS:.0f}s from cooldown "
-            "start (never restarted), stability = "
-            f"{config.SWAP_RETRY_COOLDOWN_STABLE_INTERVALS} consecutive "
-            f"intervals <= {config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S:.2f} MiB/s; "
-            "unreadable or implausible counters fail closed",
-            f"gates UNCHANGED for the retry attempt: free VRAM >= "
-            f"{config.GATES.free_vram_gate_mib} MiB, swap I/O delta <= "
-            f"{config.GATES.swap_delta_limit_mib} MiB per attempt, zero "
-            "CPU offload, vision stage deadline "
-            f"{config.BUDGETS.vision_stage_deadline_seconds}s (fresh "
-            "immediate baseline only at the attempt's own start)",
-            f"measured failure being retried: swap_delta gate, "
-            f"{_overshoot_text(elig.overshoot_mib)}",
-            "scope fingerprints (exact — any change is a NEW authorization "
-            f"question): model {elig.scope.get('vision_model')}, media "
-            f"{elig.scope.get('media_sha256')}, sampling "
-            f"{elig.scope.get('sampling_manifest_sha256')}",
-        ),
-        effects=(
-            "a failed second attempt ends retrying for this id this "
-            "invocation (retry exhausted, video/window-scoped — NOT the "
-            "global service-restoration hard stop)",
-            "the remaining ids of the original GPU window stay PENDING "
-            "even if this retry succeeds: no silent skip, no reorder",
-            "the original failure evidence and its partial artifacts are "
-            "archived unmodified first; the retry is recorded as "
-            "additional evidence, never as a replacement",
-            "progress narration goes to stderr; the final stdout JSON "
-            "report gains an additive per-video retry object",
-        ),
+        operations=tuple(operations),
+        limits=tuple(limits),
+        effects=tuple(effects),
     )
 
 
@@ -1509,33 +1536,39 @@ def _swap_retry_readmission(
     state: StateRoot,
     stages: StageFunctions,
     plan: RunPlan,
-    elig: SwapRetryEligibility,
+    eligs: Sequence[SwapRetryEligibility],
     watcher: SwapQuietWatcher,
     samples: list[dict[str, Any]],
     out: Callable[[str], None],
     now: Callable[[], float],
     do_sleep: Callable[[float], None],
-) -> tuple[str, str | None, GpuLease | None]:
-    """Re-admission under the retry consent's named authority (D-05).
+) -> tuple[str, str | None, GpuLease | None, list[tuple[str, str]]]:
+    """Re-admission under the retry consent's named authority (D-05/D-11).
 
-    Returns ``(status, reason, lease)``:
+    Returns ``(status, reason, lease, dropped)``:
 
-    - ``("ok", None, lease)`` — whisper stopped under the retry
+    - ``("ok", None, lease, dropped)`` — whisper stopped under the retry
       authority (through the window's GPU lease: the persisted marker
       exists for exactly this stop→…→restore window), identical
       configuration re-checked, a fresh post-stop swap sample recorded
       and (when measurable) below threshold, fresh free-VRAM gate green;
       the retry attempt may run — the caller releases the SAME lease
       when it ends the window instead of executing the attempt;
-    - ``("drift", reason, lease|None)`` — final-conditions drift
+      ``dropped`` lists ``(video_id, reason)`` ids whose scope drifted
+      since the consent (FR-24): they were removed from the window and
+      stay pending for a fresh authorization; the lifecycle ran for the
+      remaining ids only (or no id remains, in which case the stop never
+      happened — see below);
+    - ``("drift", reason, lease|None, dropped)`` — final-conditions drift
       (FR-11): the stability count must reset and sampling resumes
       inside the SAME 180 s cap; whisper is left RUNNING (the window's
       lease was released — restored — if this re-admission had stopped
       it; the shared service is NEVER held down while resampling);
-    - ``("new_authorization", reason, None)`` — scope fingerprints
-      changed since the consent (FR-24): the approved retry does not
-      cover this scope; the video stays pending for a fresh
-      authorization. No stop was attempted, so there is no lease.
+    - ``("new_authorization", reason, None, dropped)`` — scope
+      fingerprints changed since the consent (FR-24) for EVERY covered
+      id: the approved retry does not cover this scope; the ids stay
+      pending for a fresh authorization. No stop was attempted, so there
+      is no lease.
 
     Raises ``_SwapRetryBlocked`` (the existing global service-
     restoration fail-closed category, actual state reported) for
@@ -1548,25 +1581,48 @@ def _swap_retry_readmission(
     bound = plan.whisper_info
     assert bound is not None  # narrowing: the flow verified the binding
     lease: GpuLease | None = None
-    # Scope fingerprints first (read-only, before any mutation).
-    scope_now = _swap_retry_scope_now(state, elig.video_id)
-    if scope_now is None:
-        raise _SwapRetryBlocked(
-            "the durable manifest disappeared while the swap-retry was "
-            "consented; the retry cannot proceed and the scope cannot be "
-            "verified — progress is blocked"
-        )
-    for key in ("media_sha256", "sampling_manifest_sha256"):
-        if scope_now.get(key) != elig.scope.get(key):
-            return (
-                "new_authorization",
-                "scope fingerprints changed since the retry consent "
-                f"({key}: consent bound {elig.scope.get(key)!r}, now "
-                f"{scope_now.get(key)!r}); a retry under changed scope is "
-                "a NEW authorization question — the approved retry does "
-                "not cover it",
-                None,
+    # Scope fingerprints first (read-only, before any mutation). A
+    # drifted id is DROPPED from the window (its retry is a NEW
+    # authorization question); only when EVERY id drifted does the whole
+    # window become new_authorization with no stop attempted.
+    dropped: list[tuple[str, str]] = []
+    remaining: list[SwapRetryEligibility] = []
+    for elig in eligs:
+        scope_now = _swap_retry_scope_now(state, elig.video_id)
+        if scope_now is None:
+            raise _SwapRetryBlocked(
+                "the durable manifest disappeared while the swap-retry was "
+                "consented; the retry cannot proceed and the scope cannot be "
+                "verified — progress is blocked"
             )
+        drift_reason: str | None = None
+        for key in ("media_sha256", "sampling_manifest_sha256"):
+            if scope_now.get(key) != elig.scope.get(key):
+                drift_reason = (
+                    "scope fingerprints changed since the retry consent "
+                    f"({key}: consent bound {elig.scope.get(key)!r}, now "
+                    f"{scope_now.get(key)!r}); a retry under changed scope is "
+                    "a NEW authorization question — the approved retry does "
+                    "not cover it"
+                )
+                break
+        if drift_reason is None:
+            remaining.append(elig)
+        else:
+            dropped.append((elig.video_id, drift_reason))
+    if not remaining:
+        ids_text = ", ".join(video_id for video_id, _ in dropped)
+        return (
+            "new_authorization",
+            (
+                "scope fingerprints changed since the retry consent for "
+                f"every covered id ({ids_text}); a retry under changed "
+                "scope is a NEW authorization question — the approved "
+                "retry does not cover it"
+            ),
+            None,
+            dropped,
+        )
     current = stages.whisper_inspect()
     if current is None:
         raise _SwapRetryBlocked(
@@ -1595,6 +1651,7 @@ def _swap_retry_readmission(
             "(pre-mutation healthy samples never guarantee post-change "
             "conditions); sampling resumes inside the SAME cap",
             None,
+            dropped,
         )
     if not same_service_config(bound, current):
         # Identity-level mismatch: a DIFFERENT configuration is answering
@@ -1672,7 +1729,7 @@ def _swap_retry_readmission(
             lease, now=now, do_sleep=do_sleep,
             context="a post-stop swap drift at re-admission",
         )
-        return ("drift", drift, lease)
+        return ("drift", drift, lease, dropped)
     # Fresh admission gate AFTER the transition (FR-10/FR-11): the
     # vision stage's own gate stays authoritative; this seam only
     # enables the pre-attempt drift check. A RAISING probe leaves the
@@ -1707,9 +1764,9 @@ def _swap_retry_readmission(
                 lease, now=now, do_sleep=do_sleep,
                 context="a re-admission VRAM drift",
             )
-            return ("drift", drift, lease)
+            return ("drift", drift, lease, dropped)
     out("whisper stop (retry authority): verified identical config")
-    return ("ok", None, lease)
+    return ("ok", None, lease, dropped)
 
 
 def _archive_original_vision_attempt(
@@ -1794,48 +1851,54 @@ def _execute_swap_retry(
     stages: StageFunctions,
     narrated: StageFunctions,
     lease: GpuLease,
-    video_id: str,
-    elig: SwapRetryEligibility,
+    items: Sequence[tuple[str, SwapRetryEligibility, dict[str, Any]]],
     window: ConsentWindow,
-    record: dict[str, Any],
     samples: list[dict[str, Any]],
     out: Callable[[str], None],
     now: Callable[[], float],
     do_sleep: Callable[[float], None],
 ) -> None:
-    """Run the ONE vision retry attempt inside its own bounded window.
+    """Run the ONE vision retry window for every covered id (D-11/FR-26).
 
     Precondition: re-admission already stopped whisper under the retry
     authority (through ``lease``) and checked the fresh final
-    conditions. This function owns: the evidence archive, the
-    isolated-Ollama lifecycle (never adopting a preexisting server), the
-    single narrated vision call, the server stop, and the release of the
-    window's GPU lease (the ONE whisper restore + bounded health wait)
-    on EVERY exit path (success, failure, interrupt). A failing evidence
-    archive also releases the lease before its failure is reported.
-    Terminal state and the attempt record land in ``record``.
+    conditions. This function owns: the per-id evidence archives, ONE
+    isolated-Ollama lifecycle (never adopting a preexisting server)
+    shared by every covered id, the narrated vision call per id, the
+    single server stop, and the release of the window's GPU lease (the
+    ONE whisper restore + bounded health wait) on EVERY exit path
+    (success, failure, interrupt). A failing evidence archive also
+    releases the lease before its failure is reported. The window
+    CLOSES at the first id whose re-run fails the swap gate again:
+    that id keeps its failed-attempt evidence, the remaining ids are
+    not attempted and stay pending. Terminal state and the attempt
+    record land per id in ``record``.
     """
     started_iso = utc_now_iso()
     started = now()
     assert lease.stopped_info is not None  # narrowing: readmission stopped it
-    # The evidence archive runs BEFORE the retry can overwrite the live
-    # paths, but re-admission has ALREADY stopped whisper under the retry
-    # authority. A failing archive here (a raise, or a manifest that
-    # unexpectedly vanished) must therefore release the window's lease
-    # (restore the SAME service under that authority) before it is
-    # reported — the shared service is never left stopped behind the
+    window_ids = [video_id for video_id, _, _ in items]
+    # The evidence archives run BEFORE the retry can overwrite the live
+    # paths, but re-admission has ALREADY stopped whisper under the
+    # retry authority. A failing archive here (a raise, or a manifest
+    # that unexpectedly vanished) must therefore release the window's
+    # lease (restore the SAME service under that authority) before it
+    # is reported — the shared service is never left stopped behind the
     # retry window.
     try:
-        archive = _archive_original_vision_attempt(
-            state, video_id, elig, window
-        )
-        if archive is None:
-            # Never reached in practice (eligibility read the manifest);
-            # honest fail-closed rather than an ungated attempt.
-            raise _SwapRetryBlocked(
-                "the durable manifest disappeared before the retry "
-                "attempt; the retry is not executed and progress is blocked"
+        for video_id, elig, _record in items:
+            archive = _archive_original_vision_attempt(
+                state, video_id, elig, window
             )
+            if archive is None:
+                # Never reached in practice (eligibility read the
+                # manifest); honest fail-closed rather than an
+                # ungated attempt.
+                raise _SwapRetryBlocked(
+                    "the durable manifest disappeared before the retry "
+                    "attempt; the retry is not executed and progress is "
+                    "blocked"
+                )
     except _SwapRetryBlocked:
         _release_retry_lease(
             lease, now=now, do_sleep=do_sleep,
@@ -1860,42 +1923,130 @@ def _execute_swap_retry(
         ) from exc
     handle: Any = None
     restore_ok = False
-    outcome: Any = None
-    attempt_ran = False
-    attempt_interrupted = False
+    # Per-id attempt evidence, persisted on EVERY path where that id's
+    # vision call actually started (append-only, never a replacement).
+    attempts: list[tuple[str, dict[str, Any]]] = []
     blocked: _SwapRetryBlocked | None = None
     try:
         if stages.ollama_reachable():
-            record["state"] = "retry_not_executed_pending"
+            pending_text = (
+                "every listed id stays pending"
+                if len(items) > 1
+                else "Video stays pending"
+            )
+            for _video_id, _elig, rec in items:
+                rec["state"] = "retry_not_executed_pending"
             message = (
                 "isolated Ollama already answers on "
                 f"{config.OLLAMA_API_BASE}: the retry never adopts a "
                 "preexisting server; stop it explicitly and re-invoke. "
-                "Video stays pending; the retry consent is exhausted for "
+                f"{pending_text}; the retry consent is exhausted for "
                 "this invocation"
             )
-            record["message"] = message
+            for _video_id, _elig, rec in items:
+                rec["message"] = message
             out(message)
             return
         handle = stages.ollama_start()
         stages.ollama_wait_ready(handle)
-        out(
-            "vision retry attempt 2 begins: vision-only re-run with a "
-            "fresh immediate baseline; gates unchanged"
-        )
-        attempt_ran = True
-        try:
-            outcome = narrated.vision(video_id, state)
-        except KeyboardInterrupt:
-            attempt_interrupted = True
-            raise
+        if len(items) > 1:
+            out(
+                "vision retry window begins: "
+                f"{len(items)} id(s) ("
+                + ", ".join(video_id for video_id, _, _ in items)
+                + ") with ONE shared isolated-Ollama lifecycle (one model "
+                "load for all of them); vision-only re-runs with a fresh "
+                "immediate baseline; gates unchanged"
+            )
+        else:
+            out(
+                "vision retry attempt 2 begins: vision-only re-run with a "
+                "fresh immediate baseline; gates unchanged"
+            )
+        for index, (video_id, elig, record) in enumerate(items):
+            outcome: Any = None
+            try:
+                outcome = narrated.vision(video_id, state)
+            except KeyboardInterrupt:
+                attempts.append(
+                    (
+                        video_id,
+                        {
+                            "started_at": started_iso,
+                            "finished_at": utc_now_iso(),
+                            "duration_seconds": round(now() - started, 3),
+                            "outcome": "interrupted_unknown",
+                            "reason": (
+                                "vision retry interrupted; outcome UNKNOWN"
+                            ),
+                            "model": config.VISION_MODEL,
+                            "cooldown_samples": [],
+                            "window_ids": list(window_ids),
+                            "restore_verified_healthy": False,
+                        },
+                    )
+                )
+                raise
+            outcome_value = str(getattr(outcome, "outcome", outcome))
+            outcome_reason = str(getattr(outcome, "reason", ""))
+            attempts.append(
+                (
+                    video_id,
+                    {
+                        "started_at": started_iso,
+                        "finished_at": utc_now_iso(),
+                        "duration_seconds": round(now() - started, 3),
+                        "outcome": outcome_value,
+                        "reason": outcome_reason,
+                        "model": config.VISION_MODEL,
+                        # Window-level samples attach to the FIRST
+                        # covered id's record only; the linkage is the
+                        # explicit window_ids list.
+                        "cooldown_samples": (
+                            list(samples) if index == 0 else []
+                        ),
+                        "window_ids": list(window_ids),
+                        "restore_verified_healthy": False,
+                    },
+                )
+            )
+            if outcome_value == "complete":
+                record["state"] = "retry_complete"
+                record["message"] = (
+                    "swap-retry complete: vision re-ran successfully with "
+                    "gates green; the video's remaining stages "
+                    "(audio/synthesis/verify) stay pending for their own "
+                    "authorization/invocation"
+                )
+                continue
+            record["state"] = "retry_exhausted"
+            record["message"] = (
+                "retry exhausted: no third attempt this invocation; video "
+                "stays pending (resumable by re-invoking)"
+            )
+            if _is_swap_gate_failure(outcome_reason):
+                # FR-26: the window CLOSES at this id; the remaining
+                # covered ids are not attempted and stay pending.
+                close_reason = (
+                    "swap gate fired again inside the retry window at id "
+                    f"{video_id}: the window closed after this id's "
+                    "failed attempt; this id was not attempted and stays "
+                    "pending (resumable by re-invoking); no second window "
+                    "this invocation"
+                )
+                for rvideo_id, _relig, rrecord in items[index + 1:]:
+                    rrecord["state"] = "retry_not_executed_pending"
+                    rrecord["message"] = close_reason
+                out(close_reason)
+                break
     finally:
         if handle is not None:
             try:
                 stages.ollama_stop(handle)
                 out("isolated Ollama stopped cleanly (retry window)")
             except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-                record["ollama_stop_failed"] = str(exc)
+                for video_id, _elig, record in items:
+                    record["ollama_stop_failed"] = str(exc)
                 out(
                     f"ISOLATED OLLAMA STOP FAILED (retry window): {exc}; "
                     "the server this run started may still be running — "
@@ -1915,14 +2066,32 @@ def _execute_swap_retry(
             out("whisper restored healthy after the retry window")
         except _SwapRetryBlocked as exc:
             # The unrestored shared service is the most severe honest
-            # fact: capture it so the attempt's own evidence is persisted
+            # fact: capture it so the window's own evidence is persisted
             # first, then let it propagate (it outranks the interrupt
-            # report — an unrestored service blocks everything).
+            # report — an unrestored service blocks everything). The
+            # restore failure OUTRANKS every per-id outcome in the
+            # records too: their durable attempt evidence stays in the
+            # manifests, but the report state is the global hard stop.
             blocked = exc
+            for video_id, _elig, record in items:
+                record["state"] = "blocked_global"
+                record["message"] = exc.reason
         except KeyboardInterrupt:
-            if not attempt_interrupted:
-                # An interrupt inside the release itself: its outcome is
-                # UNKNOWN — record honestly and let it propagate.
+            # An interrupt inside the release itself: its outcome is
+            # UNKNOWN — record honestly and let it propagate. The
+            # unknown restore OUTRANKS every per-id outcome in the
+            # records (their durable attempt evidence stays in the
+            # manifests); the coordinator's handler re-raises.
+            for video_id, _elig, record in items:
+                record["state"] = "interrupted_unknown"
+                record["message"] = (
+                    "swap-retry interrupted: the video's retry state is "
+                    "UNKNOWN for this invocation (nothing is assumed); "
+                    "the applicable whisper restoration ran under the "
+                    "retry authority unless its own report above says "
+                    "otherwise; partial results are preserved by the "
+                    "stages"
+                )
                 record["restore_unknown_interrupt"] = True
             raise
         except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
@@ -1932,62 +2101,28 @@ def _execute_swap_retry(
                 "service state explicitly; no rollback is performed or "
                 "implied"
             )
-        # Persist the attempt's own evidence on EVERY path where the
-        # vision attempt actually started (success, failure, interrupt,
-        # later restore failure) — append-only, never a replacement.
-        if attempt_ran:
-            finished_iso = utc_now_iso()
-            outcome_value = (
-                str(getattr(outcome, "outcome", outcome))
-                if outcome is not None
-                else "interrupted_unknown"
-            )
-            attempt: dict[str, Any] = {
-                "started_at": started_iso,
-                "finished_at": finished_iso,
-                "duration_seconds": round(now() - started, 3),
-                "outcome": outcome_value,
-                "reason": (
-                    str(getattr(outcome, "reason", ""))
-                    if outcome is not None
-                    else "vision retry interrupted; outcome UNKNOWN"
-                ),
-                "model": config.VISION_MODEL,
-                "cooldown_samples": list(samples),
-                "restore_verified_healthy": restore_ok,
-            }
-            record["attempt"] = attempt
+        # Persist the per-id attempt evidence on EVERY path where that
+        # id's vision call actually started (success, failure,
+        # interrupt, later restore failure) — append-only.
+        for video_id, attempt in attempts:
+            attempt["restore_verified_healthy"] = restore_ok
+            for pvideo_id, _pelig, record in items:
+                if pvideo_id == video_id:
+                    record["attempt"] = attempt
+                    break
             _record_swap_retry_attempt(state, video_id, attempt)
     if blocked is not None:
         raise blocked
-    finished_iso = utc_now_iso()
-    outcome_value = str(getattr(outcome, "outcome", outcome))
-    attempt: dict[str, Any] = {
-        "started_at": started_iso,
-        "finished_at": finished_iso,
-        "duration_seconds": round(now() - started, 3),
-        "outcome": outcome_value,
-        "reason": str(getattr(outcome, "reason", "")),
-        "model": config.VISION_MODEL,
-        "cooldown_samples": list(samples),
-        "restore_verified_healthy": restore_ok,
-    }
-    record["attempt"] = attempt
-    _record_swap_retry_attempt(state, video_id, attempt)
-    if outcome_value == "complete":
-        record["state"] = "retry_complete"
-        message = (
-            "swap-retry complete: vision re-ran successfully with gates "
-            "green; the video's remaining stages (audio/synthesis/verify) "
-            "stay pending for their own authorization/invocation"
-        )
-    else:
-        record["state"] = "retry_exhausted"
-        message = (
-            "retry exhausted: no third attempt this invocation; video "
-            "stays pending (resumable by re-invoking)"
-        )
-    record["message"] = message
+
+
+def _is_swap_gate_failure(reason: str) -> bool:
+    """True when a stage reason reports a swap_delta gate firing.
+
+    ``GateViolation`` renders as ``"<gate> gate fired: <reason>"`` with
+    the gate id from :mod:`tiktok_ingest.gates` — a single stable
+    definition covered by contract tests.
+    """
+    return f"{GATE_SWAP_DELTA} gate fired:" in str(reason)
     out(message)
 
 
@@ -2007,14 +2142,17 @@ def _run_swap_retry_flow(
     sleep: Callable[[float], None] | None = None,
     vmstat_fn: Callable[[], Any] | None = None,
 ) -> None:
-    """Offer the bounded swap-retry for every eligible id of ONE batch.
+    """Offer the bounded swap-retry for every eligible id of ONE batch
+    as a single shared-lifecycle window (D-11/FR-26).
 
-    Called after a batch whose whisper restoration succeeded. Order per
-    video (FR-05): verify the SAME whisper service restored healthy
-    FIRST, then ask the DEDICATED consent, then run the read-only
-    cooldown with the callback-based re-admission, then the single
-    vision-only attempt. Exactly ONE ask per video per invocation
-    (denial included); a failed second attempt ends the matter.
+    Collect phase: every eligible id of the batch joins ONE window.
+    Order per window (FR-05): verify the SAME whisper service restored
+    healthy FIRST, then ONE dedicated consent covering every covered
+    id, then the read-only cooldown with the callback-based
+    re-admission, then the single vision-only window (one Ollama
+    lifecycle for all covered ids). Exactly ONE ask per covered id per
+    invocation (denial included); a failed second attempt ends the
+    matter for that id.
     """
     if not stages.whisper_lifecycle_ready():
         return
@@ -2028,13 +2166,15 @@ def _run_swap_retry_flow(
     now = monotonic or time.monotonic
     do_sleep = sleep or time.sleep
     vmstat = vmstat_fn or default_vmstat_fn
+    # -- collect phase (D-11): every eligible id joins ONE window ------
+    items: list[tuple[str, SwapRetryEligibility, dict[str, Any]]] = []
     for video_id in batch_ids:
         if video_id in offered:
             continue
         elig = _swap_retry_eligibility(state, video_id)
         if not elig.eligible:
             continue
-        offered.add(video_id)  # ONE ask per video per invocation (D-02)
+        offered.add(video_id)  # ONE ask per id per invocation (D-02)
         record: dict[str, Any] = {
             "id": video_id,
             "state": "retry_eligible",
@@ -2053,269 +2193,316 @@ def _run_swap_retry_flow(
             f"swap_delta gate ({_overshoot_text(elig.overshoot_mib)}) "
             "with verified cleanup"
         )
-        # T16 (PRD: ANY state -> interrupted_unknown): pre-consent
-        # verification, the consent ask and the whole cooldown sit inside
-        # ONE per-video interrupt scope so a KeyboardInterrupt can never
-        # propagate with this record still "retry_eligible" and no
-        # durable evidence. The inner cooldown handler sets the terminal
-        # state first; this outer scope covers the phases BEFORE any
-        # mutation (nothing was stopped or started there).
+        items.append((video_id, elig, record))
+    if not items:
+        return
+    window_ids = [video_id for video_id, _, _ in items]
+    for _vid, _el, rec in items:
+        rec["window_ids"] = list(window_ids)
+    # Window-level fields (samples, stable resets) attach to the FIRST
+    # covered id's record; window_ids links the rest.
+    record = items[0][2]
+    # T16 (PRD: ANY state -> interrupted_unknown): pre-consent
+    # verification, the consent ask and the whole cooldown sit inside
+    # ONE interrupt scope so a KeyboardInterrupt can never propagate
+    # with a record still "retry_eligible" and no durable evidence. The
+    # inner cooldown handler sets the terminal state first; this outer
+    # scope covers the phases BEFORE any mutation (nothing was stopped
+    # or started there).
+    try:
+        # FR-05: window closed + SAME whisper restored healthy BEFORE
+        # the prompt (the batch cycle's standing restore did the work;
+        # this verifies it positively, read-only).
+        verify_error = _verify_whisper_restored_healthy(stages, plan)
+        if verify_error is not None:
+            for _vid, _el, rec in items:
+                rec["state"] = "blocked_global"
+                rec["message"] = verify_error
+            report["hard_stop_reason"] = verify_error
+            out(verify_error)
+            return
+        window = _build_swap_retry_window(
+            [el for _, el, _ in items], plan
+        )
+        granted = human.ask(window)
+        _record_decision(
+            human_decisions,
+            window,
+            granted,
+            "human decision: ONE bounded vision swap-retry window (new "
+            "scope, never covered by the run-plan grant)",
+        )
+        for _vid, _el, rec in items:
+            rec["consent_granted"] = granted
+        if not granted:
+            message = (
+                "swap-retry declined: video stays pending and resumable "
+                "(re-invoke to be asked again)"
+            )
+            for _vid, _el, rec in items:
+                rec["state"] = "retry_declined_pending"
+                rec["message"] = message
+            out(message)
+            return
+        # -- read-only cooldown + callback-based re-admission ----------
+        watcher = SwapQuietWatcher(vmstat_fn=vmstat, monotonic=now)
+        ids_text = (
+            ", ".join(window_ids)
+            if len(window_ids) > 1
+            else f"id {window_ids[0]}"
+        )
+        out(
+            f"vision swap-retry pause: {ids_text} failed swap_delta "
+            f"gate ({_overshoot_text(items[0][1].overshoot_mib)}, "
+            "cleanup verified). Whisper restored healthy; isolated server "
+            "stopped. Waiting for swap to quiet: sampling every "
+            f"{watcher.interval_seconds:.0f}s, admission no earlier "
+            f"than {watcher.floor_seconds:.0f}s, hard stop at "
+            f"{watcher.cap_seconds:.0f}s. Nothing else runs meanwhile."
+        )
+        samples: list[dict[str, Any]] = record["samples"]
+        next_narration = config.SWAP_RETRY_NARRATION_INTERVAL_SECONDS
+        above_narrated = False
+        phase = "cooldown"
         try:
-            # FR-05: window closed + SAME whisper restored healthy
-            # BEFORE the prompt (the batch cycle's standing restore did
-            # the work; this verifies it positively, read-only).
-            verify_error = _verify_whisper_restored_healthy(stages, plan)
-            if verify_error is not None:
-                record["state"] = "blocked_global"
-                record["message"] = verify_error
-                report["hard_stop_reason"] = verify_error
-                out(verify_error)
-                return
-            window = _build_swap_retry_window(video_id, elig, plan)
-            granted = human.ask(window)
-            _record_decision(
-                human_decisions,
-                window,
-                granted,
-                "human decision: ONE bounded vision swap-retry (new scope, "
-                "never covered by the run-plan grant)",
-            )
-            record["consent_granted"] = granted
-            if not granted:
-                record["state"] = "retry_declined_pending"
-                message = (
-                    "swap-retry declined: video stays pending and resumable "
-                    "(re-invoke to be asked again)"
-                )
-                record["message"] = message
-                out(message)
-                continue
-            # -- read-only cooldown + callback-based re-admission ------
-            watcher = SwapQuietWatcher(vmstat_fn=vmstat, monotonic=now)
-            out(
-                f"vision swap-retry pause: id {video_id} failed swap_delta "
-                f"gate ({_overshoot_text(elig.overshoot_mib)}, cleanup "
-                "verified). Whisper restored healthy; isolated server "
-                "stopped. Waiting for swap to quiet: sampling every "
-                f"{watcher.interval_seconds:.0f}s, admission no earlier "
-                f"than {watcher.floor_seconds:.0f}s, hard stop at "
-                f"{watcher.cap_seconds:.0f}s. Nothing else runs meanwhile."
-            )
-            samples: list[dict[str, Any]] = record["samples"]
-            next_narration = config.SWAP_RETRY_NARRATION_INTERVAL_SECONDS
-            above_narrated = False
-            phase = "cooldown"
-            try:
-                watcher.start()
-                terminal = None
-                while terminal is None:
-                    if (
-                        not watcher.admitted
-                        and watcher.remaining_seconds <= 0
-                    ):
-                        terminal = "cooldown_expired"
-                        break
-                    do_sleep(
-                        min(
-                            watcher.interval_seconds,
-                            watcher.remaining_seconds,
-                        )
+            watcher.start()
+            terminal = None
+            while terminal is None:
+                if (
+                    not watcher.admitted
+                    and watcher.remaining_seconds <= 0
+                ):
+                    terminal = "cooldown_expired"
+                    break
+                do_sleep(
+                    min(
+                        watcher.interval_seconds,
+                        watcher.remaining_seconds,
                     )
-                    sample = watcher.sample(phase)
-                    samples.append(sample.to_dict())
-                    if watcher.admitted:
-                        out(
-                            f"[{sample.elapsed_seconds:.0f}s] swap "
-                            f"{format_rate_mib_per_s(sample.rate_bytes_per_s)} "
-                            f"— stable {watcher.stable_count}/"
-                            f"{watcher.stable_intervals_needed} at "
-                            f"{watcher.floor_seconds:.0f}s floor: admitting "
-                            "retry"
-                        )
-                        status, reason, lease = _swap_retry_readmission(
+                )
+                sample = watcher.sample(phase)
+                samples.append(sample.to_dict())
+                if watcher.admitted:
+                    out(
+                        f"[{sample.elapsed_seconds:.0f}s] swap "
+                        f"{format_rate_mib_per_s(sample.rate_bytes_per_s)} "
+                        f"— stable {watcher.stable_count}/"
+                        f"{watcher.stable_intervals_needed} at "
+                        f"{watcher.floor_seconds:.0f}s floor: admitting "
+                        "retry"
+                    )
+                    status, reason, lease, dropped = _swap_retry_readmission(
+                        state=state,
+                        stages=stages,
+                        plan=plan,
+                        eligs=[el for _, el, _ in items],
+                        watcher=watcher,
+                        samples=samples,
+                        out=out,
+                        now=now,
+                        do_sleep=do_sleep,
+                    )
+                    if dropped:
+                        # FR-24 per id: drifted ids leave the window
+                        # before any mutation; they stay pending for a
+                        # fresh authorization.
+                        dropped_ids = {vid for vid, _r in dropped}
+                        for dvid, dreason in dropped:
+                            for vid, _el, rec in items:
+                                if vid == dvid:
+                                    rec["state"] = (
+                                        "retry_not_executed_pending"
+                                    )
+                                    rec["message"] = dreason
+                                    break
+                            out(dreason)
+                        items = [
+                            entry for entry in items
+                            if entry[0] not in dropped_ids
+                        ]
+                    if status == "ok":
+                        if not items:
+                            terminal = "retry_not_executed_pending"
+                            break
+                        # The 180 s TOTAL cap (never restarted, D-04/
+                        # D-06) also gates the LAUNCH: re-admission
+                        # transitions (bounded stop grace, health waits,
+                        # probes) consume real time, and past the
+                        # ORIGINAL deadline the attempt must not start.
+                        # Whisper is STOPPED here (readmission stopped
+                        # it) — release the window's lease (restore
+                        # under the retry authority) before expiring
+                        # honestly.
+                        if watcher.expired:
+                            _release_retry_lease(
+                                lease,
+                                now=now,
+                                do_sleep=do_sleep,
+                                context=(
+                                    "a re-admission that consumed the "
+                                    "remaining cooldown cap"
+                                ),
+                            )
+                            message = (
+                                "cap exhausted during re-admission "
+                                "transitions: retry not executed, video "
+                                "pending (resumable by re-invoking). "
+                                "Whisper restored healthy."
+                            )
+                            for _vid, _el, rec in items:
+                                rec["state"] = "cooldown_expired"
+                                rec["message"] = message
+                            out(message)
+                            terminal = "cooldown_expired"
+                            break
+                        _execute_swap_retry(
                             state=state,
                             stages=stages,
-                            plan=plan,
-                            elig=elig,
-                            watcher=watcher,
+                            narrated=narrated,
+                            lease=lease,
+                            items=items,
+                            window=window,
                             samples=samples,
                             out=out,
                             now=now,
                             do_sleep=do_sleep,
                         )
-                        if status == "ok":
-                            # The 180 s TOTAL cap (never restarted, D-04/
-                            # D-06) also gates the LAUNCH: re-admission
-                            # transitions (bounded stop grace, health
-                            # waits, probes) consume real time, and past
-                            # the ORIGINAL deadline the attempt must not
-                            # start. Whisper is STOPPED here (readmission
-                            # stopped it) — release the window's lease
-                            # (restore under the retry authority) before
-                            # expiring honestly.
-                            if watcher.expired:
-                                _release_retry_lease(
-                                    lease,
-                                    now=now,
-                                    do_sleep=do_sleep,
-                                    context=(
-                                        "a re-admission that consumed the "
-                                        "remaining cooldown cap"
-                                    ),
-                                )
-                                record["state"] = "cooldown_expired"
-                                message = (
-                                    f"cap exhausted during re-admission "
-                                    f"transitions: retry not executed, "
-                                    "video pending (resumable by "
-                                    "re-invoking). Whisper restored "
-                                    "healthy."
-                                )
-                                record["message"] = message
-                                out(message)
-                                terminal = record["state"]
-                                break
-                            _execute_swap_retry(
-                                state=state,
-                                stages=stages,
-                                narrated=narrated,
-                                lease=lease,
-                                video_id=video_id,
-                                elig=elig,
-                                window=window,
-                                record=record,
-                                samples=samples,
-                                out=out,
-                                now=now,
-                                do_sleep=do_sleep,
-                            )
-                            terminal = record["state"]
-                            break
-                        if status == "new_authorization":
-                            assert reason is not None
-                            record["state"] = "retry_not_executed_pending"
-                            record["message"] = reason
-                            out(reason)
-                            terminal = record["state"]
-                            break
-                        # Drift (FR-11): reset the count, NEVER the cap;
-                        # resampling continues inside the SAME 180 s
-                        # budget (the readmission already restored whisper
-                        # where it had stopped it).
+                        terminal = "window_done"
+                        break
+                    if status == "new_authorization":
+                        # Every covered id drifted; the records were
+                        # already marked by the dropped loop above.
                         assert reason is not None
                         out(reason)
-                        record["stable_resets"].append(
-                            {
-                                "elapsed_seconds": round(
-                                    sample.elapsed_seconds, 3
-                                ),
-                                "reason": reason,
-                            }
-                        )
-                        watcher.reset_stability()
-                        phase = "resample"
-                        continue
-                    if (
-                        sample.elapsed_seconds + 1e-9 >= next_narration
-                    ):
-                        rate_text = format_rate_mib_per_s(
-                            sample.rate_bytes_per_s
-                        )
-                        remaining = max(
-                            0.0,
-                            watcher.cap_seconds - sample.elapsed_seconds,
-                        )
-                        if sample.rate_bytes_per_s is not None and (
-                            sample.rate_bytes_per_s
-                            > watcher.rate_limit_bytes_per_s
-                        ):
-                            mood = (
-                                "above "
-                                f"{config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S:.2f} MiB/s"
-                                if not above_narrated
-                                else "NOT recovered"
-                            )
-                            above_narrated = True
-                            out(
-                                f"[{sample.elapsed_seconds:.0f}s] swap "
-                                f"{rate_text} — {mood} (stable "
-                                f"{watcher.stable_count}/"
-                                f"{watcher.stable_intervals_needed}), "
-                                f"{remaining:.0f}s left"
-                            )
-                        else:
-                            out(
-                                f"[{sample.elapsed_seconds:.0f}s] swap "
-                                f"{rate_text} — stable "
-                                f"{watcher.stable_count}/"
-                                f"{watcher.stable_intervals_needed}, "
-                                f"{remaining:.0f}s left"
-                            )
-                        next_narration += (
-                            config.SWAP_RETRY_NARRATION_INTERVAL_SECONDS
-                        )
-                    if watcher.expired:
-                        terminal = "cooldown_expired"
+                        terminal = "retry_not_executed_pending"
                         break
-                # Only the SAMPLING expiry writes the generic message
-                # here; the re-admission gate above already recorded its
-                # own state and message (record state is terminal).
-                if (
-                    terminal == "cooldown_expired"
-                    and record["state"] == "retry_eligible"
-                ):
-                    record["state"] = "cooldown_expired"
-                    message = (
-                        f"cap reached without "
-                        f"{watcher.stable_intervals_needed} stable intervals: "
-                        "retry not executed, video pending (resumable by "
-                        "re-invoking). Whisper remains healthy."
+                    # Drift (FR-11): reset the count, NEVER the cap;
+                    # resampling continues inside the SAME 180 s budget
+                    # (the readmission already restored whisper where it
+                    # had stopped it).
+                    assert reason is not None
+                    out(reason)
+                    record["stable_resets"].append(
+                        {
+                            "elapsed_seconds": round(
+                                sample.elapsed_seconds, 3
+                            ),
+                            "reason": reason,
+                        }
                     )
-                    record["message"] = message
-                    out(message)
-            except SwapCooldownMeasurementError as exc:
-                record["state"] = "measurement_unavailable"
+                    watcher.reset_stability()
+                    phase = "resample"
+                    continue
+                if (
+                    sample.elapsed_seconds + 1e-9 >= next_narration
+                ):
+                    rate_text = format_rate_mib_per_s(
+                        sample.rate_bytes_per_s
+                    )
+                    remaining = max(
+                        0.0,
+                        watcher.cap_seconds - sample.elapsed_seconds,
+                    )
+                    if sample.rate_bytes_per_s is not None and (
+                        sample.rate_bytes_per_s
+                        > watcher.rate_limit_bytes_per_s
+                    ):
+                        mood = (
+                            "above "
+                            f"{config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S:.2f} MiB/s"
+                            if not above_narrated
+                            else "NOT recovered"
+                        )
+                        above_narrated = True
+                        out(
+                            f"[{sample.elapsed_seconds:.0f}s] swap "
+                            f"{rate_text} — {mood} (stable "
+                            f"{watcher.stable_count}/"
+                            f"{watcher.stable_intervals_needed}), "
+                            f"{remaining:.0f}s left"
+                        )
+                    else:
+                        out(
+                            f"[{sample.elapsed_seconds:.0f}s] swap "
+                            f"{rate_text} — stable "
+                            f"{watcher.stable_count}/"
+                            f"{watcher.stable_intervals_needed}, "
+                            f"{remaining:.0f}s left"
+                        )
+                    next_narration += (
+                        config.SWAP_RETRY_NARRATION_INTERVAL_SECONDS
+                    )
+                if watcher.expired:
+                    terminal = "cooldown_expired"
+                    break
+            # Only the SAMPLING expiry writes the generic message here;
+            # the re-admission gate above already recorded its own state
+            # and message (record state is terminal).
+            if terminal == "cooldown_expired":
                 message = (
-                    f"swap measurement unavailable: retry not executed, video "
-                    f"pending (resumable by re-invoking) — {exc}"
+                    f"cap reached without "
+                    f"{watcher.stable_intervals_needed} stable intervals: "
+                    "retry not executed, video pending (resumable by "
+                    "re-invoking). Whisper remains healthy."
                 )
-                record["message"] = message
+                for _vid, _el, rec in items:
+                    if rec["state"] == "retry_eligible":
+                        rec["state"] = "cooldown_expired"
+                        rec["message"] = message
                 out(message)
-                continue
-            except _SwapRetryBlocked as exc:
-                record["state"] = "blocked_global"
-                record["message"] = exc.reason
-                report["hard_stop_reason"] = exc.reason
-                out(exc.reason)
-                return
-            except KeyboardInterrupt:
-                record["state"] = "interrupted_unknown"
-                message = (
-                    "swap-retry interrupted: the video's retry state is "
-                    "UNKNOWN for this invocation (nothing is assumed); the "
-                    "applicable whisper restoration ran under the retry "
-                    "authority unless its own report above says otherwise; "
-                    "partial results are preserved by the stages"
-                )
-                record["message"] = message
-                out(message)
-                raise
+        except SwapCooldownMeasurementError as exc:
+            message = (
+                f"swap measurement unavailable: retry not executed, video "
+                f"pending (resumable by re-invoking) — {exc}"
+            )
+            for _vid, _el, rec in items:
+                if rec["state"] == "retry_eligible":
+                    rec["state"] = "measurement_unavailable"
+                    rec["message"] = message
+            out(message)
+            return
+        except _SwapRetryBlocked as exc:
+            for _vid, _el, rec in items:
+                if rec["state"] == "retry_eligible":
+                    rec["state"] = "blocked_global"
+                    rec["message"] = exc.reason
+            report["hard_stop_reason"] = exc.reason
+            out(exc.reason)
+            return
         except KeyboardInterrupt:
-            # T16 pre-mutation phases (read-only verification / consent
-            # ask): the inner handler already set interrupted_unknown
-            # when the interrupt landed inside the cooldown or attempt;
-            # here nothing has been stopped or started yet.
-            if record["state"] == "retry_eligible":
-                record["state"] = "interrupted_unknown"
-                message = (
-                    "swap-retry interrupted before any mutation "
-                    "(verification/consent phase): nothing was stopped or "
-                    "started; the video's retry state is UNKNOWN for this "
-                    "invocation; re-invoke to be asked again"
-                )
-                record["message"] = message
-                out(message)
+            message = (
+                "swap-retry interrupted: the video's retry state is "
+                "UNKNOWN for this invocation (nothing is assumed); the "
+                "applicable whisper restoration ran under the retry "
+                "authority unless its own report above says otherwise; "
+                "partial results are preserved by the stages"
+            )
+            for _vid, _el, rec in items:
+                if rec["state"] == "retry_eligible":
+                    rec["state"] = "interrupted_unknown"
+                    rec["message"] = message
+            out(message)
             raise
+    except KeyboardInterrupt:
+        # T16 pre-mutation phases (read-only verification / consent
+        # ask): the inner handler already set interrupted_unknown when
+        # the interrupt landed inside the cooldown or attempt; here
+        # nothing has been stopped or started yet.
+        message = (
+            "swap-retry interrupted before any mutation "
+            "(verification/consent phase): nothing was stopped or "
+            "started; the video's retry state is UNKNOWN for this "
+            "invocation; re-invoke to be asked again"
+        )
+        any_pending = False
+        for _vid, _el, rec in items:
+            if rec["state"] == "retry_eligible":
+                rec["state"] = "interrupted_unknown"
+                rec["message"] = message
+                any_pending = True
+        if any_pending:
+            out(message)
+        raise
 
 
 def _phase_selection(
@@ -2563,6 +2750,13 @@ def run_collection(
     frozen_ids, canonical_urls, stage_states, plan_counts = (
         _frozen_inventory(state, collection_url)
     )
+    # Seed a live dashboard (when the consent provider is one) with the
+    # persisted stage states of the frozen inventory, so a resumed run
+    # starts from the prior state instead of an empty matrix. Optional
+    # duck-typed hook: console and test providers simply lack it.
+    seed_prior = getattr(consent, "seed_prior_state", None)
+    if callable(seed_prior):
+        seed_prior(list(stage_states.items()))
     report["final_plan_counts"] = plan_counts
     cap = limit if limit is not None else GUIDED_MAX_BATCH
 

@@ -537,6 +537,17 @@ class CursesConsentProvider(ConsentProvider):
                 self.state.note(line)
         self._draw()
 
+    def seed_prior_state(
+        self, items: Iterable[tuple[str, dict[str, str]]]
+    ) -> None:
+        """Seed the dashboard with the resumed inventory's stage states.
+
+        A resumed run then starts from the persisted prior state instead
+        of an all-pending matrix; live narration keeps overwriting these
+        cells as stages actually run."""
+        self.state.seed_items(items)
+        self._draw()
+
     # -- ConsentProvider ---------------------------------------------------
 
     def ask(self, window: Any) -> bool:

@@ -72,6 +72,23 @@ A backlog entry whose claims are all `unverifiable` is a valid, complete
 result. The verdicts ARE the product; `complete` just means the machinery
 finished honestly.
 
+### Automatic synthesis and provenance
+
+The automatic text-API path treats model output as candidate content, not
+as independent verification: supplied model verdicts are cleared before
+the validated synthesis document is persisted. The verifier still applies
+its existing rules to explicitly supplied `--from-file` documents. An
+operator-supplied or historical `confirmed` verdict is not, on its own,
+evidence that an external source was consulted; inspect the recorded reason
+and fetch records in `verification.json`. Existing artifacts and backlog
+entries are not rewritten by this change.
+
+The automatic prompt requests one evidence-supported actionable per idea
+and excludes social-engagement requests. A narrow local filter removes
+some obvious standalone follow, like, subscribe and share requests; mixed or ambiguous
+items are kept for review. The original evidence remains available, and
+the existing backlog's single `actionable` string is unchanged as a format.
+
 ## 3. Verdicts and reasons (rules version 2)
 
 `VERIFY_RULES_VERSION` is `"2"`. Verdict values (PRD section 6.6):
@@ -845,7 +862,17 @@ After a vision resource window whose vision stage failed ONLY the
 `swap_delta` gate with positively verified cleanup, collection-run may
 offer ONE extra vision
 attempt for that video THIS invocation. It is never automatic and never
-covered by the run-plan grant.
+covered by the run-plan grant. When a batch leaves MORE THAN ONE id
+retry-eligible, every eligible id joins ONE shared-lifecycle window
+(D-11/FR-26): one consent ask naming every covered id, one cooldown,
+one whisper stop, ONE isolated-Ollama start — the model loads once for
+the whole window — the vision re-run per covered id in sequence, then
+one server stop and one whisper restore. The window CLOSES at the first
+covered id whose re-run fails the swap gate again: that id keeps its
+failed-attempt evidence, the remaining covered ids are not attempted
+and stay pending/resumable (no second window this invocation). An id
+whose scope fingerprints drifted since the consent is dropped from the
+window at re-admission and stays pending for a fresh authorization.
 
 **What you see, in order.**
 
@@ -856,14 +883,16 @@ covered by the run-plan grant.
    positively BEFORE any prompt; a mismatched identity/configuration or
    an unhealthy service blocks all progress (the existing
    service-restoration hard stop, not a retry failure).
-2. A DEDICATED `vision-swap-retry` window names the video id, the
-   measured overshoot (e.g. `+18.56 MiB over the 512 MiB budget`), the
-   cooldown bounds, the unchanged gates and stage deadline, the whisper
-   stop/restore under this new named lifecycle authority, the exact
-   scope fingerprints (model/media/sampling — any change is a NEW
+2. A DEDICATED `vision-swap-retry` window names EVERY covered video id,
+   the measured overshoot per id (e.g. `+18.56 MiB over the 512 MiB
+   budget`), the cooldown bounds, the unchanged gates and stage
+   deadline, the whisper stop/restore under this new named lifecycle
+   authority, the shared isolated-Ollama lifecycle when the window
+   covers more than one id (one model load for all of them), the exact
+   scope fingerprints per id (model/media/sampling — any change is a NEW
    authorization question), and the effects of a second failure.
-   Denial/EOF/non-TTY stops without assuming consent; the video stays
-   pending and resumable.
+   Denial/EOF/non-TTY stops without assuming consent; every covered id
+   stays pending and resumable.
 3. After consent a READ-ONLY cooldown samples the cumulative
    `pswpin + pswpout` counters every 5 s: admission no earlier than
    60 s, one hard cap of 180 s from cooldown start that instability,
@@ -1029,4 +1058,3 @@ carry a strict Content-Security-Policy, no-store, nosniff and frame denial.
 This protects against other web pages in your browser, not against other
 users or processes on the same machine (accepted single-operator boundary,
 PRD section 12).
-

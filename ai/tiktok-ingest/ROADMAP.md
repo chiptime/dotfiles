@@ -5,6 +5,11 @@ TikTok collection into verified, classified entries in the local review backlog.
 The application should remove operational ceremony without weakening the existing
 consent, evidence, resource, or resume guarantees.
 
+Product goal (2026-11-04): turn the operator's saved TikTok and, later,
+Instagram collections into a personal knowledge library organized by interest
+sections and filtered by the operator's tastes (Phase 2). The backlog is the
+review step on the way there, not the destination.
+
 ## Current foundation
 
 The processing engine already provides:
@@ -259,16 +264,80 @@ Keep the existing local state contracts initially. A new database is justified o
 if the product later introduces real concurrent writers, multiple users, or query
 requirements the current stores cannot support.
 
-## Phase 2 — Accepted-result destinations
+## Phase 2 — Personal knowledge library
+
+**Outcome:** every accepted entry becomes a browsable, searchable library entry
+placed in interest sections and subsections, ranked against the operator's
+written interests.
+
+Phase requirements: [Phase 2 PRD](prds/PHASE-2-PERSONAL-LIBRARY-PRD.md) (DRAFT).
+
+- Replace the five fixed technology roots with operator-defined sections,
+  seeded subsections, and dynamic topics; one primary and up to three
+  secondary placements per entry.
+- Add `interests.md` and a relevance score; accept/reject stays the only gate.
+- Write one Markdown file per accepted entry, shaped by kind (recipe, routine,
+  remedy, tool, place, product, method).
+- Add a derived full-text index, a Library view in `ti web`, and a Markdown
+  export Gertru can ingest. The index is justified by the search requirement
+  and is rebuildable from the Markdown files.
+- Reclassify existing entries with text-only re-synthesis.
+
+## Phase 3 — Accepted-result destinations
+
+Numbered Phase 2 until 2026-11-04.
 
 **Outcome:** deliver explicitly accepted entries through optional adapters.
 
-Phase requirements: [Phase 2 PRD](prds/PHASE-2-DESTINATIONS-PRD.md).
+Phase requirements: [Phase 3 PRD](prds/PHASE-3-DESTINATIONS-PRD.md).
 
 - Add export adapters for destinations such as Notion or Gertru.
 - Send only accepted entries and require destination-specific authorization.
 - Record idempotency keys, delivery receipts, and retry-safe outcomes.
 - Keep destination failures separate from ingest and operator-review state.
+
+## Phase 4 — Instagram source
+
+**Outcome:** saved Instagram collections enter the same engine and library.
+
+- Gate: a read-only research report on how saved Instagram collections can be
+  inventoried and fetched (session handling, anti-bot limits, extractor
+  support) before any requirements are written.
+- Extract a source adapter from the TikTok-specific URL, inventory, and fetch
+  code; the PRD reserved this boundary (PRD.md §5.1) but no adapter exists yet.
+
+## Throughput track
+
+**Outcome:** large collections can be processed in a reasonable time.
+
+Measured on 2026-11-04 (live `series-7455…` run, 19 items): the vision model
+itself is fast (median 2 s per frame, image encode 13–53 ms, GPU mostly idle)
+but the machine has 17 GiB RAM, and sustained swap I/O (~4.6 MiB/s) repeatedly
+trips the S5 swap gate during vision windows. Each trip stops the window and
+the retry reloads the model; the isolated llama-server started 20 times in one
+afternoon and one 47-frame video took over two wall-clock hours of which ~90 s
+were inference. The bottleneck is the gate/reload thrash, not the model.
+
+- Vision model residency (DONE 2026-11-04, D-11/FR-26): the bounded
+  swap-retry now runs as ONE batched window per batch — one consent, one
+  cooldown, one whisper stop, ONE isolated-Ollama start (the model loads
+  once for every covered id) — instead of one full lifecycle per video.
+  Measured motivation: ~20 isolated `llama-server` starts in one
+  afternoon; a 47-frame video took 2 h wall for ~90 s inference.
+- Evaluate a smaller vision model (for example Qwen2.5-VL 3B) or a leaner
+  quant: less RAM pressure means fewer gate trips; A/B quality on the
+  benchmark fixtures before switching.
+- Reduce frames per video (scene-detection sampling toward 12–16 frames
+  instead of ~48): less time under memory pressure and less total inference.
+- Measure minutes per video wall-clock vs inference on a real collection once
+  the Phase 0 checklist is closed, and project the time for the operator's
+  real collection sizes.
+- Operational practice (2026-11-04): run collections in an exclusive time
+  window when the desktop is otherwise idle — the 17 GiB machine trips the
+  swap gate far less when no other workload holds memory. Scheduled or
+  unattended runs stay deferred.
+- Reduce operator interventions per collection (single consent per run).
+- Resume the incomplete collection scan before starting new collections.
 
 ## Explicitly deferred
 
@@ -276,12 +345,15 @@ Phase requirements: [Phase 2 PRD](prds/PHASE-2-DESTINATIONS-PRD.md).
 - multiple users or remote hosting;
 - automatic acceptance or rejection;
 - automatic publication of `pending` entries;
-- YouTube, Instagram, comments, photo-slide ingestion, or bilingual processing;
+- YouTube, comments, photo-slide ingestion, or bilingual processing;
+- Instagram until the Phase 4 research gate is passed;
 - cloud processing of raw media;
-- a new database before demonstrated need;
+- a new database before demonstrated need (the Phase 2 search index is a
+  derived, rebuildable index, not a new source of truth);
 - provider-specific business logic in the core pipeline.
 
 ## Next step
 
-Design and implement Phase 0 only. Do not begin the web interface or destination
-adapters until the one-command real-collection acceptance checklist is satisfied.
+Close the Phase 0 acceptance checklist with one live run on a small
+collection (items 7 and 8 lack live evidence), then implement Phase 2 from its
+PRD. Phase 3 and Phase 4 wait for Phase 2.

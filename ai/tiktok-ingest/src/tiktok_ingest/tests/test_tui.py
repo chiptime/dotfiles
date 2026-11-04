@@ -136,6 +136,43 @@ class StateModelTests(unittest.TestCase):
         self.assertEqual(state.ids, [])
         self.assertEqual(state.phase, "starting")
 
+    def test_seed_prior_state_renders_resumed_stages_before_narration(self) -> None:
+        provider, window = _provider([])
+        provider.seed_prior_state(
+            [
+                (
+                    "7473199405533859094",
+                    {"fetch": "complete", "prepare": "complete", "audio": "blocked"},
+                )
+            ]
+        )
+        state = provider.state
+        self.assertEqual(
+            tui.stage_role(state, "7473199405533859094", "fetch"), tui.ROLE_OK
+        )
+        self.assertEqual(
+            tui.stage_role(state, "7473199405533859094", "audio"), tui.ROLE_FAILED
+        )
+        self.assertEqual(
+            tui.stage_role(state, "7473199405533859094", "vision"), tui.ROLE_PENDING
+        )
+        self.assertIn("7473199405533859094", state.ids)
+        self.assertIn("✔ ok", window.text(), "the dashboard draws the prior state")
+        self.assertIn("✖ bloc", window.text(), "non-complete outcomes render")
+
+    def test_seed_prior_state_is_overwritten_by_live_narration(self) -> None:
+        provider, _ = _provider([])
+        provider.seed_prior_state([("2000000000000000001", {"fetch": "complete"})])
+        provider.out("stage fetch start: 2000000000000000001")
+        provider.out(
+            "stage fetch finish: 2000000000000000001 complete "
+            "(reused=True, 0.0s)"
+        )
+        self.assertEqual(
+            provider.state.stages["2000000000000000001"]["fetch"], "complete"
+        )
+        self.assertNotIn("2000000000000000001", provider.state.running)
+
     def test_apply_start_sets_activity_and_phase(self) -> None:
         state = tui.TuiState(started=0.0)
         self.assertTrue(tui.apply_line(state, "stage fetch start: 2000000000000000001"))

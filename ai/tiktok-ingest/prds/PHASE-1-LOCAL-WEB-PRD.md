@@ -73,7 +73,7 @@ Kept consistent across all phase PRDs:
 **Non-goals** (deferred by [ROADMAP.md](../ROADMAP.md))
 
 - Remote hosting, multiple users, authentication for other users.
-- External delivery of entries or adapters to Notion/Gertru (Phase 2).
+- External delivery of entries or adapters to Notion/Gertru (Phase 3).
 - A new database unless a demonstrated need appears (real concurrent writers,
   multiple users, or query requirements the current stores cannot support);
   any such migration is a separately documented decision, not a default.
@@ -276,12 +276,14 @@ Confirmed decisions are not re-opened; these are genuine open points.
 | Storage evolution pressure | If real concurrent writers, multiple users, or unsupported query needs appear, a storage change becomes its own documented decision with migration guarantees. Premature migration stays out. |
 | Accessibility scope | Only the concrete items in P1-FR-19 are required. Broader accessibility work is deferred, not silently assumed done. |
 
-## 13. Handoff to Phase 2
+## 13. Handoff to Phase 2 and Phase 3
 
 Phase 1 exits when the acceptance checklist above is satisfied. Phase 2
-(destination adapters) depends on explicitly accepted local entries produced
+(personal knowledge library, see
+[Phase 2 PRD](PHASE-2-PERSONAL-LIBRARY-PRD.md)) adds the Library view to this
+interface. Phase 3 (destination adapters) depends on explicitly accepted local entries produced
 by the established review flow — from either the CLI or the UI — and MUST NOT
-block Phase 1 operation (see [Phase 2 PRD](PHASE-2-DESTINATIONS-PRD.md)).
+block Phase 1 operation (see [Phase 3 PRD](PHASE-3-DESTINATIONS-PRD.md)).
 
 ## 14. References
 
@@ -290,4 +292,4 @@ block Phase 1 operation (see [Phase 2 PRD](PHASE-2-DESTINATIONS-PRD.md)).
 - [PRD.md](../PRD.md) — verdict matrix, taxonomy, state contracts.
 - [OPERATIONS.md](../OPERATIONS.md) — review semantics, concurrency
   guarantees and limits the UI must preserve.
-- [Phase 2 PRD](PHASE-2-DESTINATIONS-PRD.md).
+- [Phase 3 PRD](PHASE-3-DESTINATIONS-PRD.md).
