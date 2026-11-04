@@ -437,10 +437,12 @@ def run_web(
     closed: the run endpoints answer 409 and runs start from the terminal.
     """
     from .runner import WebRunner, register_runs  # lazy: runner imports this module
+    from .review_api import register_review
 
     runner = WebRunner(state_root, allow_runs=allow_runs)
     server = create_server(state_root, port=port)
     register_runs(server.app, runner)
+    register_review(server.app, runner)
     url = f"http://{LOOPBACK_HOST}:{server.server_port}/"
     print(url)
     try:

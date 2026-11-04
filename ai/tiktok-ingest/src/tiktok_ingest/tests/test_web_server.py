@@ -269,6 +269,7 @@ class RunWebWiringTests(unittest.TestCase):
         def fake_serve_forever(self_server, *args, **kwargs):
             app = self_server.app
             seen["collections"] = app.resolve("GET", "/api/collections") is not None
+            seen["plan"] = app.resolve("GET", "/api/backlog/plan") is not None
             seen["events"] = app.resolve("GET", "/api/runs/active/events")[0]
             handler, _params = app.resolve("POST", "/api/runs")
             request = server_module.Request(
@@ -294,6 +295,7 @@ class RunWebWiringTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         self.assertTrue(seen["collections"])
+        self.assertTrue(seen["plan"])
         self.assertIn("runner", seen["events"].__module__ + repr(seen["events"]))
         start = seen["start"]
         status = start.status if isinstance(start, server_module.HTTPError) else start[0]
