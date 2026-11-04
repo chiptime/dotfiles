@@ -98,33 +98,50 @@ TERMINAL_EVENT = "finished"
 
 
 class EventLog:
-    """Bounded ring buffer of run events + a wait point for subscribers."""
+    """Bounded ring buffer of run events + per-subscriber delivery queues.
+
+    The ring buffer only bounds the REPLAY a late subscriber receives. A
+    connected subscriber has its own queue filled at publish time, so a
+    burst faster than the client reads never drops its events.
+    """
 
     def __init__(self, capacity: int = EVENT_BUFFER_CAPACITY) -> None:
         self._capacity = capacity
         self._events: deque[dict[str, Any]] = deque(maxlen=capacity)
         self._cond = threading.Condition()
         self._seq = 0
+        self._subscribers: list[deque[dict[str, Any]]] = []
 
     def publish(self, type_: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         with self._cond:
             self._seq += 1
             event = {"seq": self._seq, "type": type_, **dict(payload)}
             self._events.append(event)
+            for queue in self._subscribers:
+                queue.append(event)
             self._cond.notify_all()
         return event
 
-    def events_after(self, seq: int) -> list[dict[str, Any]]:
+    def subscribe(self) -> deque[dict[str, Any]]:
+        """A delivery queue seeded with the current replay buffer."""
         with self._cond:
-            return [dict(event) for event in self._events if event["seq"] > seq]
+            queue: deque[dict[str, Any]] = deque(self._events)
+            self._subscribers.append(queue)
+            return queue
 
-    def wait_for_more(self, last_seq: int, timeout: float) -> bool:
-        """Block until an event beyond ``last_seq`` appears (or timeout)."""
+    def unsubscribe(self, queue: deque[dict[str, Any]]) -> None:
         with self._cond:
-            if self._events and self._events[-1]["seq"] > last_seq:
-                return True
-            self._cond.wait(timeout)
-            return bool(self._events) and self._events[-1]["seq"] > last_seq
+            if queue in self._subscribers:
+                self._subscribers.remove(queue)
+
+    def take(self, queue: deque[dict[str, Any]], timeout: float) -> list[dict[str, Any]]:
+        """Drain a subscriber queue, waiting up to ``timeout`` when empty."""
+        with self._cond:
+            if not queue:
+                self._cond.wait(timeout)
+            drained = [dict(event) for event in queue]
+            queue.clear()
+            return drained
 
 
 class _ActiveRun:
@@ -508,34 +525,32 @@ def register_runs(app: App, runner: WebRunner) -> None:
     def get_events(request: Request) -> Response:
         run = runner._current_run(missing_status=404)  # noqa: SLF001 - route seam
         log = run.events
+        # Subscribe NOW (not on first iteration) so nothing published
+        # between this request and the first chunk is lost.
+        queue = log.subscribe()
 
         def body() -> Iterable[bytes]:
-            last = 0
-            while True:
-                # Emit everything already buffered BEYOND what this
-                # subscriber has seen; events published while we were
-                # suspended in a yield are picked up on the next pass —
-                # the terminal check happens only AFTER its own chunk.
-                for event in log.events_after(last):
-                    yield _sse_chunk(event)
-                    last = event["seq"]
-                    if event["type"] == TERMINAL_EVENT:
+            try:
+                while True:
+                    events = log.take(queue, timeout=0.5)
+                    for event in events:
+                        yield _sse_chunk(event)
+                        if event["type"] == TERMINAL_EVENT:
+                            return
+                    if events:
+                        continue
+                    # Safety valve: a worker that exited WITHOUT publishing
+                    # a terminal event must not hold the stream open
+                    # forever. A dead thread has published everything it
+                    # ever will, so an empty queue proves there is no tail.
+                    if (
+                        run.thread is not None
+                        and not run.thread.is_alive()
+                        and not queue
+                    ):
                         return
-                if log.wait_for_more(last, timeout=0.5):
-                    continue
-                if log.events_after(last):
-                    continue
-                # Safety valve: a worker that exited WITHOUT publishing
-                # a terminal event must not hold the stream open forever.
-                # The double events_after check makes this airtight: a
-                # dead thread has already published everything it ever
-                # will, so an empty re-check proves there is no tail.
-                if (
-                    run.thread is not None
-                    and not run.thread.is_alive()
-                    and not log.events_after(last)
-                ):
-                    return
+            finally:
+                log.unsubscribe(queue)
 
         return (
             200,

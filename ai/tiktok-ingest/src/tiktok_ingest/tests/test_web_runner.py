@@ -617,6 +617,28 @@ class SseTests(Harness):
         self.assertEqual(seqs, sorted(seqs))
         self.assertGreater(event["seq"], 0)
 
+    def test_connected_subscriber_gets_every_event_of_a_fast_burst(self) -> None:
+        release = threading.Event()
+
+        def burst(fake, url, kwargs):
+            out = kwargs["out"]
+            if not release.wait(10):
+                raise RuntimeError("probe release timed out")
+            for index in range(3000):
+                out(f"line {index}")
+            return 0, {}
+
+        self.ingest.scenario = burst
+        self.post_json("POST", "/api/runs", _start_payload())
+        tail = self.sse_tail()  # connected BEFORE anything is published
+        time.sleep(0.2)
+        release.set()
+        tail.wait_for(lambda event: event["type"] == "finished", timeout=20)
+        lines = [e["text"] for e in tail.events() if e["type"] == "line"]
+        self.assertEqual(lines, [f"line {index}" for index in range(3000)])
+        seqs = [e["seq"] for e in tail.events()]
+        self.assertEqual(seqs, list(range(seqs[0], seqs[0] + len(seqs))))
+
     def test_events_endpoint_is_404_without_active_run(self) -> None:
         status, _, body = self.request("GET", "/api/runs/active/events")
         self.assertEqual(status, 404)
