@@ -448,7 +448,7 @@ class WebDispatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             state_root = str(Path(tmp) / "state")
             with mock.patch(
-                "tiktok_ingest.cli.run_web", return_value=0
+                "tiktok_ingest.cli.run_web", autospec=True, return_value=0
             ) as run, contextlib.redirect_stdout(io.StringIO()):
                 code = main(
                     [
@@ -463,7 +463,34 @@ class WebDispatchTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(run.call_args.kwargs["port"], 9001)
             self.assertFalse(run.call_args.kwargs["open_browser"])
-            self.assertEqual(run.call_args.kwargs["state"].root, Path(state_root))
+            self.assertEqual(
+                run.call_args.kwargs["state_root"].root, Path(state_root)
+            )
+
+    def test_cli_web_starts_the_real_server_and_stops_on_ctrl_c(self) -> None:
+        from tiktok_ingest.cli import main
+        from tiktok_ingest.web import server as server_module
+
+        def interrupt(self_server, *args, **kwargs):
+            raise KeyboardInterrupt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stdout = io.StringIO()
+            with mock.patch.object(
+                server_module.LoopbackServer, "serve_forever", interrupt
+            ), contextlib.redirect_stdout(stdout):
+                code = main(
+                    [
+                        "web",
+                        "--no-browser",
+                        "--port",
+                        "0",
+                        "--state-root",
+                        str(Path(tmp) / "state"),
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertRegex(stdout.getvalue().strip(), r"^http://127\.0\.0\.1:\d+/$")
 
 
 if __name__ == "__main__":  # pragma: no cover

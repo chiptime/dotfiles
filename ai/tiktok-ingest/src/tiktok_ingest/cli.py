@@ -1305,7 +1305,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "web":
             try:
                 return run_web(
-                    state=state,
+                    state_root=state,
                     port=args.port,
                     open_browser=not args.no_browser,
                 )
