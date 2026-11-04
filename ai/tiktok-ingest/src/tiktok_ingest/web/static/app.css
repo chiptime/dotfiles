@@ -1,21 +1,233 @@
-/* Phase 1 placeholder styles. CSP (default-src 'self') forbids inline
-   styles, so everything lives in this external stylesheet. */
-:root { color-scheme: light dark; }
+/* tiktok-ingest Phase 1 styles. CSP (default-src 'self') forbids inline
+   styles, so everything lives here. Focus states are always visible
+   (P1-FR-19). */
+
+:root {
+  color-scheme: light dark;
+  --line: color-mix(in srgb, currentColor 25%, transparent);
+  --accent: #4a7fd4;
+  --danger: #c0392b;
+  --ok: #2e7d32;
+}
+
+* { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
 
 body {
   font-family: system-ui, sans-serif;
   line-height: 1.5;
   margin: 0 auto;
-  max-width: 720px;
+  max-width: 1100px;
   padding: 0 1rem 2rem;
 }
 
-header {
-  border-bottom: 1px solid currentColor;
+a { color: var(--accent); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- header / navigation ------------------------------------------ */
+
+.site-header {
+  border-bottom: 1px solid var(--line);
   margin-bottom: 1rem;
   padding: 1rem 0;
 }
 
-h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
+.site-header h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
 
-.health { font-weight: 600; margin: 0; }
+#health { font-weight: 600; margin: 0 0 0.5rem; }
+
+#nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#nav a { display: inline-block; padding: 0.15rem 0; }
+#nav a[aria-current="page"] { font-weight: 700; text-decoration: none; }
+
+/* ---- layout -------------------------------------------------------- */
+
+.layout {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr) 320px; }
+}
+
+.view h2 { margin-top: 0; }
+.view h3 { margin-bottom: 0.35rem; }
+
+/* ---- status and error messages ------------------------------------- */
+
+.status { color: unset; }
+.error {
+  color: var(--danger);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ok-note { color: var(--ok); font-weight: 600; }
+
+/* ---- tables --------------------------------------------------------- */
+
+table.list {
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  margin: 0.5rem 0 1rem;
+  width: 100%;
+}
+
+table.list th,
+table.list td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.35rem 0.5rem 0.35rem 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+table.list th {
+  border-bottom-width: 2px;
+  white-space: nowrap;
+}
+
+table.list td { overflow-wrap: anywhere; }
+
+/* ---- forms ----------------------------------------------------------- */
+
+fieldset.options {
+  border: 1px solid var(--line);
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.field { margin: 0.5rem 0; }
+.field label { display: block; }
+.field.option label { display: inline; margin-left: 0.35rem; }
+.field input[type="text"],
+.field input[type="number"],
+.field textarea {
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+  width: 100%;
+}
+.field input[type="number"] { width: 8rem; }
+.field textarea { min-height: 4.5rem; }
+
+button { font: inherit; padding: 0.3rem 0.9rem; }
+
+/* ---- run panel -------------------------------------------------------- */
+
+.run-panel { font-size: 0.95rem; }
+.run-panel h2 { font-size: 1.15rem; margin: 0 0 0.5rem; }
+.run-panel h3 { font-size: 1rem; }
+
+.narration {
+  background: rgba(127, 127, 127, 0.12);
+  border: 1px solid var(--line);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  margin: 0.25rem 0 0.75rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+}
+
+.narration div { min-height: 1em; }
+
+/* ---- verbatim blocks (consent text, evidence, receipts) --------------- */
+
+.verbatim {
+  background: rgba(127, 127, 127, 0.12);
+  border: 1px solid var(--line);
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  margin: 0.35rem 0 0.75rem;
+  max-height: 50vh;
+  overflow: auto;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+}
+
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+/* ---- definition lists (facts) ------------------------------------------ */
+
+dl.facts {
+  display: grid;
+  gap: 0 1rem;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  margin: 0.5rem 0 1rem;
+}
+
+dl.facts dt { font-weight: 600; }
+dl.facts dd {
+  margin: 0 0 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+/* ---- consent modal (S6) -------------------------------------------------- */
+
+.modal {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  height: 100vh;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 10;
+}
+
+.modal-card {
+  background: canvastext;
+  background: light-dark(#fff, #1c1c1c);
+  border: 2px solid var(--accent);
+  color: canvastext;
+  color: light-dark(#111, #eee);
+  max-height: 92vh;
+  max-width: 46rem;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  width: min(46rem, 94vw);
+}
+
+.modal-card h2 { margin: 0 0 0.5rem; }
+.modal-card h3 { margin-bottom: 0.25rem; }
+
+.kicker { font-size: 0.9rem; margin: 0 0 0.75rem; }
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+#consent-authorize { font-weight: 700; }
+
+/* ---- misc --------------------------------------------------------------- */
+
+.back-link { display: inline-block; margin-bottom: 0.75rem; }
+
+.actions-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
