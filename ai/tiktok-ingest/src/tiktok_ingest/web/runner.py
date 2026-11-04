@@ -40,10 +40,11 @@ with a seam-enabled handler; everything else is plain JSON.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 from collections import deque
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 from .. import gpu_lease
 from ..collection import CollectionError, parse_collection_url
@@ -67,6 +68,9 @@ from .server import (
 RUNS_DISABLED_MESSAGE = (
     "run launching from the web is disabled until the Phase 0 acceptance "
     "checklist is closed; use `ti <url>` in a terminal"
+)
+REVIEW_WRITING_MESSAGE = (
+    "a backlog review write is in progress; retry when it finishes"
 )
 
 # The exact option names of the ingest CLI (`ti ingest --help`); the web
@@ -207,6 +211,9 @@ class WebRunner:
         self._shutdown_join_seconds = shutdown_join_seconds
         self._lock = threading.Lock()
         self._active: _ActiveRun | None = None
+        # S8 single-writer slot shared with review writes: a run and a
+        # review write never overlap, checked under the same lock.
+        self._review_writing = False
 
     # -- start ---------------------------------------------------------------
 
@@ -228,6 +235,8 @@ class WebRunner:
                     "a run is already active; wait for it to finish or "
                     "cancel it before starting another",
                 )
+            if self._review_writing:
+                raise HTTPError(409, REVIEW_WRITING_MESSAGE)
             payload = self._validate_options(options)
             kind = self._validate_url(payload["url"])
             self._refuse_foreign_gpu_lease()
@@ -371,6 +380,24 @@ class WebRunner:
         run.events.publish("line", {"text": text})
 
     # -- introspection ---------------------------------------------------------
+
+    @contextlib.contextmanager
+    def review_write(self, busy_message: str) -> Iterator[None]:
+        """Hold the single-writer slot for one review write (S8).
+
+        Refuses with 409 ``busy_message`` while a run is active; while
+        held, ``start`` refuses. Review writes serialize among themselves
+        through their own lock; this slot only excludes runs.
+        """
+        with self._lock:
+            if self._active is not None:
+                raise HTTPError(409, busy_message)
+            self._review_writing = True
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._review_writing = False
 
     def active_view(self) -> dict[str, Any]:
         with self._lock:

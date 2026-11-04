@@ -229,7 +229,7 @@ def register_review(app: App, runner: WebRunner) -> None:
             raise HTTPError(400, "reason must be a string or null")
 
         state_root = _state_of(request)
-        with review_lock:
+        with review_lock, runner.review_write(ACTIVE_RUN_MESSAGE):
             # Hash binding: decide on the entry the client previewed.
             # (show_entry is the public reader that yields the current
             # raw-line hash; a mismatch is the review module's stale
@@ -282,7 +282,7 @@ def register_review(app: App, runner: WebRunner) -> None:
             raise HTTPError(400, "plan_sha256 is required (echo GET /api/backlog/plan)")
 
         state_root = _state_of(request)
-        with review_lock:
+        with review_lock, runner.review_write(ACTIVE_RUN_MESSAGE):
             try:
                 decisions = parse_decisions_file(decisions_path)
                 plan = build_plan(

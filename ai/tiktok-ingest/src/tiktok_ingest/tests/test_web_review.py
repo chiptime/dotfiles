@@ -454,6 +454,66 @@ class TestSingleWriter(ReviewApiTestCase):
         self.assertIn("run is active", data["error"])
 
 
+class TestSharedWriterSlot(ReviewApiTestCase):
+    """S8 / P1-FR-13: a review write and a run start never overlap."""
+
+    def _runner_and_port(self):
+        release = threading.Event()
+
+        def fake_ingest(*args, **kwargs):
+            release.wait(timeout=10)
+            return 0, {}
+
+        runner = WebRunner(self.state, allow_runs=True, ingest=fake_ingest)
+        port = self._serve(self.state, runner)
+        self.addCleanup(runner.shutdown)
+        self.addCleanup(release.set)
+        return runner, port
+
+    def test_run_start_is_refused_while_a_decision_is_being_written(self) -> None:
+        from unittest import mock
+
+        from tiktok_ingest.web import review_api
+
+        runner, port = self._runner_and_port()
+        entered, resume = threading.Event(), threading.Event()
+        real = review_api.record_decision
+
+        def paused_record(*args, **kwargs):
+            entered.set()
+            resume.wait(timeout=10)
+            return real(*args, **kwargs)
+
+        result: dict = {}
+        with mock.patch.object(review_api, "record_decision", paused_record):
+            worker = threading.Thread(
+                target=lambda: result.update(
+                    decision=self.decide("111", "accepted", self.hashes["111"], port=port)
+                )
+            )
+            worker.start()
+            self.assertTrue(entered.wait(10))
+            with self.assertRaises(Exception) as caught:
+                runner.start(VIDEO_URL, {"url": VIDEO_URL})
+            self.assertEqual(getattr(caught.exception, "status", None), 409)
+            from tiktok_ingest.web.runner import REVIEW_WRITING_MESSAGE
+
+            self.assertEqual(caught.exception.message, REVIEW_WRITING_MESSAGE)
+            self.assertEqual(runner.active_view()["state"], "idle")
+            resume.set()
+            worker.join(10)
+        self.assertEqual(result["decision"][0], 200)
+
+    def test_apply_is_refused_while_a_run_is_starting_or_active(self) -> None:
+        runner, port = self._runner_and_port()
+        runner.start(VIDEO_URL, {"url": VIDEO_URL})
+        status, data = self.post_json(
+            "/api/backlog/apply", {"plan_sha256": "0" * 64}, port=port
+        )
+        self.assertEqual(status, 409)
+        self.assertIn("run is active", data["error"])
+
+
 class TestToken(ReviewApiTestCase):
     def test_decision_without_token_is_403(self) -> None:
         status, data = self.decide(
