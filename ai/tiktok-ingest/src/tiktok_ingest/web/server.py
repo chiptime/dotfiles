@@ -23,7 +23,7 @@ import webbrowser
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Callable, Iterable, Mapping
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .. import __version__
@@ -127,6 +127,13 @@ class _Route:
         self.segments = _split_pattern(pattern)
         self.handler = handler
 
+    def specificity(self) -> tuple[int, ...]:
+        """Sort key: 0 per literal segment, 1 per parameter (lower wins)."""
+        return tuple(
+            1 if seg.startswith("{") and seg.endswith("}") else 0
+            for seg in self.segments
+        )
+
     @staticmethod
     def _capture(params: dict[str, str], literal: str, segment: str) -> bool:
         """Record one segment match; False when the literal differs."""
@@ -170,14 +177,20 @@ class App:
         self._routes.append(_Route(method, pattern, handler))
 
     def resolve(self, method: str, path: str) -> tuple[Handler, dict[str, str]] | None:
+        # The most specific match wins regardless of registration order:
+        # position by position, a literal segment beats a parameter.
         segments = _split_path(path)
+        best: tuple[tuple[int, ...], Handler, dict[str, str]] | None = None
         for route in self._routes:
             if route.method != method:
                 continue
             params = route.match(segments)
-            if params is not None:
-                return route.handler, params
-        return None
+            if params is None:
+                continue
+            rank = route.specificity()
+            if best is None or rank < best[0]:
+                best = (rank, route.handler, params)
+        return None if best is None else (best[1], best[2])
 
 
 def _resolve_static(static_dir: Path, relative: str) -> Path | None:
@@ -223,6 +236,9 @@ def create_app(state: ServerState, static_dir: Path | None = None) -> App:
     app.route("GET", "/", index)
     app.route("GET", "/api/health", _health_handler)
     app.route("GET", "/static/{path...}", static)
+    from .views import register_views  # lazy: views imports this module
+
+    register_views(app)
     return app
 
 
@@ -337,18 +353,37 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         self,
         status: int,
         headers: Mapping[str, str],
-        body: bytes,
+        body: bytes | Iterable[bytes],
         head_only: bool = False,
     ) -> None:
+        # A non-bytes body is a stream (SSE): written chunk by chunk and
+        # delimited by closing the connection instead of Content-Length.
+        streaming = not isinstance(body, (bytes, bytearray))
         self.send_response(status)
         for name, value in {**SECURITY_HEADERS, **(headers or {})}.items():
             self.send_header(name, value)
-        self.send_header("Content-Length", str(len(body)))
-        if status >= 400:
+        if streaming and not head_only:
             self.close_connection = True
             self.send_header("Connection", "close")
+        else:
+            self.send_header("Content-Length", str(len(body or b"")))
+            if status >= 400:
+                self.close_connection = True
+                self.send_header("Connection", "close")
         self.end_headers()
-        if body and not head_only:
+        if head_only:
+            return
+        if streaming:
+            try:
+                for chunk in body:
+                    if chunk:
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+            except Exception as exc:  # client went away mid-stream
+                self.log_message("stream aborted (%s)", type(exc).__name__)
+                self.close_connection = True
+            return
+        if body:
             self.wfile.write(body)
 
     # -- sanitized logging (stderr, no query strings, no secrets) --------
@@ -394,9 +429,18 @@ def run_web(
     state_root: StateRoot,
     port: int = DEFAULT_PORT,
     open_browser: bool = True,
+    allow_runs: bool = False,
 ) -> int:
-    """Serve until Ctrl+C; print the URL once; exit 0 on KeyboardInterrupt."""
+    """Serve until Ctrl+C; print the URL once; exit 0 on KeyboardInterrupt.
+
+    ``allow_runs`` stays False until the Phase 0 acceptance checklist is
+    closed: the run endpoints answer 409 and runs start from the terminal.
+    """
+    from .runner import WebRunner, register_runs  # lazy: runner imports this module
+
+    runner = WebRunner(state_root, allow_runs=allow_runs)
     server = create_server(state_root, port=port)
+    register_runs(server.app, runner)
     url = f"http://{LOOPBACK_HOST}:{server.server_port}/"
     print(url)
     try:
@@ -407,4 +451,5 @@ def run_web(
         pass
     finally:
         server.server_close()
+        runner.shutdown()  # cancel and join an active run so cleanup runs
     return 0

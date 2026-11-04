@@ -256,6 +256,50 @@ class SafetyTests(ServerHarness):
         self.assertNotIn("SECRETVALUE", logged)
 
 
+class RunWebWiringTests(unittest.TestCase):
+    def test_run_web_serves_views_and_holds_run_launching(self) -> None:
+        from unittest import mock
+
+        from tiktok_ingest.web import server as server_module
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        seen: dict[str, object] = {}
+
+        def fake_serve_forever(self_server, *args, **kwargs):
+            app = self_server.app
+            seen["collections"] = app.resolve("GET", "/api/collections") is not None
+            seen["events"] = app.resolve("GET", "/api/runs/active/events")[0]
+            handler, _params = app.resolve("POST", "/api/runs")
+            request = server_module.Request(
+                method="POST",
+                path="/api/runs",
+                query={},
+                headers={},
+                body=b'{"url": "https://www.tiktok.com/@a/video/1"}',
+                params={},
+                state=app.state,
+            )
+            try:
+                seen["start"] = handler(request)
+            except server_module.HTTPError as exc:
+                seen["start"] = exc
+            raise KeyboardInterrupt
+
+        with mock.patch.object(
+            server_module.LoopbackServer, "serve_forever", fake_serve_forever
+        ), mock.patch("builtins.print"):
+            code = server_module.run_web(
+                StateRoot(Path(tmp.name) / "state"), port=0, open_browser=False
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue(seen["collections"])
+        self.assertIn("runner", seen["events"].__module__ + repr(seen["events"]))
+        start = seen["start"]
+        status = start.status if isinstance(start, server_module.HTTPError) else start[0]
+        self.assertEqual(status, 409)
+
+
 class RouterApiTests(unittest.TestCase):
     """Pin the exact router contract later units register endpoints with."""
 
@@ -279,6 +323,22 @@ class RouterApiTests(unittest.TestCase):
         self.assertEqual(params, {"key": "abc123"})
         handler(params and type("R", (), {"params": params, "state": self.state})())
         self.assertEqual(captured, {"key": "abc123"})
+
+    def test_literal_route_wins_over_a_parameter_route_registered_first(self) -> None:
+        def generic(request):
+            return json_response(200, {"route": "generic"})
+
+        def literal(request):
+            return json_response(200, {"route": "literal"})
+
+        self.app.route("GET", "/api/x/{key}/{name}", generic)
+        self.app.route("GET", "/api/x/active/events", literal)
+        handler, params = self.app.resolve("GET", "/api/x/active/events")
+        self.assertIs(handler, literal)
+        self.assertEqual(params, {})
+        handler, params = self.app.resolve("GET", "/api/x/k1/r1")
+        self.assertIs(handler, generic)
+        self.assertEqual(params, {"key": "k1", "name": "r1"})
 
     def test_http_error_maps_to_status_and_message(self) -> None:
         from tiktok_ingest.cli import main  # noqa: F401  (router import stays lazy)
