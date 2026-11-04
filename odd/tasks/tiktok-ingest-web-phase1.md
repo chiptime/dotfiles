@@ -25,7 +25,7 @@ Objective: ROADMAP "Phase 1 — Local web application" per `ai/tiktok-ingest/prd
 | T4 | S5,S6,S8 | run runner: worker thread, web consent provider, readiness, SSE, single-writer lock, cooperative cancel | delegated, parallel with T2; launch gated by T0 | done | `32f9447`; RED import; GREEN; parent wired SSE streaming in server.py and fixed route precedence (literal beats param, RED first) |
 | T5 | S6,S7 | frontend SPA (5 views, consent modal, run launch) | delegated after T2–T4 | done | `a9f233e`; RED 5 structural tests; GREEN; `node --check` OK |
 | T6 | S9 | docs | inline | done | docs commit |
-| T7 | all | independent verifier (risk: security item 2, concurrency item 4) | delegated | pending | |
+| T7 | all | independent verifier (risk: security item 2, concurrency item 4) | delegated | pending: verifier unavailable (provider usage limit) | parent inline security probe passed (see L8) |
 
 ## Log
 
@@ -36,3 +36,4 @@ Objective: ROADMAP "Phase 1 — Local web application" per `ai/tiktok-ingest/prd
 - L5: route collision — views' `/api/runs/{key}/{report}` captured `/api/runs/active/events`; parent changed the router so the most specific route wins (literal segment beats parameter), RED test first.
 - L6: parent committed T3 once with 3 failing `RunWebTests` (bare Mock server lacks a real app); fixed in `426a110`.
 - L7: review decisions use the product vocabulary `accepted`/`rejected` (P1-FR-03); apply is bound by `plan_sha256` of the previewed plan because the CLI has no confirmation token.
+- L8 (2026-11-04 02:08): independent verifier failed to start (provider usage limit). Parent inline probe on a port-0 server wired like run_web, fresh temp state: foreign/portless/other-port/IPv6/trailing-dot Host → 421 (uppercase LOCALHOST accepted: Host is case-insensitive); Origin null/foreign/https/other-port → 403 on GET and POST; POST/PUT/DELETE/PATCH without or with a wrong token → 403; 8 traversal variants → 404/400; POST /api/runs → 409 disabled message; token absent from non-index responses and stderr; CLI has no way to enable allow_runs. Not independent: concurrency, review races, SSE ordering and CLI differential still need the verifier.
