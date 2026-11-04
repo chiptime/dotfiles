@@ -130,9 +130,10 @@ class EventLog:
             return queue
 
     def unsubscribe(self, queue: deque[dict[str, Any]]) -> None:
+        # Identity, not equality: two clients' queues often hold equal
+        # events, and removing the wrong one would starve a live client.
         with self._cond:
-            if queue in self._subscribers:
-                self._subscribers.remove(queue)
+            self._subscribers = [q for q in self._subscribers if q is not queue]
 
     def take(self, queue: deque[dict[str, Any]], timeout: float) -> list[dict[str, Any]]:
         """Drain a subscriber queue, waiting up to ``timeout`` when empty."""

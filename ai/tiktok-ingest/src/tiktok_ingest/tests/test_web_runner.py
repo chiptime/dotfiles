@@ -586,6 +586,21 @@ class CancelTests(Harness):
         self.assertIn("no active run", body["error"])
 
 
+class EventLogSubscriberTests(unittest.TestCase):
+    def test_unsubscribing_one_client_never_removes_another_equal_queue(self) -> None:
+        from tiktok_ingest.web.runner import EventLog
+
+        log = EventLog()
+        log.publish("line", {"text": "a"})
+        first, second = log.subscribe(), log.subscribe()
+        self.assertEqual(first, second)  # same replay contents
+        log.unsubscribe(second)
+        log.publish("finished", {"exit_code": 0})
+        self.assertEqual([e["type"] for e in log.take(first, 0)], ["line", "finished"])
+        log.unsubscribe(first)
+        self.assertEqual(log._subscribers, [])  # noqa: SLF001 - leak check
+
+
 class SseTests(Harness):
     def test_late_subscriber_gets_buffer_replay(self) -> None:
         self.ingest.scenario = self._lines_then_block
