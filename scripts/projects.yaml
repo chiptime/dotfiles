@@ -98,6 +98,7 @@ llm-hub:
   scope: personal
   status: active
   desc: Hub para levantar modelos locales — vivo, uso puntual
+  next: Commitear el trabajo local-chat pendiente y decidir push/PR de feat/tiktok-ingest-vision-whisper-gpu
 
 modular-saas:
   scope: personal
