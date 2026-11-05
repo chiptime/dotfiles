@@ -51,7 +51,7 @@ compare-prices:
   scope: personal
   status: active
   desc: Price comparator (Bun/Elysia + React/Vite). Crawl con resume automático: barrido cada 15 min + botón Reanudar + persistencia confirmada por página y lock por mercado (PRs #50/#51); panel Procesos de crawling con salud y coste MB (PR #47). EROSKI t:ac y ALCAMPO JSON+FALLBACK operativos.
-  next: Commitear PRDs + backend/scripts/test-env en fix/eci-stores; redesplegar VPS para PRs #47/#50/#51 y verificar el barrido de 15 min
+  next: Verificar el merge local 5338d609 y corregir el aislamiento entre mercados de la escalera Eroski antes de desplegar; revisar también PRDs + backend/scripts/test-env y el barrido de 15 min pendientes
 
 vps:
   scope: personal
@@ -67,8 +67,8 @@ engram-sync:
 ai-stack:
   scope: personal
   status: active
-  desc: Control-hub en producción — sync-tasks migrado a script determinista Node sin tokens (3.3s); OpenClaw detenido en VPS a demanda; drift-alert, watchdog y backup operativos
-  next: Levantar OpenClaw (docker start) cuando se retome la actividad y verificar ejecución desatendida de sync-tasks a las 10:15
+  desc: Stack del VPS — Hermes es el agente: laboratorio local v0.22.7 con Gertru migrada y compactada (memoria 98%, 3 skills propias), rama feat/hermes-gertru-ingest publicada; OpenClaw aparcado
+  next: En sesión nueva en ai-stack: arreglar pack (exclusión anidada de secretos), backup del volumen hermes-data con ensayo de restauración, merge autorizado y desplegar v0.22.7 + bundle de Gertru en el VPS
 
 voice-assistant:
   scope: personal
