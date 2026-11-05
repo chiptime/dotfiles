@@ -74,7 +74,7 @@ voice-assistant:
   scope: personal
   status: active
   desc: Asistente de voz (Electron + Whisper) + Pipecat con TTS Edge local; bucle completo validado en vivo
-  next: Oir respuesta en renderer (beep probe + salida por-app de Windows); fix fuga tareas en stop (Task-83); latencia 1ª respuesta 8-21 s (UX pensando ya puesto); guion 6 turnos pendiente
+  next: Rotar GDRIVE_CLIENT_SECRET y refresh token: el secreto está en el historial (385bad8, 9ed15fe) y el repo tiene remoto
 
 busqueda-vacaciones:
   scope: personal
