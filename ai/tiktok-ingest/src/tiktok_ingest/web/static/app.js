@@ -565,9 +565,10 @@
     fetch: "Download the video and validate it (blocklist, cache, size "
       + "limits).",
     prepare: "Extract frames and audio from the video with FFmpeg (CPU only).",
-    audio: "Transcribe the audio with the local Whisper service.",
-    vision: "Describe the sampled frames with the local vision model "
-      + "(Ollama, GPU).",
+    audio: "Transcribe the audio with the resident llm-hub-whisper "
+      + "service.",
+    vision: "Describe the sampled frames with the resident llm-hub chat "
+      + "model.",
     synthesis: "Turn the visual and audio evidence into claims, entities "
       + "and a classification.",
     verify: "Check each claim against its candidate URLs and record a "

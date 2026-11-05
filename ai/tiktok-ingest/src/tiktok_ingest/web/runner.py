@@ -19,8 +19,6 @@ Honesty rules carried into this module:
 - The SSE stream is DERIVED narration, never an authority: the report
   stays on disk (the saved run report), and a reload rebuilds state from
   the product's own stores. The in-memory buffer is bounded.
-- The GPU lease stays authoritative: a live foreign lease marker is a
-  hard refusal (the marker itself is never touched here).
 - Signals only reach the main thread, so cancellation is COOPERATIVE:
   ``cancel()`` resolves any pending prompt fail-closed and the worker
   raises ``KeyboardInterrupt`` at the next safe point (a narration call
@@ -29,8 +27,8 @@ Honesty rules carried into this module:
   cancellation takes effect; the existing per-stage timeouts bound that
   wait. No ctypes async exceptions.
 - Process exit: ``shutdown()`` cancels and bounded-joins an active run
-  so the engine's GPU lease restore/marker logic runs; a hard kill is
-  covered by the existing startup reconcile, never silently assumed.
+  so the engine's own interruption handling runs; a hard kill is
+  recovered from the persisted state, never silently assumed.
 
 Streaming seam: the SSE endpoint returns an iterable body. Until
 ``server.WebRequestHandler._send`` grows iterable-body support (a
@@ -46,12 +44,11 @@ import threading
 from collections import deque
 from typing import Any, Callable, Iterable, Iterator, Mapping
 
-from .. import gpu_lease
 from ..collection import CollectionError, parse_collection_url
 from ..contracts import utc_now_iso
 from ..fetch import PipelineError, parse_tiktok_url
 from ..ingest import IngestError, run_ingest
-from ..state import StateError, StateRoot
+from ..state import StateRoot
 from .consent import PromptRejected, WebConsentProvider
 from .server import (
     App,
@@ -238,9 +235,8 @@ class WebRunner:
     def start(self, url: object, options: object) -> dict[str, Any]:
         """Validate and launch ONE run in a worker thread.
 
-        Guard order: the L3 hold, the single-writer lock (S8), input
-        validation (400), then the GPU lease refusal (S8) — the lease
-        itself stays authoritative and is never touched.
+        Guard order: the L3 hold, the single-writer lock (S8), then
+        input validation (400).
         """
         if not isinstance(options, dict):
             raise HTTPError(400, "a JSON object body is required")
@@ -257,14 +253,13 @@ class WebRunner:
                 raise HTTPError(409, REVIEW_WRITING_MESSAGE)
             payload = self._validate_options(options)
             kind = self._validate_url(payload["url"])
-            self._refuse_foreign_gpu_lease()
             run = _ActiveRun(payload["url"], kind, payload)
             run.thread = threading.Thread(
                 target=self._worker,
                 args=(run,),
                 name="ti-web-run",
                 daemon=True,  # shutdown() joins bounded; a hard exit is
-                # still covered by the startup reconcile.
+                # still recovered from the persisted state.
             )
             self._active = run
             run.thread.start()
@@ -315,15 +310,6 @@ class WebRunner:
                     )
                 ),
             ) from exc
-
-    def _refuse_foreign_gpu_lease(self) -> None:
-        marker = gpu_lease.LeaseMarkerFile(self.state_root)
-        try:
-            owner = marker.live_foreign_owner()
-        except StateError as exc:  # unreadable marker: ownership is never guessed
-            raise HTTPError(409, f"gpu lease marker unreadable: {exc}") from exc
-        if owner is not None:
-            raise HTTPError(409, gpu_lease._busy_message(owner))
 
     # -- worker ---------------------------------------------------------------
 
@@ -477,7 +463,7 @@ class WebRunner:
 
     def shutdown(self) -> None:
         """Process-exit rule: cancel any active run and bounded-join the
-        worker so the engine's GPU lease restore/marker logic runs."""
+        worker so the engine's own interruption handling runs."""
         with self._lock:
             run = self._active
         if run is None:

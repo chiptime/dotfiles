@@ -29,8 +29,6 @@ class ParserTests(unittest.TestCase):
                 "install-extractor",
                 "fetch-url",
                 "prepare",
-                "install-ollama",
-                "import-model",
                 "vision",
                 "audio",
                 "synthesize",
@@ -127,19 +125,28 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 2)
 
     def test_milestone_3_commands_parse(self) -> None:
-        args = self.parser.parse_args(
-            ["import-model", "--model", "qwen3.5:9b", "--share-root", "/tmp/sr"]
-        )
-        self.assertEqual(args.command, "import-model")
-        self.assertEqual(args.model, "qwen3.5:9b")
         args = self.parser.parse_args(["vision", "123", "--force"])
         self.assertEqual(args.command, "vision")
         self.assertEqual(args.video_id, "123")
         self.assertTrue(args.force)
         args = self.parser.parse_args(["audio", "123"])
         self.assertEqual(args.command, "audio")
-        args = self.parser.parse_args(["install-ollama"])
-        self.assertEqual(args.command, "install-ollama")
+
+    def test_removed_ollama_commands_are_gone(self) -> None:
+        for removed in ("install-ollama", "import-model"):
+            stderr = io.StringIO()
+            with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(
+                stderr
+            ):
+                self.parser.parse_args([removed])
+            self.assertEqual(ctx.exception.code, 2)
+        # The removed swap-gate flag is gone too.
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(
+            stderr
+        ):
+            self.parser.parse_args(["vision", "123", "--swap-limit-mib", "1024"])
+        self.assertEqual(ctx.exception.code, 2)
 
     def test_fetch_url_parses_url_and_flags(self) -> None:
         args = self.parser.parse_args(
@@ -355,7 +362,7 @@ class GuidedRunDispatchTests(unittest.TestCase):
             code = main(argv)
         return code, stdout.getvalue(), stderr.getvalue()
 
-    def test_guided_run_wires_whisper_lifecycle_stages(self) -> None:
+    def test_guided_run_wires_default_stages(self) -> None:
         with mock.patch(
             "tiktok_ingest.cli.run_guided", return_value=(0, {"mode": "execute"})
         ) as run:
@@ -370,10 +377,20 @@ class GuidedRunDispatchTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         stages = run.call_args.kwargs["stages"]
-        self.assertTrue(stages.whisper_lifecycle_ready())
-        self.assertIsNotNone(stages.whisper_inspect)
-        self.assertIsNotNone(stages.whisper_stop)
-        self.assertIsNotNone(stages.whisper_restore)
+        # The plain production bundle: the six stages plus the read-only
+        # whisper health precheck — no lifecycle hooks exist any more.
+        for name in (
+            "fetch",
+            "prepare",
+            "vision",
+            "audio",
+            "synthesize",
+            "verify",
+            "whisper_health",
+        ):
+            self.assertTrue(callable(getattr(stages, name)), name)
+        self.assertFalse(hasattr(stages, "whisper_stop"))
+        self.assertFalse(hasattr(stages, "ollama_start"))
 
     def test_guided_run_keeps_stdout_json_and_summarizes_on_stderr(self) -> None:
         report = {

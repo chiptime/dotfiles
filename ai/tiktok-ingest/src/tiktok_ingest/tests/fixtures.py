@@ -109,7 +109,7 @@ def sample_manifest() -> JobManifest:
         config_versions={"prompt_pack": "1", "transcript_policy": config.TRANSCRIPT_POLICY},
         budgets=dataclasses.asdict(config.BUDGETS),
         stages=stages,
-        resource_gates={"free_vram_gate_mib": config.GATES.free_vram_gate_mib},
+        resource_gates={},
     )
 
 

@@ -208,10 +208,7 @@ class FakeStages:
         vision_outcomes: dict[str, FakeOutcome] | None = None,
         audio_outcome: FakeOutcome | None = None,
         verify_outcome: FakeOutcome | None = None,
-        whisper_running: bool = False,
         whisper_healthy: bool = True,
-        ollama_already_running: bool = False,
-        stop_raises: bool = False,
         vision_raises: BaseException | None = None,
         real_synthesis: bool = True,
         verify_emits_pending: bool = False,
@@ -222,15 +219,10 @@ class FakeStages:
         self.vision_outcomes = vision_outcomes or {}
         self.audio_outcome = audio_outcome or FakeOutcome("complete")
         self.verify_outcome = verify_outcome or FakeOutcome("complete")
-        self.whisper_running = whisper_running
         self.whisper_healthy = whisper_healthy
-        self.ollama_already_running = ollama_already_running
-        self.stop_raises = stop_raises
         self.vision_raises = vision_raises
         self.real_synthesis = real_synthesis
         self.verify_emits_pending = verify_emits_pending
-        self.server_started = 0
-        self.server_stopped = 0
 
     def functions(self) -> guided.StageFunctions:
         return guided.StageFunctions(
@@ -240,12 +232,7 @@ class FakeStages:
             audio=self.do_audio,
             synthesize=self.do_synthesize,
             verify=self.do_verify,
-            whisper_stopped=self.do_whisper_stopped,
             whisper_health=self.do_whisper_health,
-            ollama_reachable=self.do_ollama_reachable,
-            ollama_start=self.do_ollama_start,
-            ollama_wait_ready=self.do_ollama_wait_ready,
-            ollama_stop=self.do_ollama_stop,
         )
 
     def do_fetch(self, url: str, state: StateRoot) -> FakeOutcome:
@@ -298,38 +285,11 @@ class FakeStages:
             emit_backlog_entry(Backlog(state), entry)
         return self.verify_outcome
 
-    def do_whisper_stopped(self) -> None:
-        self.calls.append("whisper-stopped-check")
-        if self.whisper_running:
-            raise RuntimeError(
-                "stop the whisper service first (operator-authorized action): "
-                "still running: ['voice-assistant-whisper']"
-            )
-
     def do_whisper_health(self) -> tuple[bool, str]:
         self.calls.append("whisper-health-check")
         if self.whisper_healthy:
             return True, "healthy"
         return False, "whisper health endpoint unreachable: fixture"
-
-    def do_ollama_reachable(self) -> bool:
-        self.calls.append("ollama-reachable-check")
-        return self.ollama_already_running
-
-    def do_ollama_start(self) -> object:
-        self.calls.append("ollama-start")
-        self.server_started += 1
-        return object()
-
-    def do_ollama_wait_ready(self, handle: object) -> str:
-        self.calls.append("ollama-wait-ready")
-        return config.GATES.isolated_ollama_version
-
-    def do_ollama_stop(self, handle: object) -> None:
-        self.calls.append("ollama-stop")
-        self.server_stopped += 1
-        if self.stop_raises:
-            raise RuntimeError("fixture: SIGTERM did not stop the server")
 
 
 class ScriptedConsent(guided.ConsentProvider):
@@ -846,7 +806,7 @@ class TestGpuWindow(GuidedTestCase):
         seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
         seed_job(self.state, fake_id(2), complete=("fetch", "prepare"))
 
-    def test_vision_all_then_verified_stop_then_audio(self) -> None:
+    def test_vision_all_then_health_then_audio(self) -> None:
         self._seed_two_prepared()
         stages = FakeStages()
         code, report, _ = self.run_guided_with(
@@ -856,36 +816,17 @@ class TestGpuWindow(GuidedTestCase):
         )
         self.assertEqual(code, 0)
         calls = stages.calls
-        self.assertLess(calls.index("ollama-start"), calls.index(f"vision:{fake_id(1)}"))
         self.assertLess(calls.index(f"vision:{fake_id(1)}"), calls.index(f"vision:{fake_id(2)}"))
-        self.assertLess(calls.index(f"vision:{fake_id(2)}"), calls.index("ollama-stop"))
-        self.assertLess(calls.index("ollama-stop"), calls.index("whisper-health-check"))
+        self.assertLess(calls.index(f"vision:{fake_id(2)}"), calls.index("whisper-health-check"))
         self.assertLess(calls.index("whisper-health-check"), calls.index(f"audio:{fake_id(1)}"))
         self.assertLess(calls.index(f"audio:{fake_id(1)}"), calls.index(f"audio:{fake_id(2)}"))
-        self.assertEqual(stages.server_started, 1)
-        self.assertEqual(stages.server_stopped, 1)
 
-    def test_whisper_running_blocks_vision_before_any_load(self) -> None:
-        self._seed_two_prepared()
-        stages = FakeStages(whisper_running=True)
-        code, report, _ = self.run_guided_with(
-            stages,
-            ScriptedConsent([("tanda", True), ("gpu", True)]),
-            ids=[fake_id(1), fake_id(2)],
-        )
-        self.assertEqual(code, 1)
-        self.assertNotIn("ollama-start", stages.calls)
-        self.assertNotIn(f"vision:{fake_id(1)}", stages.calls)
-        vision_failures = [f for f in report["failures"] if f["stage"] == "vision"]
-        self.assertEqual(len(vision_failures), 2)
-        self.assertIn("stop the whisper service first", vision_failures[0]["reason"])
-
-    def test_whisper_running_does_not_block_audio_of_vision_complete_ids(self) -> None:
+    def test_vision_failure_does_not_block_audio_of_vision_complete_ids(self) -> None:
         seed_scan(self.state, [1])
         seed_job(
             self.state, fake_id(1), complete=("fetch", "prepare", "vision")
         )
-        stages = FakeStages(whisper_running=True)
+        stages = FakeStages()
         code, _, _ = self.run_guided_with(
             stages,
             ScriptedConsent([("tanda", True), ("gpu", True)]),
@@ -893,14 +834,13 @@ class TestGpuWindow(GuidedTestCase):
         )
         self.assertEqual(code, 0)
         self.assertIn(f"audio:{fake_id(1)}", stages.calls)
-        self.assertNotIn("ollama-start", stages.calls)
 
-    def test_fired_gate_ends_window_no_further_gpu_load(self) -> None:
+    def test_vision_failure_ends_window_no_further_requests(self) -> None:
         self._seed_two_prepared()
         stages = FakeStages(
             vision_outcomes={
                 fake_id(1): FakeOutcome(
-                    "failed", "swap I/O delta exceeds the limit; window closed"
+                    "failed", "llm-hub request failed; window closed"
                 )
             }
         )
@@ -913,23 +853,9 @@ class TestGpuWindow(GuidedTestCase):
         self.assertNotIn(f"vision:{fake_id(2)}", stages.calls)
         self.assertNotIn(f"audio:{fake_id(1)}", stages.calls)
         self.assertNotIn(f"audio:{fake_id(2)}", stages.calls)
-        # The server this run started is still stopped (cleanup runs).
-        self.assertEqual(stages.server_stopped, 1)
+        self.assertTrue(report["vision_window_closed"])
 
-    def test_preexisting_ollama_is_never_adopted(self) -> None:
-        self._seed_two_prepared()
-        stages = FakeStages(ollama_already_running=True)
-        code, report, _ = self.run_guided_with(
-            stages,
-            ScriptedConsent([("tanda", True), ("gpu", True)]),
-            ids=[fake_id(1), fake_id(2)],
-        )
-        self.assertEqual(code, 1)
-        self.assertNotIn("ollama-start", stages.calls)
-        reason = report["failures"][0]["reason"]
-        self.assertIn("never adopts a preexisting process", reason)
-
-    def test_interrupt_runs_cleanup_and_preserves_partials(self) -> None:
+    def test_interrupt_preserves_partials(self) -> None:
         self._seed_two_prepared()
         stages = FakeStages(vision_raises=KeyboardInterrupt())
         code, report, _ = self.run_guided_with(
@@ -939,26 +865,7 @@ class TestGpuWindow(GuidedTestCase):
         )
         self.assertEqual(code, 1)
         self.assertTrue(report["interrupted"])
-        self.assertEqual(stages.server_stopped, 1)
         self.assertNotIn("audio", " ".join(stages.calls))
-
-    def test_cleanup_failure_blocks_audio_explicitly(self) -> None:
-        self._seed_two_prepared()
-        stages = FakeStages(stop_raises=True)
-        code, report, _ = self.run_guided_with(
-            stages,
-            ScriptedConsent([("tanda", True), ("gpu", True)]),
-            ids=[fake_id(1), fake_id(2)],
-        )
-        self.assertEqual(code, 1)
-        self.assertIn(f"vision:{fake_id(1)}", stages.calls)
-        self.assertNotIn(f"audio:{fake_id(1)}", stages.calls)
-        self.assertTrue(
-            any("ISOLATED OLLAMA STOP FAILED" in n for n in report["cleanup_notes"])
-        )
-        self.assertTrue(
-            any("audio NOT attempted" in n for n in report["notes"])
-        )
 
     def test_gpu_window_not_asked_when_nothing_pending(self) -> None:
         seed_scan(self.state, [1])
@@ -1189,7 +1096,9 @@ class TestResume(GuidedTestCase):
         self.assertEqual(code, 1)
         audio_failure = [f for f in report["failures"] if f["stage"] == "audio"][0]
         self.assertEqual(audio_failure["outcome"], "blocked")
-        self.assertIn("start it explicitly", audio_failure["reason"])
+        self.assertIn(
+            "systemctl --user start llm-hub-whisper", audio_failure["reason"]
+        )
         self.assertIn("zero re-inference", audio_failure["reason"])
         self.assertNotIn(f"audio:{fake_id(1)}", stages.calls)
 
@@ -1224,76 +1133,9 @@ class TestReportingAndDefaults(GuidedTestCase):
             "audio",
             "synthesize",
             "verify",
-            "whisper_stopped",
             "whisper_health",
-            "ollama_reachable",
-            "ollama_start",
-            "ollama_wait_ready",
-            "ollama_stop",
         ):
             self.assertTrue(callable(getattr(defaults, name)), name)
-
-    def test_default_whisper_stopped_returns_when_none_running(self) -> None:
-        """The zero-arg adapter must reach the REAL podman query.
-
-        Regression: the default lambda used to call
-        ``assert_whisper_stopped()`` without the required ``runner``,
-        so every real invocation raised TypeError and surfaced as a
-        misleading operator-facing block.
-        """
-        from tiktok_ingest.vision import VisionError
-
-        defaults = guided.default_stage_functions()
-        argv_seen: list[list[str]] = []
-
-        def fake_runner(argv, timeout=None):  # type: ignore[no-untyped-def]
-            argv_seen.append(list(argv))
-            return 0, "some-container\nother-tool\n", ""
-
-        with mock.patch.object(guided, "subprocess_runner", fake_runner):
-            self.assertIsNone(defaults.whisper_stopped())
-        self.assertEqual(argv_seen, [["podman", "ps", "--format", "{{.Names}}"]])
-
-    def test_default_whisper_stopped_fails_closed_when_whisper_running(self) -> None:
-        from tiktok_ingest.vision import VisionError
-
-        defaults = guided.default_stage_functions()
-
-        def fake_runner(argv, timeout=None):  # type: ignore[no-untyped-def]
-            return 0, "voice-assistant-whisper\n", ""
-
-        with mock.patch.object(guided, "subprocess_runner", fake_runner):
-            with self.assertRaises(VisionError) as ctx:
-                defaults.whisper_stopped()
-        self.assertIn("still running", str(ctx.exception))
-        self.assertIn("voice-assistant-whisper", str(ctx.exception))
-
-    def test_default_whisper_stopped_fails_closed_when_podman_fails(self) -> None:
-        from tiktok_ingest.vision import VisionError
-
-        defaults = guided.default_stage_functions()
-
-        def fake_runner(argv, timeout=None):  # type: ignore[no-untyped-def]
-            return 1, "", "podman fixture failure"
-
-        with mock.patch.object(guided, "subprocess_runner", fake_runner):
-            with self.assertRaises(VisionError) as ctx:
-                defaults.whisper_stopped()
-        self.assertIn("cannot verify", str(ctx.exception))
-        self.assertIn("failing closed", str(ctx.exception))
-
-    def test_default_whisper_stopped_binds_production_runner(self) -> None:
-        from tiktok_ingest import runtime
-
-        self.assertIs(guided.subprocess_runner, runtime.subprocess_runner)
-
-    def test_ollama_reachable_false_when_port_closed(self) -> None:
-        original = config.OLLAMA_API_BASE
-        config.OLLAMA_API_BASE = "http://127.0.0.1:1"
-        try:
-            self.assertFalse(guided._ollama_reachable())  # noqa: SLF001
-        finally:
-            config.OLLAMA_API_BASE = original
 
     def test_fetch_failure_recorded_and_other_ids_continue(self) -> None:
         # id 1 still needs its fetch; id 2 already has fetch+prepare and
@@ -1319,68 +1161,6 @@ class TestReportingAndDefaults(GuidedTestCase):
         self.assertNotIn(f"vision:{fake_id(1)}", stages.calls)
         fetch_failure = [f for f in report["failures"] if f["stage"] == "fetch"][0]
         self.assertEqual(fetch_failure["id"], fake_id(1))
-
-
-# --------------------------------------------------------------------------
-# GPU window whisper text: standalone vs lifecycle-coordinated semantics
-# --------------------------------------------------------------------------
-
-
-class ManagedFakeStages(FakeStages):
-    """FakeStages plus the Phase 0 whisper lifecycle hooks.
-
-    With the service already stopped the hooks are never invoked; they
-    only enable the managed coordination path so its consent text can
-    be asserted separately from the standalone default.
-    """
-
-    def functions(self) -> guided.StageFunctions:
-        base = super().functions()
-        return dataclasses.replace(
-            base,
-            whisper_inspect=lambda: None,
-            whisper_stop=lambda info: None,
-            whisper_restore=lambda info: None,
-        )
-
-
-class TestGpuWhisperConsentText(GuidedTestCase):
-    def _run_to_gpu_window(
-        self, stages: FakeStages
-    ) -> tuple[ConsentWindow, list[str]]:
-        seed_scan(self.state, [1])
-        seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
-        consent = ScriptedConsent([("tanda", True), ("gpu", True)])
-        _, _, messages = self.run_guided_with(
-            stages, consent, ids=[fake_id(1)]
-        )
-        gpu_windows = [w for w in consent.windows if w.kind == "gpu"]
-        self.assertEqual(len(gpu_windows), 1)
-        return gpu_windows[0], messages
-
-    def test_standalone_window_keeps_operator_managed_text(self) -> None:
-        gpu, messages = self._run_to_gpu_window(FakeStages())
-        effects = " ".join(gpu.effects)
-        self.assertIn("never manages that service", effects)
-        self.assertTrue(
-            any("never stops or starts it" in message for message in messages),
-            messages,
-        )
-
-    def test_managed_window_names_consent_coordinated_stop_and_restore(self) -> None:
-        gpu, messages = self._run_to_gpu_window(ManagedFakeStages())
-        effects = " ".join(gpu.effects)
-        self.assertNotIn("never manages that service", effects)
-        self.assertIn("explicit consent", effects)
-        self.assertIn("standing restore", effects)
-        self.assertFalse(
-            any("never stops or starts it" in message for message in messages),
-            messages,
-        )
-        self.assertTrue(
-            any("explicit consent" in message for message in messages),
-            messages,
-        )
 
 
 # --------------------------------------------------------------------------
@@ -1463,8 +1243,8 @@ class TestGpuConsentAudioOperations(GuidedTestCase):
         gpu = [w for w in consent.windows if w.kind == "gpu"][0]
         audio_op = " ".join(gpu.operations)
         self.assertIn(
-            "full-audio transcription through the shared whisper WS "
-            "service per pending id",
+            "full-audio transcription through the resident llm-hub-whisper "
+            "WS service per pending id",
             audio_op,
         )
         self.assertNotIn("conditional", audio_op)
@@ -1489,6 +1269,22 @@ class TestGpuConsentAudioOperations(GuidedTestCase):
         # Both ids' audio actually ran under that one consent line.
         self.assertIn(f"audio:{fake_id(1)}", stages.calls)
         self.assertIn(f"audio:{fake_id(2)}", stages.calls)
+
+    def test_collection_audio_accepts_prepared_ids_without_vision(self) -> None:
+        seed_scan(self.state, [1])
+        seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
+        selection = guided.select_ids(self.state, [fake_id(1)], limit=5)
+        stages = FakeStages()
+        consent = ScriptedConsent([("gpu", True)])
+        runner = guided.GuidedRun(self.state, stages=stages.functions(), consent=consent)
+        report = runner._execute_collection_phase(selection, "audio")
+        self.assertIn(f"audio:{fake_id(1)}", stages.calls)
+        self.assertFalse(any(call.startswith("vision:") for call in stages.calls))
+        window = consent.windows[0]
+        self.assertEqual(window.ids, (fake_id(1),))
+        self.assertIn("unconditional", " ".join(window.operations))
+        self.assertNotIn("CONDITIONALLY", " ".join(window.operations))
+        self.assertEqual(report["selected"][0]["stages"]["audio"], "complete")
 
     def test_audio_complete_reused_not_rerequested(self) -> None:
         seed_scan(self.state, [1, 2])
@@ -1518,326 +1314,6 @@ class TestGpuConsentAudioOperations(GuidedTestCase):
 
 
 # --------------------------------------------------------------------------
-# Whisper restore: bounded read-only readiness wait after the one start
-# --------------------------------------------------------------------------
-
-
-class FakeRestoreClock:
-    """Deterministic monotonic clock + sleep recorder (never really sleeps)."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-        self.slept: list[float] = []
-
-    def monotonic(self) -> float:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.slept.append(seconds)
-        self.now += seconds
-
-
-class RestoreLifecycleFakeStages(FakeStages):
-    """Managed fake with a scriptable restore/health sequence.
-
-    The whisper service starts RUNNING so the managed coordination path
-    triggers (identity-verified stop behind its two consent windows);
-    the stop flips it to stopped and ONE restore starts it again.
-    Health results are consumed in order (the last repeats when the
-    script is exhausted); ``health_raises`` fires instead, to script an
-    interruption inside the readiness wait.
-    """
-
-    def __init__(
-        self,
-        *,
-        health_results: list[tuple[bool, str]] | None = None,
-        health_raises: BaseException | None = None,
-    ) -> None:
-        super().__init__(whisper_running=True)
-        self.health_results = list(health_results or [(True, "healthy")])
-        self.health_raises = health_raises
-        self.restore_calls: list[object] = []
-        self.stop_calls: list[object] = []
-
-    def functions(self) -> guided.StageFunctions:
-        base = super().functions()
-        return dataclasses.replace(
-            base,
-            whisper_inspect=lambda: self._info(),
-            whisper_stop=lambda info: self._do_stop(info),
-            whisper_restore=lambda info: self._do_restore(info),
-            whisper_health=self._do_scripted_health,
-        )
-
-    def _info(self) -> object:
-        from tiktok_ingest.whisper_lifecycle import WhisperServiceInfo
-
-        return WhisperServiceInfo(
-            name="voice-assistant-whisper",
-            image="fixture/whisper:latest",
-            state="running",
-            running=True,
-            env=(("DEVICE", "cuda"),),
-        )
-
-    def _do_stop(self, info: object) -> None:
-        self.stop_calls.append(info)
-        self.calls.append("whisper-stop")
-        self.whisper_running = False
-
-    def _do_restore(self, info: object) -> None:
-        self.restore_calls.append(info)
-        self.calls.append("whisper-restore")
-        self.whisper_running = True
-
-    def _do_scripted_health(self) -> tuple[bool, str]:
-        self.calls.append("whisper-health-check")
-        if self.health_raises is not None:
-            raise self.health_raises
-        if len(self.health_results) > 1:
-            return self.health_results.pop(0)
-        return self.health_results[0]
-
-
-MANAGED_GRANT = [
-    ("tanda", True),
-    ("gpu", True),
-    ("whisper-stop", True),
-    ("whisper-restore", True),
-]
-
-
-class TestWhisperRestoreReadinessWait(GuidedTestCase):
-    """After the ONE authorized restore, health is POLLED read-only.
-
-    A transient connection reset right after the start must not
-    permanently block the run: the wait is bounded (small deadline,
-    bounded per-probe timeout, non-busy interval), stops on success,
-    reports the started-but-unhealthy state on deadline, never repeats
-    the start, and never swallows an interruption.
-    """
-
-    def _seed_prepared(self) -> None:
-        seed_scan(self.state, [1])
-        seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
-
-    def test_restore_failure_prevents_synthesis_and_verify_of_ready_peer(self) -> None:
-        class FailedRestore(RestoreLifecycleFakeStages):
-            def _do_restore(self, info: object) -> None:
-                super()._do_restore(info)
-                raise RuntimeError("fixture failed restore")
-
-        seed_scan(self.state, [1, 2])
-        seed_job(
-            self.state, fake_id(1),
-            complete=("fetch", "prepare", "vision", "audio"), evidence=True,
-        )
-        seed_job(self.state, fake_id(2), complete=("fetch", "prepare"))
-        stages = FailedRestore()
-        stages.real_synthesis = False
-        consent = ScriptedConsent(list(MANAGED_GRANT) + [("verify", True)])
-        code, report, _ = self.run_guided_with(
-            stages, consent, ids=[fake_id(1), fake_id(2)],
-            synthesis={fake_id(1): Path(self.tmp.name) / "unused.json"},
-        )
-        self.assertEqual(code, 1)
-        self.assertTrue(report["whisper_restore_failed"])
-        self.assertFalse(any(
-            call.startswith(("synthesize:", "verify:")) for call in stages.calls
-        ), stages.calls)
-        self.assertNotIn("verify", consent.asked_kinds)
-
-    def test_collection_audio_accepts_prepared_ids_without_vision(self) -> None:
-        self._seed_prepared()
-        selection = guided.select_ids(self.state, [fake_id(1)], limit=5)
-        stages = FakeStages()
-        consent = ScriptedConsent([("gpu", True)])
-        runner = guided.GuidedRun(self.state, stages=stages.functions(), consent=consent)
-        report = runner._execute_collection_phase(selection, "audio")
-        self.assertIn(f"audio:{fake_id(1)}", stages.calls)
-        self.assertFalse(any(call.startswith("vision:") for call in stages.calls))
-        self.assertEqual(stages.server_started, 0)
-        window = consent.windows[0]
-        self.assertEqual(window.ids, (fake_id(1),))
-        self.assertIn("unconditional", " ".join(window.operations))
-        self.assertNotIn("CONDITIONALLY", " ".join(window.operations))
-        self.assertEqual(report["selected"][0]["stages"]["audio"], "complete")
-
-    def test_collection_vision_only_restores_each_fresh_runner_once(self) -> None:
-        seed_scan(self.state, [1, 2])
-        stages = RestoreLifecycleFakeStages()
-        for n in (1, 2):
-            seed_job(self.state, fake_id(n), complete=("fetch", "prepare", "audio"))
-            selection = guided.select_ids(self.state, [fake_id(n)], limit=5)
-            consent = ScriptedConsent(list(MANAGED_GRANT)[1:])
-            runner = guided.GuidedRun(
-                self.state, stages=stages.functions(), consent=consent, out=lambda _: None
-            )
-            report = runner._execute_collection_phase(selection, "vision")
-            self.assertFalse(report["whisper_restore_failed"])
-            self.assertFalse(report["interrupted"])
-            self.assertTrue(stages.whisper_running)
-        self.assertEqual(len(stages.stop_calls), 2)
-        self.assertEqual(len(stages.restore_calls), 2)
-        self.assertFalse(any(call.startswith("audio:") for call in stages.calls))
-
-    def test_unexpected_vision_boundary_error_still_restores_once(self) -> None:
-        self._seed_prepared()
-        stages = RestoreLifecycleFakeStages()
-        functions = stages.functions()
-
-        def failed_start() -> object:
-            raise RuntimeError("fixture isolated server start failed")
-
-        functions = dataclasses.replace(functions, ollama_start=failed_start)
-        runner = guided.GuidedRun(
-            self.state, stages=functions,
-            consent=ScriptedConsent(list(MANAGED_GRANT)[1:]),
-            out=lambda _: None,
-        )
-        report = runner._execute_collection_phase(
-            guided.select_ids(self.state, [fake_id(1)], limit=5), "vision"
-        )
-        self.assertEqual(len(stages.stop_calls), 1)
-        self.assertEqual(len(stages.restore_calls), 1)
-        self.assertTrue(stages.whisper_running)
-        self.assertIn("start failed", report["progress_blocked_reason"])
-
-    def _run_with_fake_clock(
-        self, stages: RestoreLifecycleFakeStages, clock: FakeRestoreClock
-    ) -> tuple[int, dict[str, Any], list[str]]:
-        from types import SimpleNamespace
-
-        fake_time = SimpleNamespace(
-            monotonic=clock.monotonic, sleep=clock.sleep
-        )
-        # The restore-readiness clock moved to tiktok_ingest.engine with
-        # the stage engine (S2); narration keeps resolving guided.time,
-        # so both seams get the same deterministic clock.
-        with mock.patch.object(guided, "time", fake_time):
-            with mock.patch.object(engine, "time", fake_time):
-                return self.run_guided_with(
-                    stages, ScriptedConsent(list(MANAGED_GRANT)), ids=[fake_id(1)]
-                )
-
-    def test_transient_unready_then_healthy_single_restore(self) -> None:
-        self._seed_prepared()
-        stages = RestoreLifecycleFakeStages(
-            health_results=[
-                (False, "whisper health endpoint unreachable: connection reset"),
-                (True, "healthy"),
-            ]
-        )
-        clock = FakeRestoreClock()
-        code, report, messages = self._run_with_fake_clock(stages, clock)
-        self.assertEqual(code, 0)
-        self.assertFalse(report["whisper_restore_failed"])
-        self.assertEqual(len(stages.restore_calls), 1)
-        self.assertIn(f"audio:{fake_id(1)}", stages.calls)
-        # Exactly one restore, then the readiness wait, then audio.
-        self.assertLess(
-            stages.calls.index("whisper-restore"),
-            stages.calls.index("whisper-health-check"),
-        )
-        self.assertLess(
-            stages.calls.index("whisper-health-check"),
-            stages.calls.index(f"audio:{fake_id(1)}"),
-        )
-        # Two probes inside the wait (unready then healthy) + the audio
-        # phase's own precheck.
-        self.assertEqual(stages.calls.count("whisper-health-check"), 3)
-        self.assertTrue(
-            any("waiting for Whisper readiness" in m for m in messages),
-            messages,
-        )
-        # A real wait happened between the probes (deterministic clock).
-        self.assertTrue(clock.slept)
-
-    def test_persistent_unhealthy_deadline_blocks_all(self) -> None:
-        self._seed_prepared()
-        stages = RestoreLifecycleFakeStages(
-            health_results=[
-                (False, "whisper health endpoint unreachable: fixture")
-            ]
-        )
-        clock = FakeRestoreClock()
-        code, report, _ = self._run_with_fake_clock(stages, clock)
-        self.assertEqual(code, 1)
-        self.assertTrue(report["whisper_restore_failed"])
-        self.assertEqual(len(stages.restore_calls), 1)
-        self.assertNotIn(f"audio:{fake_id(1)}", stages.calls)
-        restore_failures = [
-            f for f in report["failures"] if f["stage"] == "whisper-restore"
-        ]
-        self.assertEqual(len(restore_failures), 1)
-        reason = restore_failures[0]["reason"]
-        self.assertIn("did not become healthy within 60s", reason)
-        self.assertIn("started but is NOT healthy", reason)
-        self.assertIn("unreachable: fixture", reason)  # actual detail kept
-        # Bounded polling until the 60s deadline at ~1s intervals: no
-        # busy loop, no unbounded iteration count.
-        self.assertGreaterEqual(len(clock.slept), 55)
-        self.assertLessEqual(len(clock.slept), 61)
-        self.assertTrue(all(seconds >= 0.5 for seconds in clock.slept))
-        self.assertGreaterEqual(clock.now, 60.0)
-
-    def test_interrupt_during_readiness_wait_is_honest_unknown(self) -> None:
-        self._seed_prepared()
-        stages = RestoreLifecycleFakeStages(health_raises=KeyboardInterrupt())
-        clock = FakeRestoreClock()
-        code, report, _ = self._run_with_fake_clock(stages, clock)
-        self.assertEqual(code, 1)
-        self.assertTrue(report["interrupted"])
-        self.assertTrue(report["whisper_restore_failed"])
-        # The ONE authorized start happened and is never repeated...
-        self.assertEqual(len(stages.restore_calls), 1)
-        self.assertNotIn(f"audio:{fake_id(1)}", stages.calls)
-        # ...and exactly one honest UNKNOWN-health record is reported.
-        restore_failures = [
-            f for f in report["failures"] if f["stage"] == "whisper-restore"
-        ]
-        self.assertEqual(len(restore_failures), 1)
-        reason = restore_failures[0]["reason"]
-        self.assertIn("was STARTED", reason)
-        self.assertIn("health is UNKNOWN", reason)
-
-    def test_already_healthy_immediate_no_wait(self) -> None:
-        self._seed_prepared()
-        stages = RestoreLifecycleFakeStages(health_results=[(True, "healthy")])
-        clock = FakeRestoreClock()
-        code, report, messages = self._run_with_fake_clock(stages, clock)
-        self.assertEqual(code, 0)
-        self.assertFalse(report["whisper_restore_failed"])
-        self.assertEqual(len(stages.restore_calls), 1)
-        self.assertIn(f"audio:{fake_id(1)}", stages.calls)
-        # Immediate success: the first probe answers, nothing sleeps and
-        # no waiting feedback is printed.
-        self.assertEqual(clock.slept, [])
-        self.assertFalse(
-            any("waiting for Whisper readiness" in m for m in messages),
-            messages,
-        )
-
-    def test_wait_bounds_are_small_and_probe_is_bounded(self) -> None:
-        import inspect
-
-        from tiktok_ingest import whisper_client
-
-        self.assertEqual(guided.WHISPER_RESTORE_READY_DEADLINE_SECONDS, 60.0)
-        self.assertEqual(guided.WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS, 1.0)
-        # The per-probe bound is the health precheck's own default
-        # timeout: the deadline can overshoot by at most ONE probe,
-        # never unbounded.
-        self.assertEqual(
-            inspect.signature(whisper_client.health_precheck)
-            .parameters["timeout"]
-            .default,
-            5.0,
-        )
-
-
-# --------------------------------------------------------------------------
 # Single upfront consent: one run-plan window for the whole tanda
 # --------------------------------------------------------------------------
 
@@ -1845,11 +1321,11 @@ class TestWhisperRestoreReadinessWait(GuidedTestCase):
 class TestGuidedRunSingleConsent(GuidedTestCase):
     """guided-run asks exactly ONE run-plan window for the whole tanda.
 
-    The per-phase windows (tanda/prepare/fetch/gpu/whisper-stop/
-    whisper-restore and the configured synthesis API) are discharged
-    programmatically when covered by the plan; verification keeps its own
-    grouped human decision; denial/EOF fail closed; anything outside the
-    planned scope is asked as genuinely new scope.
+    The per-phase windows (tanda/prepare/fetch/gpu and the configured
+    synthesis API) are discharged programmatically when covered by the
+    plan; verification keeps its own grouped human decision; denial/EOF
+    fail closed; anything outside the planned scope is asked as
+    genuinely new scope.
     """
 
     def _plan_run(
@@ -1900,10 +1376,10 @@ class TestGuidedRunSingleConsent(GuidedTestCase):
         self.assertIn(f"vision:{fake_id(1)}", stages.calls)
         self.assertIn(f"vision:{fake_id(2)}", stages.calls)
 
-    def test_run_plan_window_names_ids_urls_service_and_limits(self) -> None:
+    def test_run_plan_window_names_ids_urls_llm_hub_and_limits(self) -> None:
         seed_scan(self.state, [1])
         seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
-        stages = RestoreLifecycleFakeStages()
+        stages = FakeStages()
         consent = ScriptedConsent([("run-plan", True)])
         code, _, _ = self._plan_run(stages, consent, ids=[fake_id(1)])
         self.assertEqual(code, 0)
@@ -1914,15 +1390,14 @@ class TestGuidedRunSingleConsent(GuidedTestCase):
             f"https://www.tiktok.com/@fixture_author/video/{fake_id(1)}",
             window.destinations,
         )
-        self.assertIn(stages._info().describe(), window.destinations)
         self.assertTrue(window.limits)
         self.assertTrue(
-            any(
-                "whisper coordination for exactly" in op
-                for op in window.operations
-            ),
+            any("RESIDENT llm-hub chat" in op for op in window.operations),
             window.operations,
         )
+        joined_ops = " ".join(window.operations)
+        self.assertNotIn("whisper coordination", joined_ops)
+        self.assertNotIn("standing restore", joined_ops)
 
     def test_run_plan_window_names_text_api_endpoint_and_model(self) -> None:
         import os
@@ -2024,8 +1499,6 @@ class TestGuidedRunSingleConsent(GuidedTestCase):
             batch_cap=5,
             batch_count=1,
             plan_counts={},
-            whisper_bound=None,
-            whisper_note="n/a",
             text_api_origin=None,
             text_api_model=None,
         )
@@ -2161,19 +1634,15 @@ class TestCliWiring(GuidedTestCase):
         original = sys.stdin
         sys.stdin = NonTTY()
         try:
-            with mock.patch(
-                "tiktok_ingest.collection_run._bind_whisper_identity",
-                return_value=(None, "fixture: read-only binding stubbed"),
-            ):
-                code, out, _ = self._run_cli(
-                    [
-                        "guided-run",
-                        "--state-root",
-                        str(self.state.root),
-                        "--collection",
-                        COLLECTION_URL,
-                    ]
-                )
+            code, out, _ = self._run_cli(
+                [
+                    "guided-run",
+                    "--state-root",
+                    str(self.state.root),
+                    "--collection",
+                    COLLECTION_URL,
+                ]
+            )
         finally:
             sys.stdin = original
         self.assertEqual(code, 0)
@@ -2338,27 +1807,82 @@ class TestStageNarration(unittest.TestCase):
         self.assertIs(narrated.fetch("https://www.tiktok.com/@a/video/1", None), sentinel)
 
 
-class TestWhisperCoordinatedStageFunctions(unittest.TestCase):
-    def test_hooks_are_all_present_and_lifecycle_ready(self) -> None:
-        stages = guided.whisper_coordinated_stage_functions(
-            runner=lambda args, timeout=None: (0, "", "")
+class TestLlmHubMigration(GuidedTestCase):
+    """T3/S4 regression: a run with vision+audio coordinates no services.
+
+    Every model call goes to the resident llm-hub services, so one
+    guided/engine run that executes BOTH the vision and audio stages
+    must never stop/start/inspect any container (whisper coordination)
+    and never probe any isolated-Ollama URL. The subprocess and urlopen
+    seams below are spies: they record and fail closed, so any attempt
+    surfaces as an assertion failure instead of a real effect.
+    """
+
+    def test_vision_and_audio_run_never_touches_podman_or_ollama(self) -> None:
+        seed_scan(self.state, [1])
+        seed_job(self.state, fake_id(1), complete=("fetch", "prepare"))
+        commands: list[list[str]] = []
+        requested_urls: list[str] = []
+
+        def spy_runner(argv, *args, **kwargs):
+            commands.append(list(argv))
+            return 0, "", ""
+
+        def spy_urlopen(req, timeout=None, **kwargs):
+            requested_urls.append(
+                req.full_url if hasattr(req, "full_url") else str(req)
+            )
+            raise OSError("spy: no network in tests")
+
+        stage_calls: list[str] = []
+
+        def fake_vision(video_id, state):
+            stage_calls.append(f"vision:{video_id}")
+            return FakeOutcome("complete")
+
+        def fake_audio(video_id, state):
+            stage_calls.append(f"audio:{video_id}")
+            return FakeOutcome("complete")
+
+        stages = dataclasses.replace(
+            guided.default_stage_functions(),
+            vision=fake_vision,
+            audio=fake_audio,
+            whisper_health=lambda: (True, "healthy (spy)"),
         )
-        self.assertTrue(stages.whisper_lifecycle_ready())
-
-    def test_standalone_default_has_no_hooks(self) -> None:
-        self.assertFalse(guided.default_stage_functions().whisper_lifecycle_ready())
-
-    def test_inspect_delegates_to_the_injected_runner(self) -> None:
-        calls: list[list[str]] = []
-
-        def runner(args, timeout=None):
-            calls.append(args)
-            return 1, "", "no such container"
-
-        stages = guided.whisper_coordinated_stage_functions(runner=runner)
-        self.assertIsNone(stages.whisper_inspect())
+        with mock.patch("urllib.request.urlopen", spy_urlopen):
+            runner = guided.GuidedRun(
+                self.state,
+                stages=stages,
+                consent=ScriptedConsent(
+                    [("tanda", True), ("gpu", True)]
+                ),
+                out=lambda _text: None,
+            )
+            report = runner.execute(
+                guided.select_ids(self.state, [fake_id(1)], limit=5)
+            )
+        self.assertEqual(report["failures"], [])
+        # The run really executed both model-consuming stages.
         self.assertEqual(
-            calls, [["podman", "inspect", "voice-assistant-whisper"]]
+            stage_calls, [f"vision:{fake_id(1)}", f"audio:{fake_id(1)}"]
+        )
+        # No container lifecycle command was issued (whisper stop/start/
+        # inspect or any other podman mutation/query for services).
+        podman_calls = [c for c in commands if c and c[0] == "podman"]
+        self.assertEqual(
+            podman_calls,
+            [],
+            f"service lifecycle commands were issued: {podman_calls}",
+        )
+        # No isolated-Ollama endpoint was ever probed.
+        ollama_urls = [
+            url
+            for url in requested_urls
+            if "11435" in url or "ollama" in url.lower()
+        ]
+        self.assertEqual(
+            ollama_urls, [], f"Ollama URLs were probed: {ollama_urls}"
         )
 
 

@@ -16,11 +16,9 @@ COORDINATES; it implements no stage logic of its own:
   through the existing validated-document ingestion stage
   (``run_synthesis_stage``): the ``SynthesisDocument`` contract, the
   credential scrub and the resume fingerprint stay authoritative.
-- The KNOWN shared whisper service is coordinated only through the
-  guided coordinator's optional lifecycle hooks
-  (:mod:`tiktok_ingest.whisper_lifecycle`): identity-verified,
-  consented, bounded stop before vision and verified restore + health
-  before audio, after every affected batch including failure paths.
+- Every model call goes to the RESIDENT llm-hub services (llama-chat
+  for vision, llm-hub-whisper for audio): no container lifecycle, GPU
+  lease or swap gating is coordinated here any more.
 
 Authorization contract (user-approved 2026-09-30 — TWO decisions plus
 ONE grouped verification, no routine per-stage prompts):
@@ -33,15 +31,14 @@ ONE grouped verification, no routine per-stage prompts):
 2. ONE whole-current-run plan grant covers the FROZEN inventory
    computed after the capture: the exact eligible ids and canonical
    download URLs (with their stage reuse states), batches of at most
-   five, the whisper stop/restore authority for the exact service
-   identity bound read-only BEFORE the plan, the synthesis
-   endpoint/model, and the retry policy (each id/operation attempted
-   at most once this invocation). Stage windows provably inside that
-   scope are discharged by :class:`RunScopedAuthorization` and audited
-   as ``covered_by_run_plan`` — never fabricated human yeses; anything
-   else (unknown kinds, excess ids, unapproved destinations, whisper
-   config drift) is forwarded to the human as genuinely new scope and
-   never auto-granted.
+   five, the synthesis endpoint/model, and the retry policy (each
+   id/operation attempted at most once this invocation). Stage windows
+   provably inside that scope are discharged by
+   :class:`RunScopedAuthorization` and audited as
+   ``covered_by_run_plan`` — never fabricated human yeses; anything
+   else (unknown kinds, excess ids, unapproved destinations) is
+   forwarded to the human as genuinely new scope and never
+   auto-granted.
 3. Verification candidate URLs are unknown until synthesis, so the
    batches DEFER the verify window and the run asks ONE grouped
    authorization showing every exact validated URL before any
@@ -54,31 +51,15 @@ with the actual outcome, reuse flag and measured duration; batch x/y);
 stdout stays the single parseable JSON report. An aggregate progress
 view is derived from the product's stores at report time — it is a
 view, never a second state authority.
-
-Phase 0 addendum (swap-quiet-retry PRD): after a batch whose vision
-stage failed the ``swap_delta`` gate with VERIFIED cleanup, this module
-additionally offers ONE bounded, measured, separately-consented vision
-retry per video per invocation — a read-only cooldown (5 s cumulative-
-counter samples, 60 s admission floor, 180 s never-restarted cap, 3
-consecutive intervals <= 1 MiB/s), a named re-admission authority for
-the SAME whisper service, and an append-only evidence archive in the
-existing manifest. The run-plan grant NEVER covers it (a dedicated
-``vision-swap-retry`` window goes to the human), a fired gate keeps the
-original GPU window closed for the remaining same-window ids (they stay
-pending even after a successful retry), and retry exhaustion is
-video/window-scoped — never relabeled as the global service-
-restoration hard stop.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 import math
 import os
 import re
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -97,17 +78,8 @@ from .collection import (
     parse_collection_url,
     resolve_collection,
 )
-from .contracts import JobManifest, StageOutcome, utc_now_iso
-from .gates import GATE_SWAP_DELTA
-from .gpu_lease import (
-    GpuLease,
-    LeaseMarkerFile,
-    ReconcileResult,
-    reconcile_lease,
-    wait_for_whisper_health,
-)
-from .engine import lease_from_stages, run_dir_of
-from .fetch import parse_tiktok_url
+from .contracts import utc_now_iso
+from .engine import run_dir_of
 from .guided import (
     GUIDED_MAX_BATCH,
     ConsentProvider,
@@ -122,15 +94,8 @@ from .guided import (
 )
 from .state import (
     Backlog,
-    Processed,
     StateRoot,
-    atomic_write_bytes,
     atomic_write_json,
-)
-from .swap_cooldown import (
-    SwapCooldownMeasurementError,
-    SwapQuietWatcher,
-    format_rate_mib_per_s,
 )
 from .synthesis import SynthesisDocument, run_synthesis_stage
 from .synthesis_api import (
@@ -142,15 +107,6 @@ from .synthesis_api import (
     read_evidence_text,
     request_json_document,
     sanitize_evidence_text,
-)
-from .vision import default_vmstat_fn
-from .whisper_lifecycle import (
-    WhisperLifecycleError,
-    inspect_whisper,
-    restore_whisper,
-    same_service_config,
-    stop_whisper,
-    verify_known_service,
 )
 
 ELIGIBLE_CLASSIFICATIONS = ("new_processable", "partial_resumable")
@@ -218,8 +174,9 @@ def preflight(
         "planned_destinations": [
             "headed Playwright browser (inventory only; run-scoped profile)",
             "gated pinned-extractor downloads of the selected TikTok URLs",
-            "isolated Ollama (vision) and the shared whisper service "
-            "(audio) on this machine",
+            "the resident llm-hub services on this machine (chat "
+            f"{config.LLM_HUB_CHAT_API_BASE} for vision, whisper WS "
+            f"{config.WHISPER_WS_URL} for audio)",
             *(
                 [
                     f"sanitized evidence text to the configured text API at "
@@ -348,29 +305,6 @@ def make_auto_synthesizer(
     return auto_synthesize
 
 
-def build_stage_functions(
-    *,
-    api_transport: Callable[..., Any],
-    podman_runner: Callable[..., Any],
-) -> StageFunctions:
-    """Production stages + Phase 0 whisper lifecycle hooks.
-
-    Everything is the REAL production default from
-    :func:`default_stage_functions` — only the whisper lifecycle hooks
-    are added (all-or-nothing, per the StageFunctions contract). The
-    automatic synthesis path is injected separately through
-    ``run_guided(auto_synthesizer=...)``, which routes results through
-    the existing validated-document ingestion stage.
-    """
-    base = default_stage_functions()
-    return dataclasses.replace(
-        base,
-        whisper_inspect=lambda: inspect_whisper(podman_runner),
-        whisper_stop=lambda info: stop_whisper(info, runner=podman_runner),
-        whisper_restore=lambda info: restore_whisper(info, runner=podman_runner),
-    )
-
-
 def _eligible_ids(state: StateRoot, collection_url: str) -> tuple[list[str], dict[str, int]]:
     ref, scan = resolve_collection(state, collection_url)
     if scan is None:
@@ -416,97 +350,14 @@ def _frozen_inventory(
     return tuple(ids), urls, stage_states, dict(plan.counts)
 
 
-def _reconcile_gpu_lease(
-    state: StateRoot,
-    stages: StageFunctions,
-    out: Callable[[str], None],
-) -> ReconcileResult:
-    """Reconcile a GPU lease marker left by a previous run (S4-S6).
-
-    Runs before the whisper identity is bound and before any GPU work, in
-    both collection-run and guided-run. Without the whisper lifecycle
-    hooks this pipeline never stops the service, so nothing is touched.
-    """
-    if not stages.whisper_lifecycle_ready():
-        return ReconcileResult("none")
-    result = reconcile_lease(
-        LeaseMarkerFile(state),
-        inspect=stages.whisper_inspect,  # type: ignore[arg-type]
-        restore=stages.whisper_restore,  # type: ignore[arg-type]
-        health=stages.whisper_health,
-        waiting_feedback=lambda seconds: out(
-            f"waiting for Whisper readiness after the restore "
-            f"(read-only health polling for up to {seconds:.0f}s; "
-            "no further start is attempted)"
-        ),
-    )
-    if result.action != "none":
-        out(f"gpu lease reconcile: {result.detail}")
-    return result
-
-
-def _bind_whisper_identity(
-    stages: StageFunctions, out: Callable[[str], None]
-) -> tuple[Any | None, str]:
-    """Read-only whisper identity binding BEFORE the run-plan window.
-
-    The operator must never be asked to authorize stopping a service
-    whose identity is unknown, and the plan must name the exact
-    service/configuration it covers. This performs ONLY the read-only
-    inspect plus the positive known-service verification; any failure
-    binds NOTHING (later whisper windows are asked as genuinely new
-    scope, fail-closed on denial). A configuration that later differs
-    from this binding is not covered either.
-    """
-    if not stages.whisper_lifecycle_ready():
-        return None, (
-            "whisper lifecycle coordination inactive (standalone "
-            "semantics: the service is operator-managed and blocks are "
-            "surfaced, never managed here)"
-        )
-    try:
-        info = stages.whisper_inspect()
-    except Exception as exc:  # noqa: BLE001 - read-only, reported honestly
-        return None, (
-            "whisper identity inspection failed read-only before the "
-            f"plan ({exc}); no stop/restore is pre-approved — any later "
-            "whisper window would be asked as new scope"
-        )
-    if info is None:
-        return None, (
-            "no known whisper container exists right now; if one appears "
-            "during the run, its stop/restore needs a new authority "
-            "question (never auto-granted)"
-        )
-    try:
-        verify_known_service(info)
-    except WhisperLifecycleError as exc:
-        return None, (
-            f"whisper identity verification failed before the plan: "
-            f"{exc}; no stop/restore is pre-approved"
-        )
-    out(
-        "whisper identity bound read-only before the plan: "
-        f"{info.describe()}"
-    )
-    return info, (
-        "identity verified read-only before the plan: the bounded stop "
-        "before vision and the standing restore per GPU batch cycle are "
-        "covered by this grant for exactly this service/configuration "
-        "(restore honored once per actual stop cycle; errors/interrupts "
-        "report the UNKNOWN state, no rollback, progress blocked); a "
-        "changed configuration fails closed to a new authority question"
-    )
-
-
 @dataclasses.dataclass(frozen=True)
 class RunPlan:
     """The scope granted by the ONE whole-current-run authorization.
 
     ``frozen_ids``/``canonical_urls``/``stage_states`` capture the
-    frozen inventory; ``whisper_info`` carries the bound service object
-    (``whisper_bound`` is its display text) so coverage checks compare
-    exact identities, not wildcards.
+    frozen inventory. Model inference needs no service binding any
+    more: the resident llm-hub units are named by configuration, not
+    stopped/restored per run.
     """
 
     collection_url: str
@@ -516,11 +367,8 @@ class RunPlan:
     batch_cap: int
     batch_count: int
     plan_counts: dict[str, int]
-    whisper_bound: str | None
-    whisper_note: str
     text_api_origin: str | None
     text_api_model: str | None
-    whisper_info: Any = None
     retry_failed: int = 1
 
 
@@ -540,8 +388,6 @@ def build_run_plan_window(
         plan.canonical_urls.get(video_id, f"(no canonical URL recorded for {video_id})")
         for video_id in plan.frozen_ids
     ]
-    if plan.whisper_bound:
-        destinations.append(plan.whisper_bound)
     if plan.text_api_origin:
         destinations.append(plan.text_api_origin)
     reuse_lines: list[str] = []
@@ -567,11 +413,12 @@ def build_run_plan_window(
         ),
         "gated pinned-extractor download of exactly the frozen canonical "
         "URLs listed above (oEmbed metadata per URL), CPU preparation in "
-        "the pinned container, GPU vision (isolated Ollama lifecycle + "
-        "model) and audio through the shared whisper service; audio requires "
-        "prepared media, not vision completion; NO synthesis request occurs "
-        "until every original vision window and its separately consented "
-        "retry has ended",
+        "the pinned container, vision through the RESIDENT llm-hub chat "
+        f"service ({config.LLM_HUB_CHAT_API_BASE}, model "
+        f"{config.VISION_MODEL}) and audio through the resident "
+        "llm-hub-whisper WS service; audio requires prepared media, not "
+        "vision completion; no model is loaded, unloaded, started or "
+        "stopped by this run",
         *reuse_lines,
         *(
             (
@@ -585,17 +432,6 @@ def build_run_plan_window(
                 "(no text API configured: synthesis stops at a blocked, "
                 "resumable state — no model calls)",
             )
-        ),
-        *(
-            (
-                f"whisper coordination for exactly {plan.whisper_bound}: "
-                "bounded verified stop before vision, standing restore "
-                "after the window (once per actual stop cycle, also on "
-                "failure/interrupt); restore/health failure blocks all "
-                "progress with the actual partial state, no rollback",
-            )
-            if plan.whisper_bound
-            else (f"whisper: {plan.whisper_note}",)
         ),
         (
             (
@@ -621,11 +457,9 @@ def build_run_plan_window(
     limits = (
         f"each frozen id is attempted in exactly ONE batch of at most "
         f"{plan.batch_cap}: {retry_policy}",
-        "no automatic retry of any operation; a fired resource gate is "
-        "final for its GPU window and its remaining ids stay pending; "
-        "later frozen normal windows retain their existing attempt policy; "
-        "only a NEW dedicated consent can authorize the existing ONE "
-        "eligible vision swap-retry, never reopening its original window",
+        "no automatic retry of any operation; a failed model request is "
+        "final for its window and its remaining ids stay pending; "
+        "later frozen normal windows retain their existing attempt policy",
         "ids that become eligible later are never absorbed into this run "
         "(they need a new scope decision in a new invocation)",
         "this grant covers exactly the named ids/URLs/endpoint/model/"
@@ -676,7 +510,6 @@ def _run_plan_dict(plan: RunPlan, granted: bool) -> dict[str, Any]:
         "batch_cap": plan.batch_cap,
         "batch_count": plan.batch_count,
         "plan_counts": dict(plan.plan_counts),
-        "whisper": {"bound": plan.whisper_bound, "note": plan.whisper_note},
         "text_api": (
             {"origin": plan.text_api_origin, "model": plan.text_api_model}
             if plan.text_api_origin
@@ -756,9 +589,6 @@ class RunScopedAuthorization(ConsentProvider):
       frozen canonical URLs;
     - ``synthesis-api``: the destination must be the endpoint named in
       the plan AND the model must appear in the window's operations;
-    - ``whisper-stop``/``whisper-restore``: the window's service text
-      must match the identity bound read-only before the plan (state
-      text normalized, name/image/config exact);
     - ``verify``: ALWAYS deferred during batches — candidate URLs are
       unknown until synthesis, so ``run_collection`` asks ONE grouped
       verification window afterwards instead;
@@ -821,21 +651,6 @@ class RunScopedAuthorization(ConsentProvider):
                 return match.group(1).strip()
         return None
 
-    def _whisper_covered(self, destinations: Sequence[str]) -> bool:
-        info = self.plan.whisper_info
-        if info is None:
-            return False
-        accepted = {info.describe()}
-        if not getattr(info, "running", True):
-            # The bound service was stopped at plan time; the stop window
-            # for the SAME identity now running differs only in the
-            # volatile state segment. Name/image/config must still match
-            # exactly (they are embedded in the compared text).
-            accepted.add(
-                dataclasses.replace(info, state="running", running=True).describe()
-            )
-        return all(destination in accepted for destination in destinations)
-
     def _coverage(self, window: ConsentWindow) -> tuple[bool, str]:
         plan = self.plan
         frozen = set(plan.frozen_ids)
@@ -867,18 +682,6 @@ class RunScopedAuthorization(ConsentProvider):
                 False,
                 "synthesis endpoint/model not exactly the one named in "
                 "the run plan",
-            )
-        if kind in ("whisper-stop", "whisper-restore"):
-            if self._whisper_covered(window.destinations):
-                return (
-                    True,
-                    "the exact service identity bound read-only before "
-                    "the run plan",
-                )
-            return (
-                False,
-                "whisper service/configuration differs from the plan "
-                "binding",
             )
         return False, f"kind {kind!r} is never auto-covered"
 
@@ -1109,1400 +912,6 @@ def _run_grouped_verification(
     )
 
 
-# --------------------------------------------------------------------------
-# Phase 0 addendum: ONE bounded vision swap-retry after measured quiet
-# (prds/PHASE-0-SWAP-QUIET-RETRY-PRD.md). Every rule here traces to that
-# PRD's decision ledger D-01..D-10; nothing weakens a gate, a consent
-# rule or the fired-gate window semantics.
-# --------------------------------------------------------------------------
-
-
-class _SwapRetryBlocked(RuntimeError):
-    """A lifecycle/restore failure inside the retry flow: progress is
-    blocked globally with the actual state reported (T6 semantics — the
-    existing service-restoration hard-stop category, never a relabel of
-    gate exhaustion)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
-
-
-@dataclasses.dataclass(frozen=True)
-class SwapRetryEligibility:
-    """Read-only eligibility answer from DURABLE typed evidence (FR-01)."""
-
-    video_id: str
-    eligible: bool
-    reason: str
-    overshoot_mib: float | None = None
-    scope: dict[str, Any] = dataclasses.field(default_factory=dict)
-
-
-def _load_job_manifest(
-    state: StateRoot, video_id: str
-) -> tuple[JobManifest, Path] | None:
-    run_dir = run_dir_of(state, video_id)
-    if run_dir is None:
-        return None
-    path = Path(run_dir) / "meta.json"
-    if not path.is_file():
-        return None
-    try:
-        manifest = JobManifest.from_dict(
-            json.loads(path.read_text(encoding="utf-8"))
-        )
-    except (OSError, ValueError):
-        return None
-    return manifest, path
-
-
-def _write_job_manifest(path: Path, manifest: JobManifest) -> None:
-    atomic_write_bytes(
-        path,
-        json.dumps(
-            manifest.to_dict(), ensure_ascii=False, indent=2, sort_keys=True
-        ).encode("utf-8")
-        + b"\n",
-    )
-
-
-def _swap_retry_eligibility(
-    state: StateRoot, video_id: str
-) -> SwapRetryEligibility:
-    """ONLY a failed vision run whose TYPED gate id is ``swap_delta`` and
-    whose failure cleanup positively verified release qualifies (D-01).
-
-    Decided from the persisted typed gate field in ``meta.json``
-    ``resource_gates`` — never by parsing reason prose (FR-16). Offload,
-    unload-verification, service-identity, fetch/prepare/audio/synthesis/
-    verify failures and deadline exhaustion never qualify.
-    """
-    loaded = _load_job_manifest(state, video_id)
-    if loaded is None:
-        return SwapRetryEligibility(
-            video_id, False, "no durable manifest can be read for this id"
-        )
-    manifest, _path = loaded
-    record = manifest.stages.get("vision")
-    if record is None:
-        return SwapRetryEligibility(
-            video_id, False, "no vision stage record exists for this id"
-        )
-    if record.result.outcome is not StageOutcome.FAILED:
-        return SwapRetryEligibility(
-            video_id,
-            False,
-            f"vision outcome {record.result.outcome.value!r} is not a "
-            "failed run (blocked/deadline outcomes are never retried)",
-        )
-    gates_detail = manifest.resource_gates.get("vision") or {}
-    entries = gates_detail.get("gates") or []
-    swap_failed = [
-        entry
-        for entry in entries
-        if isinstance(entry, dict)
-        and entry.get("gate") == GATE_SWAP_DELTA
-        and entry.get("passed") is False
-    ]
-    if not swap_failed:
-        return SwapRetryEligibility(
-            video_id,
-            False,
-            "the persisted typed gate ledger shows no failed swap_delta "
-            "gate for the vision stage (prose reasons are never parsed)",
-        )
-    cleanup = gates_detail.get("cleanup") or {}
-    if cleanup.get("release_verified") is not True:
-        return SwapRetryEligibility(
-            video_id,
-            False,
-            "the failed attempt's cleanup did not positively verify model "
-            "release (unload verified, GPU release observed)",
-        )
-    last = swap_failed[-1]
-    detail = last.get("detail") or {}
-    overshoot: float | None = None
-    delta_bytes = detail.get("delta_bytes")
-    limit_bytes = detail.get("limit_bytes")
-    if (
-        isinstance(delta_bytes, int)
-        and isinstance(limit_bytes, int)
-        and delta_bytes > limit_bytes
-    ):
-        overshoot = round((delta_bytes - limit_bytes) / (1024 * 1024), 2)
-    scope = {
-        "vision_model": config.VISION_MODEL,
-        "media_sha256": manifest.media_sha256,
-        "sampling_manifest_sha256": record.input_sha256,
-    }
-    return SwapRetryEligibility(
-        video_id,
-        True,
-        "failed vision swap_delta gate with verified cleanup",
-        overshoot_mib=overshoot,
-        scope=scope,
-    )
-
-
-def _overshoot_text(overshoot_mib: float | None) -> str:
-    if overshoot_mib is None:
-        return (
-            "overshoot not recorded in this manifest's raw gate detail "
-            "(pre-addendum evidence)"
-        )
-    return (
-        f"+{overshoot_mib:.2f} MiB over the "
-        f"{config.GATES.swap_delta_limit_mib} MiB budget"
-    )
-
-
-def _build_swap_retry_window(
-    eligs: Sequence[SwapRetryEligibility], plan: RunPlan
-) -> ConsentWindow:
-    """The DEDICATED new consent (D-02/D-11): never covered by the run
-    plan. One window names EVERY covered id; with more than one id the
-    shared isolated-Ollama lifecycle (one model load) is stated
-    explicitly (FR-26)."""
-    whisper_bound = plan.whisper_bound or "(whisper identity not bound)"
-    ids = tuple(elig.video_id for elig in eligs)
-    shared = len(eligs) > 1
-    operations = [
-        "RE-RUN of the vision stage ONLY for the listed id(s): valid fetch "
-        "and prepare results are reused; completed audio, synthesis and "
-        "verification are never repeated",
-        "read-only cooldown sampling of the systemwide cumulative "
-        f"swap I/O counters every {config.SWAP_RETRY_COOLDOWN_INTERVAL_SECONDS:.0f}s "
-        "BEFORE the retry (no mutation of any kind while sampling)",
-        f"stop the SAME known whisper service again ({whisper_bound}) "
-        "for the retry window and restore it afterwards — THIS "
-        "consent is that named lifecycle authority",
-        "start a new isolated Ollama instance only if none answers on "
-        f"{config.OLLAMA_API_BASE} (a preexisting one is never adopted)",
-    ]
-    if shared:
-        operations.append(
-            "the isolated Ollama instance and its model load are SHARED "
-            "by every listed id: one server start for the whole window, "
-            "one stop at the end (D-11)"
-        )
-    limits = [
-        "exactly ONE extra vision attempt per listed id THIS invocation: "
-        "no third attempt and no re-prompt after a failed second "
-        "attempt; every listed id stays pending and resumable",
-        f"cooldown bounds: admission no earlier than "
-        f"{config.SWAP_RETRY_COOLDOWN_FLOOR_SECONDS:.0f}s, hard cap "
-        f"{config.SWAP_RETRY_COOLDOWN_CAP_SECONDS:.0f}s from cooldown "
-        "start (never restarted), stability = "
-        f"{config.SWAP_RETRY_COOLDOWN_STABLE_INTERVALS} consecutive "
-        f"intervals <= {config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S:.2f} MiB/s; "
-        "unreadable or implausible counters fail closed",
-        f"gates UNCHANGED for the retry attempt: free VRAM >= "
-        f"{config.GATES.free_vram_gate_mib} MiB, swap I/O delta <= "
-        f"{config.GATES.swap_delta_limit_mib} MiB per attempt, zero "
-        "CPU offload, vision stage deadline "
-        f"{config.BUDGETS.vision_stage_deadline_seconds}s (fresh "
-        "immediate baseline only at the window's own start)",
-    ]
-    for elig in eligs:
-        prefix = f"id {elig.video_id}: " if shared else ""
-        limits.append(
-            f"{prefix}measured failure being retried: swap_delta gate, "
-            f"{_overshoot_text(elig.overshoot_mib)}"
-        )
-        limits.append(
-            f"{prefix}scope fingerprints (exact — any change is a NEW "
-            f"authorization question): model {elig.scope.get('vision_model')}, "
-            f"media {elig.scope.get('media_sha256')}, sampling "
-            f"{elig.scope.get('sampling_manifest_sha256')}"
-        )
-    if shared:
-        limits.append(
-            "the window CLOSES at the first listed id whose re-run fails "
-            "the swap gate again: the remaining listed ids stay pending "
-            "(resumable by re-invoking), no second window this invocation"
-        )
-    effects = [
-        "a failed second attempt ends retrying for that id this "
-        "invocation (retry exhausted, video/window-scoped — NOT the "
-        "global service-restoration hard stop)",
-        "the remaining ids of the original GPU window stay PENDING "
-        "even if this retry succeeds: no silent skip, no reorder",
-        "the original failure evidence and its partial artifacts are "
-        "archived unmodified first; the retry is recorded as "
-        "additional evidence, never as a replacement",
-        "progress narration goes to stderr; the final stdout JSON "
-        "report gains an additive per-video retry object",
-    ]
-    return ConsentWindow(
-        kind="vision-swap-retry",
-        title=(
-            "ONE bounded vision retry window after a measured swap_delta "
-            "gate failure (new scope: the run-plan grant does NOT cover "
-            "this)"
-        ),
-        ids=ids,
-        destinations=(whisper_bound,),
-        operations=tuple(operations),
-        limits=tuple(limits),
-        effects=tuple(effects),
-    )
-
-
-def _verify_whisper_restored_healthy(
-    stages: StageFunctions, plan: RunPlan
-) -> str | None:
-    """FR-05/FR-06 pre-consent verification: the batch cycle's standing
-    restore left the SAME known whisper service running and healthy.
-
-    Returns ``None`` when verified; an error string (blocked_global,
-    the service-restoration hard-stop category) otherwise. Read-only.
-    """
-    bound = plan.whisper_info
-    if bound is None:
-        return (
-            "the whisper identity was not bound before the run plan; the "
-            "SAME-service restore required before any retry consent "
-            "cannot be positively verified"
-        )
-    try:
-        current = stages.whisper_inspect()
-    except Exception as exc:  # noqa: BLE001 - read-only, reported honestly
-        return (
-            f"cannot verify the restored whisper service before the retry "
-            f"consent (inspect failed: {exc}); progress is blocked"
-        )
-    if current is None:
-        return (
-            "the known whisper service cannot be found after the batch "
-            "cycle; the required healthy restore is NOT verified — "
-            "progress is blocked; verify the service state explicitly"
-        )
-    if not getattr(current, "running", False):
-        return (
-            "the known whisper service is not running after the batch "
-            "cycle; the required healthy restore is NOT verified — "
-            "progress is blocked; verify the service state explicitly"
-        )
-    if not same_service_config(bound, current):
-        return (
-            "the restored whisper service does not match the identity/"
-            f"configuration bound before the run plan (bound "
-            f"{bound.describe()}; now {current.describe()}); the SAME "
-            "service/config was not restored — progress is blocked; no "
-            "rollback is performed or implied"
-        )
-    try:
-        healthy, detail = stages.whisper_health()
-    except Exception as exc:  # noqa: BLE001 - read-only, reported honestly
-        return (
-            f"cannot verify the restored whisper service's health before "
-            f"the retry consent ({exc}); progress is blocked"
-        )
-    if not healthy:
-        return (
-            "the shared whisper service is restored but NOT healthy "
-            f"({detail}); progress is blocked; verify the service state "
-            "explicitly; no rollback is performed or implied"
-        )
-    return None
-
-
-def _wait_whisper_healthy_for_retry(
-    stages: StageFunctions,
-    *,
-    now: Callable[[], float],
-    do_sleep: Callable[[float], None],
-    deadline_seconds: float = 60.0,
-) -> tuple[bool, str]:
-    """Bounded read-only readiness polling after a retry-window restore.
-
-    Thin delegation to the ONE shared implementation (S2,
-    :func:`tiktok_ingest.gpu_lease.wait_for_whisper_health`): first
-    probe immediate, one bounded interval between probes, one probe of
-    overshoot at most; a crossing stops with the last REAL detail.
-    ``KeyboardInterrupt`` is never caught here. This wrapper stays
-    silent (no operator feedback), exactly as before.
-    """
-    return wait_for_whisper_health(
-        stages.whisper_health,
-        deadline_seconds=deadline_seconds,
-        poll_interval_seconds=1.0,
-        monotonic=now,
-        sleep=do_sleep,
-    )
-
-
-def _swap_retry_scope_now(
-    state: StateRoot, video_id: str
-) -> dict[str, Any] | None:
-    loaded = _load_job_manifest(state, video_id)
-    if loaded is None:
-        return None
-    manifest, _path = loaded
-    record = manifest.stages.get("vision")
-    return {
-        "vision_model": config.VISION_MODEL,
-        "media_sha256": manifest.media_sha256,
-        "sampling_manifest_sha256": (
-            record.input_sha256 if record is not None else None
-        ),
-    }
-
-
-def _restore_whisper_after_drift(
-    stages: StageFunctions,
-    info: Any,
-    *,
-    now: Callable[[], float],
-    do_sleep: Callable[[float], None],
-    context: str,
-) -> None:
-    """Restore the known service after a drift, under the granted retry
-    authority, so resampling NEVER proceeds with the shared service held
-    down. Raises ``_SwapRetryBlocked`` (global fail-closed, actual state)
-    when the restore cannot be positively completed."""
-    try:
-        stages.whisper_restore(info)
-        healthy, _detail = _wait_whisper_healthy_for_retry(
-            stages, now=now, do_sleep=do_sleep
-        )
-        if not healthy:
-            raise _SwapRetryBlocked(
-                f"whisper restoration after {context} did not become "
-                "healthy: ALL further progress is blocked; verify the "
-                "service state explicitly; no rollback is performed or "
-                "implied"
-            )
-    except _SwapRetryBlocked:
-        raise
-    except KeyboardInterrupt:
-        raise
-    except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-        raise _SwapRetryBlocked(
-            f"whisper restoration after {context} failed ({exc}): ALL "
-            "further progress is blocked; verify the service state "
-            "explicitly; no rollback is performed or implied"
-        ) from exc
-
-
-def _release_retry_lease(
-    lease: GpuLease,
-    *,
-    now: Callable[[], float],
-    do_sleep: Callable[[float], None],
-    context: str,
-) -> None:
-    """Release a retry window's GPU lease: the ONE authorized restore.
-
-    The lease is the single owner of the stop→…→restore window (S1): it
-    performs exactly one start, the bounded readiness wait (S2) and the
-    marker clear on the verified healthy path (S3). Every drift/exit
-    path that must not leave the shared service stopped releases the
-    lease through here, so the restore logic lives in ONE place; this
-    helper only maps the lease's outcome onto the existing global
-    fail-closed category (``_SwapRetryBlocked``) with the exact
-    per-branch messages. A ``KeyboardInterrupt`` propagates (the lease
-    records where it landed; the one start is never repeated).
-    """
-    try:
-        outcome = lease.restore_once(monotonic=now, sleep=do_sleep)
-    except KeyboardInterrupt:
-        raise
-    except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-        raise _SwapRetryBlocked(
-            f"whisper restoration after {context} failed ({exc}): ALL "
-            "further progress is blocked; verify the service state "
-            "explicitly; no rollback is performed or implied"
-        ) from exc
-    if outcome.status == "restore_failed":
-        exc = outcome.error
-        raise _SwapRetryBlocked(
-            f"whisper restoration after {context} failed ({exc}): ALL "
-            "further progress is blocked; verify the service state "
-            "explicitly; no rollback is performed or implied"
-        ) from exc
-    if outcome.status != "healthy":
-        raise _SwapRetryBlocked(
-            f"whisper restoration after {context} did not become "
-            "healthy: ALL further progress is blocked; verify the "
-            "service state explicitly; no rollback is performed or "
-            "implied"
-        )
-
-
-def _swap_retry_readmission(
-    *,
-    state: StateRoot,
-    stages: StageFunctions,
-    plan: RunPlan,
-    eligs: Sequence[SwapRetryEligibility],
-    watcher: SwapQuietWatcher,
-    samples: list[dict[str, Any]],
-    out: Callable[[str], None],
-    now: Callable[[], float],
-    do_sleep: Callable[[float], None],
-) -> tuple[str, str | None, GpuLease | None, list[tuple[str, str]]]:
-    """Re-admission under the retry consent's named authority (D-05/D-11).
-
-    Returns ``(status, reason, lease, dropped)``:
-
-    - ``("ok", None, lease, dropped)`` — whisper stopped under the retry
-      authority (through the window's GPU lease: the persisted marker
-      exists for exactly this stop→…→restore window), identical
-      configuration re-checked, a fresh post-stop swap sample recorded
-      and (when measurable) below threshold, fresh free-VRAM gate green;
-      the retry attempt may run — the caller releases the SAME lease
-      when it ends the window instead of executing the attempt;
-      ``dropped`` lists ``(video_id, reason)`` ids whose scope drifted
-      since the consent (FR-24): they were removed from the window and
-      stay pending for a fresh authorization; the lifecycle ran for the
-      remaining ids only (or no id remains, in which case the stop never
-      happened — see below);
-    - ``("drift", reason, lease|None, dropped)`` — final-conditions drift
-      (FR-11): the stability count must reset and sampling resumes
-      inside the SAME 180 s cap; whisper is left RUNNING (the window's
-      lease was released — restored — if this re-admission had stopped
-      it; the shared service is NEVER held down while resampling);
-    - ``("new_authorization", reason, None, dropped)`` — scope
-      fingerprints changed since the consent (FR-24) for EVERY covered
-      id: the approved retry does not cover this scope; the ids stay
-      pending for a fresh authorization. No stop was attempted, so there
-      is no lease.
-
-    Raises ``_SwapRetryBlocked`` (the existing global service-
-    restoration fail-closed category, actual state reported) for
-    identity/config mismatches and lifecycle failures: a foreign
-    configuration answering under the known name, or a service that
-    cannot be found or restored, is an operator-level anomaly that
-    resampling must never paper over by assuming a healthy known
-    service.
-    """
-    bound = plan.whisper_info
-    assert bound is not None  # narrowing: the flow verified the binding
-    lease: GpuLease | None = None
-    # Scope fingerprints first (read-only, before any mutation). A
-    # drifted id is DROPPED from the window (its retry is a NEW
-    # authorization question); only when EVERY id drifted does the whole
-    # window become new_authorization with no stop attempted.
-    dropped: list[tuple[str, str]] = []
-    remaining: list[SwapRetryEligibility] = []
-    for elig in eligs:
-        scope_now = _swap_retry_scope_now(state, elig.video_id)
-        if scope_now is None:
-            raise _SwapRetryBlocked(
-                "the durable manifest disappeared while the swap-retry was "
-                "consented; the retry cannot proceed and the scope cannot be "
-                "verified — progress is blocked"
-            )
-        drift_reason: str | None = None
-        for key in ("media_sha256", "sampling_manifest_sha256"):
-            if scope_now.get(key) != elig.scope.get(key):
-                drift_reason = (
-                    "scope fingerprints changed since the retry consent "
-                    f"({key}: consent bound {elig.scope.get(key)!r}, now "
-                    f"{scope_now.get(key)!r}); a retry under changed scope is "
-                    "a NEW authorization question — the approved retry does "
-                    "not cover it"
-                )
-                break
-        if drift_reason is None:
-            remaining.append(elig)
-        else:
-            dropped.append((elig.video_id, drift_reason))
-    if not remaining:
-        ids_text = ", ".join(video_id for video_id, _ in dropped)
-        return (
-            "new_authorization",
-            (
-                "scope fingerprints changed since the retry consent for "
-                f"every covered id ({ids_text}); a retry under changed "
-                "scope is a NEW authorization question — the approved "
-                "retry does not cover it"
-            ),
-            None,
-            dropped,
-        )
-    current = stages.whisper_inspect()
-    if current is None:
-        raise _SwapRetryBlocked(
-            "the bound whisper service cannot be found at re-admission "
-            "(podman inspect finds no such container); the SAME known "
-            "service cannot be restored — progress is blocked; verify the "
-            "service state explicitly; no rollback is performed or implied"
-        )
-    if not getattr(current, "running", False):
-        # Volatile-state drift (FR-11 "service state changed"), but the
-        # shared service is DOWN: restore it under the granted retry
-        # authority FIRST so resampling never proceeds with it held down.
-        # This flow did NOT stop it in this window, so there is no lease
-        # and no marker for this restore: exactly one direct start under
-        # the standing grant, exactly as before the lease existed (a
-        # marker here would claim ownership of a stop nobody made).
-        _restore_whisper_after_drift(
-            stages, current, now=now, do_sleep=do_sleep,
-            context="a not-running drift at re-admission",
-        )
-        return (
-            "drift",
-            "final conditions drifted: the bound whisper service was not "
-            "running at re-admission; it was restored and verified "
-            "healthy under the retry authority before resampling "
-            "(pre-mutation healthy samples never guarantee post-change "
-            "conditions); sampling resumes inside the SAME cap",
-            None,
-            dropped,
-        )
-    if not same_service_config(bound, current):
-        # Identity-level mismatch: a DIFFERENT configuration is answering
-        # under the known name. The retry consent authorizes stop/restore
-        # of exactly the bound service/configuration — neither stopping
-        # this foreign configuration nor "restoring" over it is safe, so
-        # this follows the existing restoration fail-closed semantics
-        # (T6/FR-06) with the actual state, instead of resampling on the
-        # assumption of a healthy known service.
-        raise _SwapRetryBlocked(
-            "the whisper configuration at re-admission differs from the "
-            f"plan binding (bound {bound.describe()}; now "
-            f"{current.describe()}); the SAME known service cannot be "
-            "safely stopped or restored — progress is blocked; verify "
-            "the service state explicitly; no rollback is performed or "
-            "implied"
-        )
-    # Stop under the retry consent's named lifecycle authority. The GPU
-    # lease is the single owner of this stop→…→restore window (S1): it
-    # persists the lease marker BEFORE the stop command is issued (S3,
-    # under the run's state root) and owns the exactly-one restore that
-    # ends the window on every path below.
-    lease = lease_from_stages(stages, state)
-    try:
-        lease.acquire(current)
-    except KeyboardInterrupt:
-        # The stop result is UNKNOWN: never guess, never restore — the
-        # operator verifies the exact service manually (mirrors the
-        # standing whisper-stop interrupt semantics; no unsafe rollback).
-        # The marker STAYS on disk so the next start can prove the stop
-        # was ours (S5).
-        raise
-    except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-        raise _SwapRetryBlocked(
-            f"the whisper stop under the retry authority failed ({exc}); "
-            "the service state must be verified explicitly before any "
-            "GPU work; no rollback is performed or implied"
-        ) from exc
-    # Fresh post-stop swap sample (FR-12 explicit accounting): the stop
-    # itself mutates the host, so the raw cumulative reading right after
-    # the mutation is recorded and — when measurable time elapsed — its
-    # interval rate participates: an above-threshold rate IS post-
-    # mutation drift (the pre-stop stable windows never guaranteed
-    # post-change conditions), resetting the stability count inside the
-    # SAME cap.
-    try:
-        transition_sample = watcher.sample_transition("post_stop")
-    except (SwapCooldownMeasurementError, KeyboardInterrupt):
-        # The stop above is VERIFIED, so the shared service is in a KNOWN
-        # stopped state. A handled post-stop measurement failure or an
-        # interrupt here must never leave it stopped behind a normal
-        # window end: release the window's lease (restore the SAME
-        # service under the retry authority, no replay of the start
-        # attempt) first, then let the original failure propagate with
-        # its honest terminal state.
-        _release_retry_lease(
-            lease, now=now, do_sleep=do_sleep,
-            context="a post-stop swap measurement failure at re-admission",
-        )
-        raise
-    samples.append(transition_sample.to_dict())
-    if (
-        transition_sample.rate_bytes_per_s is not None
-        and transition_sample.rate_bytes_per_s
-        > watcher.rate_limit_bytes_per_s
-    ):
-        drift = (
-            "final conditions drifted: swap I/O measured "
-            f"{format_rate_mib_per_s(transition_sample.rate_bytes_per_s)} "
-            "in the first interval after the whisper stop (above "
-            f"{config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S:.2f} "
-            "MiB/s); sampling resumes inside the SAME cap"
-        )
-        _release_retry_lease(
-            lease, now=now, do_sleep=do_sleep,
-            context="a post-stop swap drift at re-admission",
-        )
-        return ("drift", drift, lease, dropped)
-    # Fresh admission gate AFTER the transition (FR-10/FR-11): the
-    # vision stage's own gate stays authoritative; this seam only
-    # enables the pre-attempt drift check. A RAISING probe leaves the
-    # service in a KNOWN stopped state (the stop above verified), so it
-    # is restored under the granted authority before failing closed —
-    # never left stopped while the flow ends.
-    gpu_free = stages.gpu_free_mib
-    if gpu_free is not None:
-        try:
-            free_mib = gpu_free()
-        except KeyboardInterrupt:
-            raise
-        except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-            _release_retry_lease(
-                lease, now=now, do_sleep=do_sleep,
-                context="a failed free-VRAM probe at re-admission",
-            )
-            raise _SwapRetryBlocked(
-                f"the free-VRAM probe at re-admission failed ({exc}); "
-                "final conditions cannot be verified — failing closed "
-                "with the whisper service restored healthy under the "
-                "retry authority; no rollback is performed or implied"
-            ) from exc
-        if free_mib < config.GATES.free_vram_gate_mib:
-            drift = (
-                "final conditions drifted: only "
-                f"{free_mib} MiB free VRAM at re-admission (need "
-                f"{config.GATES.free_vram_gate_mib} MiB); sampling "
-                "resumes inside the SAME cap"
-            )
-            _release_retry_lease(
-                lease, now=now, do_sleep=do_sleep,
-                context="a re-admission VRAM drift",
-            )
-            return ("drift", drift, lease, dropped)
-    out("whisper stop (retry authority): verified identical config")
-    return ("ok", None, lease, dropped)
-
-
-def _archive_original_vision_attempt(
-    state: StateRoot,
-    video_id: str,
-    elig: SwapRetryEligibility,
-    window: ConsentWindow,
-) -> dict[str, Any] | None:
-    """Archive the ORIGINAL failure before the retry can overwrite it.
-
-    Copies the whole ``vision/`` artifact directory (per-frame payloads,
-    responses, records.json, crops) to a fresh ``vision-attempt-N``
-    directory inside the SAME run dir and records the original stage
-    record + gate evidence + scope in ``manifest.swap_retry`` —
-    append-only evidence inside the existing manifest structure, never
-    a second job ledger (PRD section 5.1 / FR-15).
-    """
-    loaded = _load_job_manifest(state, video_id)
-    if loaded is None:
-        return None
-    manifest, path = loaded
-    run_dir = path.parent
-    vision_dir = run_dir / "vision"
-    archive_name = "vision-attempt-1"
-    index = 1
-    while (run_dir / archive_name).exists():
-        index += 1
-        archive_name = f"vision-attempt-{index}"
-    if vision_dir.is_dir():
-        shutil.copytree(vision_dir, run_dir / archive_name)
-    original_record = manifest.stages.get("vision")
-    swap_retry: dict[str, Any] = {
-        "original": {
-            "archived_at": utc_now_iso(),
-            "stage_record": (
-                original_record.to_dict()
-                if original_record is not None
-                else None
-            ),
-            "resource_gates_vision": manifest.resource_gates.get("vision"),
-            "archive_dir": archive_name if vision_dir.is_dir() else None,
-            "scope": dict(elig.scope),
-            "failure_reason": (
-                original_record.result.reason
-                if original_record is not None
-                else None
-            ),
-        },
-        "consent": {"window": window.to_dict(), "granted": True},
-    }
-    if manifest.swap_retry is not None:
-        # A LATER invocation retrying again chains the previous retry
-        # evidence instead of discarding it (per-invocation cap, not a
-        # lifetime block — FR-17).
-        swap_retry["prior"] = manifest.swap_retry
-    manifest.swap_retry = swap_retry
-    manifest.updated_at = utc_now_iso()
-    _write_job_manifest(path, manifest)
-    return swap_retry
-
-
-def _record_swap_retry_attempt(
-    state: StateRoot, video_id: str, attempt: dict[str, Any]
-) -> None:
-    """Persist the retry attempt's own provenance (append-only)."""
-    loaded = _load_job_manifest(state, video_id)
-    if loaded is None:
-        return
-    manifest, path = loaded
-    if manifest.swap_retry is None:
-        # Defensive: the archive step must have run first; never invent
-        # evidence out of thin air.
-        manifest.swap_retry = {"original": None, "consent": None}
-    manifest.swap_retry["attempt"] = attempt
-    manifest.updated_at = utc_now_iso()
-    _write_job_manifest(path, manifest)
-
-
-def _execute_swap_retry(
-    *,
-    state: StateRoot,
-    stages: StageFunctions,
-    narrated: StageFunctions,
-    lease: GpuLease,
-    items: Sequence[tuple[str, SwapRetryEligibility, dict[str, Any]]],
-    window: ConsentWindow,
-    samples: list[dict[str, Any]],
-    out: Callable[[str], None],
-    now: Callable[[], float],
-    do_sleep: Callable[[float], None],
-) -> None:
-    """Run the ONE vision retry window for every covered id (D-11/FR-26).
-
-    Precondition: re-admission already stopped whisper under the retry
-    authority (through ``lease``) and checked the fresh final
-    conditions. This function owns: the per-id evidence archives, ONE
-    isolated-Ollama lifecycle (never adopting a preexisting server)
-    shared by every covered id, the narrated vision call per id, the
-    single server stop, and the release of the window's GPU lease (the
-    ONE whisper restore + bounded health wait) on EVERY exit path
-    (success, failure, interrupt). A failing evidence archive also
-    releases the lease before its failure is reported. The window
-    CLOSES at the first id whose re-run fails the swap gate again:
-    that id keeps its failed-attempt evidence, the remaining ids are
-    not attempted and stay pending. Terminal state and the attempt
-    record land per id in ``record``.
-    """
-    started_iso = utc_now_iso()
-    started = now()
-    assert lease.stopped_info is not None  # narrowing: readmission stopped it
-    window_ids = [video_id for video_id, _, _ in items]
-    # The evidence archives run BEFORE the retry can overwrite the live
-    # paths, but re-admission has ALREADY stopped whisper under the
-    # retry authority. A failing archive here (a raise, or a manifest
-    # that unexpectedly vanished) must therefore release the window's
-    # lease (restore the SAME service under that authority) before it
-    # is reported — the shared service is never left stopped behind the
-    # retry window.
-    try:
-        for video_id, elig, _record in items:
-            archive = _archive_original_vision_attempt(
-                state, video_id, elig, window
-            )
-            if archive is None:
-                # Never reached in practice (eligibility read the
-                # manifest); honest fail-closed rather than an
-                # ungated attempt.
-                raise _SwapRetryBlocked(
-                    "the durable manifest disappeared before the retry "
-                    "attempt; the retry is not executed and progress is "
-                    "blocked"
-                )
-    except _SwapRetryBlocked:
-        _release_retry_lease(
-            lease, now=now, do_sleep=do_sleep,
-            context="a vanished manifest at the retry archive",
-        )
-        raise
-    except KeyboardInterrupt:
-        _release_retry_lease(
-            lease, now=now, do_sleep=do_sleep,
-            context="an interrupted original-evidence archive at re-admission",
-        )
-        raise
-    except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-        _release_retry_lease(
-            lease, now=now, do_sleep=do_sleep,
-            context="a failed original-evidence archive at re-admission",
-        )
-        raise _SwapRetryBlocked(
-            f"the original-failure evidence archive failed ({exc}); the "
-            "retry is not executed and progress is blocked; the SAME "
-            "whisper service is restored healthy under the retry authority"
-        ) from exc
-    handle: Any = None
-    restore_ok = False
-    # Per-id attempt evidence, persisted on EVERY path where that id's
-    # vision call actually started (append-only, never a replacement).
-    attempts: list[tuple[str, dict[str, Any]]] = []
-    blocked: _SwapRetryBlocked | None = None
-    try:
-        if stages.ollama_reachable():
-            pending_text = (
-                "every listed id stays pending"
-                if len(items) > 1
-                else "Video stays pending"
-            )
-            for _video_id, _elig, rec in items:
-                rec["state"] = "retry_not_executed_pending"
-            message = (
-                "isolated Ollama already answers on "
-                f"{config.OLLAMA_API_BASE}: the retry never adopts a "
-                "preexisting server; stop it explicitly and re-invoke. "
-                f"{pending_text}; the retry consent is exhausted for "
-                "this invocation"
-            )
-            for _video_id, _elig, rec in items:
-                rec["message"] = message
-            out(message)
-            return
-        handle = stages.ollama_start()
-        stages.ollama_wait_ready(handle)
-        if len(items) > 1:
-            out(
-                "vision retry window begins: "
-                f"{len(items)} id(s) ("
-                + ", ".join(video_id for video_id, _, _ in items)
-                + ") with ONE shared isolated-Ollama lifecycle (one model "
-                "load for all of them); vision-only re-runs with a fresh "
-                "immediate baseline; gates unchanged"
-            )
-        else:
-            out(
-                "vision retry attempt 2 begins: vision-only re-run with a "
-                "fresh immediate baseline; gates unchanged"
-            )
-        for index, (video_id, elig, record) in enumerate(items):
-            outcome: Any = None
-            try:
-                outcome = narrated.vision(video_id, state)
-            except KeyboardInterrupt:
-                attempts.append(
-                    (
-                        video_id,
-                        {
-                            "started_at": started_iso,
-                            "finished_at": utc_now_iso(),
-                            "duration_seconds": round(now() - started, 3),
-                            "outcome": "interrupted_unknown",
-                            "reason": (
-                                "vision retry interrupted; outcome UNKNOWN"
-                            ),
-                            "model": config.VISION_MODEL,
-                            "cooldown_samples": [],
-                            "window_ids": list(window_ids),
-                            "restore_verified_healthy": False,
-                        },
-                    )
-                )
-                raise
-            outcome_value = str(getattr(outcome, "outcome", outcome))
-            outcome_reason = str(getattr(outcome, "reason", ""))
-            attempts.append(
-                (
-                    video_id,
-                    {
-                        "started_at": started_iso,
-                        "finished_at": utc_now_iso(),
-                        "duration_seconds": round(now() - started, 3),
-                        "outcome": outcome_value,
-                        "reason": outcome_reason,
-                        "model": config.VISION_MODEL,
-                        # Window-level samples attach to the FIRST
-                        # covered id's record only; the linkage is the
-                        # explicit window_ids list.
-                        "cooldown_samples": (
-                            list(samples) if index == 0 else []
-                        ),
-                        "window_ids": list(window_ids),
-                        "restore_verified_healthy": False,
-                    },
-                )
-            )
-            if outcome_value == "complete":
-                record["state"] = "retry_complete"
-                record["message"] = (
-                    "swap-retry complete: vision re-ran successfully with "
-                    "gates green; the video's remaining stages "
-                    "(audio/synthesis/verify) stay pending for their own "
-                    "authorization/invocation"
-                )
-                continue
-            record["state"] = "retry_exhausted"
-            record["message"] = (
-                "retry exhausted: no third attempt this invocation; video "
-                "stays pending (resumable by re-invoking)"
-            )
-            if _is_swap_gate_failure(outcome_reason):
-                # FR-26: the window CLOSES at this id; the remaining
-                # covered ids are not attempted and stay pending.
-                close_reason = (
-                    "swap gate fired again inside the retry window at id "
-                    f"{video_id}: the window closed after this id's "
-                    "failed attempt; this id was not attempted and stays "
-                    "pending (resumable by re-invoking); no second window "
-                    "this invocation"
-                )
-                for rvideo_id, _relig, rrecord in items[index + 1:]:
-                    rrecord["state"] = "retry_not_executed_pending"
-                    rrecord["message"] = close_reason
-                out(close_reason)
-                break
-    finally:
-        if handle is not None:
-            try:
-                stages.ollama_stop(handle)
-                out("isolated Ollama stopped cleanly (retry window)")
-            except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-                for video_id, _elig, record in items:
-                    record["ollama_stop_failed"] = str(exc)
-                out(
-                    f"ISOLATED OLLAMA STOP FAILED (retry window): {exc}; "
-                    "the server this run started may still be running — "
-                    "stop it explicitly "
-                    f"(pid file {config.OLLAMA_PID_PATH})"
-                )
-        # Whisper restore on EVERY exit path, under the retry consent's
-        # named authority (D-03/D-05): no shared service is left down.
-        # Releasing the window's lease performs the ONE authorized start
-        # and the bounded health wait, and clears the lease marker only
-        # on the verified healthy path (S1/S3).
-        try:
-            _release_retry_lease(
-                lease, now=now, do_sleep=do_sleep, context="the retry window"
-            )
-            restore_ok = True
-            out("whisper restored healthy after the retry window")
-        except _SwapRetryBlocked as exc:
-            # The unrestored shared service is the most severe honest
-            # fact: capture it so the window's own evidence is persisted
-            # first, then let it propagate (it outranks the interrupt
-            # report — an unrestored service blocks everything). The
-            # restore failure OUTRANKS every per-id outcome in the
-            # records too: their durable attempt evidence stays in the
-            # manifests, but the report state is the global hard stop.
-            blocked = exc
-            for video_id, _elig, record in items:
-                record["state"] = "blocked_global"
-                record["message"] = exc.reason
-        except KeyboardInterrupt:
-            # An interrupt inside the release itself: its outcome is
-            # UNKNOWN — record honestly and let it propagate. The
-            # unknown restore OUTRANKS every per-id outcome in the
-            # records (their durable attempt evidence stays in the
-            # manifests); the coordinator's handler re-raises.
-            for video_id, _elig, record in items:
-                record["state"] = "interrupted_unknown"
-                record["message"] = (
-                    "swap-retry interrupted: the video's retry state is "
-                    "UNKNOWN for this invocation (nothing is assumed); "
-                    "the applicable whisper restoration ran under the "
-                    "retry authority unless its own report above says "
-                    "otherwise; partial results are preserved by the "
-                    "stages"
-                )
-                record["restore_unknown_interrupt"] = True
-            raise
-        except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-            blocked = _SwapRetryBlocked(
-                f"whisper restoration after the retry window failed "
-                f"({exc}): ALL further progress is blocked; verify the "
-                "service state explicitly; no rollback is performed or "
-                "implied"
-            )
-        # Persist the per-id attempt evidence on EVERY path where that
-        # id's vision call actually started (success, failure,
-        # interrupt, later restore failure) — append-only.
-        for video_id, attempt in attempts:
-            attempt["restore_verified_healthy"] = restore_ok
-            for pvideo_id, _pelig, record in items:
-                if pvideo_id == video_id:
-                    record["attempt"] = attempt
-                    break
-            _record_swap_retry_attempt(state, video_id, attempt)
-    if blocked is not None:
-        raise blocked
-
-
-def _is_swap_gate_failure(reason: str) -> bool:
-    """True when a stage reason reports a swap_delta gate firing.
-
-    ``GateViolation`` renders as ``"<gate> gate fired: <reason>"`` with
-    the gate id from :mod:`tiktok_ingest.gates` — a single stable
-    definition covered by contract tests.
-    """
-    return f"{GATE_SWAP_DELTA} gate fired:" in str(reason)
-    out(message)
-
-
-def _run_swap_retry_flow(
-    *,
-    state: StateRoot,
-    stages: StageFunctions,
-    narrated: StageFunctions,
-    human: ConsentProvider,
-    human_decisions: list[dict[str, Any]],
-    plan: RunPlan,
-    batch_ids: Sequence[str],
-    offered: set[str],
-    out: Callable[[str], None],
-    report: dict[str, Any],
-    monotonic: Callable[[], float] | None = None,
-    sleep: Callable[[float], None] | None = None,
-    vmstat_fn: Callable[[], Any] | None = None,
-) -> None:
-    """Offer the bounded swap-retry for every eligible id of ONE batch
-    as a single shared-lifecycle window (D-11/FR-26).
-
-    Collect phase: every eligible id of the batch joins ONE window.
-    Order per window (FR-05): verify the SAME whisper service restored
-    healthy FIRST, then ONE dedicated consent covering every covered
-    id, then the read-only cooldown with the callback-based
-    re-admission, then the single vision-only window (one Ollama
-    lifecycle for all covered ids). Exactly ONE ask per covered id per
-    invocation (denial included); a failed second attempt ends the
-    matter for that id.
-    """
-    if not stages.whisper_lifecycle_ready():
-        return
-    if plan.whisper_info is None:
-        out(
-            "note: no whisper identity was bound for this run; the "
-            "bounded swap-retry (which must restore and re-stop the SAME "
-            "service) is not offered"
-        )
-        return
-    now = monotonic or time.monotonic
-    do_sleep = sleep or time.sleep
-    vmstat = vmstat_fn or default_vmstat_fn
-    # -- collect phase (D-11): every eligible id joins ONE window ------
-    items: list[tuple[str, SwapRetryEligibility, dict[str, Any]]] = []
-    for video_id in batch_ids:
-        if video_id in offered:
-            continue
-        elig = _swap_retry_eligibility(state, video_id)
-        if not elig.eligible:
-            continue
-        offered.add(video_id)  # ONE ask per id per invocation (D-02)
-        record: dict[str, Any] = {
-            "id": video_id,
-            "state": "retry_eligible",
-            "eligible_reason": elig.reason,
-            "overshoot_mib": elig.overshoot_mib,
-            "scope": dict(elig.scope),
-            "consent_granted": None,
-            "samples": [],
-            "stable_resets": [],
-            "attempt": None,
-            "message": None,
-        }
-        report["swap_retries"].append(record)
-        out(
-            f"swap-retry eligible: id {video_id} failed the vision "
-            f"swap_delta gate ({_overshoot_text(elig.overshoot_mib)}) "
-            "with verified cleanup"
-        )
-        items.append((video_id, elig, record))
-    if not items:
-        return
-    window_ids = [video_id for video_id, _, _ in items]
-    for _vid, _el, rec in items:
-        rec["window_ids"] = list(window_ids)
-    # Window-level fields (samples, stable resets) attach to the FIRST
-    # covered id's record; window_ids links the rest.
-    record = items[0][2]
-    # T16 (PRD: ANY state -> interrupted_unknown): pre-consent
-    # verification, the consent ask and the whole cooldown sit inside
-    # ONE interrupt scope so a KeyboardInterrupt can never propagate
-    # with a record still "retry_eligible" and no durable evidence. The
-    # inner cooldown handler sets the terminal state first; this outer
-    # scope covers the phases BEFORE any mutation (nothing was stopped
-    # or started there).
-    try:
-        # FR-05: window closed + SAME whisper restored healthy BEFORE
-        # the prompt (the batch cycle's standing restore did the work;
-        # this verifies it positively, read-only).
-        verify_error = _verify_whisper_restored_healthy(stages, plan)
-        if verify_error is not None:
-            for _vid, _el, rec in items:
-                rec["state"] = "blocked_global"
-                rec["message"] = verify_error
-            report["hard_stop_reason"] = verify_error
-            out(verify_error)
-            return
-        window = _build_swap_retry_window(
-            [el for _, el, _ in items], plan
-        )
-        granted = human.ask(window)
-        _record_decision(
-            human_decisions,
-            window,
-            granted,
-            "human decision: ONE bounded vision swap-retry window (new "
-            "scope, never covered by the run-plan grant)",
-        )
-        for _vid, _el, rec in items:
-            rec["consent_granted"] = granted
-        if not granted:
-            message = (
-                "swap-retry declined: video stays pending and resumable "
-                "(re-invoke to be asked again)"
-            )
-            for _vid, _el, rec in items:
-                rec["state"] = "retry_declined_pending"
-                rec["message"] = message
-            out(message)
-            return
-        # -- read-only cooldown + callback-based re-admission ----------
-        watcher = SwapQuietWatcher(vmstat_fn=vmstat, monotonic=now)
-        ids_text = (
-            ", ".join(window_ids)
-            if len(window_ids) > 1
-            else f"id {window_ids[0]}"
-        )
-        out(
-            f"vision swap-retry pause: {ids_text} failed swap_delta "
-            f"gate ({_overshoot_text(items[0][1].overshoot_mib)}, "
-            "cleanup verified). Whisper restored healthy; isolated server "
-            "stopped. Waiting for swap to quiet: sampling every "
-            f"{watcher.interval_seconds:.0f}s, admission no earlier "
-            f"than {watcher.floor_seconds:.0f}s, hard stop at "
-            f"{watcher.cap_seconds:.0f}s. Nothing else runs meanwhile."
-        )
-        samples: list[dict[str, Any]] = record["samples"]
-        next_narration = config.SWAP_RETRY_NARRATION_INTERVAL_SECONDS
-        above_narrated = False
-        phase = "cooldown"
-        try:
-            watcher.start()
-            terminal = None
-            while terminal is None:
-                if (
-                    not watcher.admitted
-                    and watcher.remaining_seconds <= 0
-                ):
-                    terminal = "cooldown_expired"
-                    break
-                do_sleep(
-                    min(
-                        watcher.interval_seconds,
-                        watcher.remaining_seconds,
-                    )
-                )
-                sample = watcher.sample(phase)
-                samples.append(sample.to_dict())
-                if watcher.admitted:
-                    out(
-                        f"[{sample.elapsed_seconds:.0f}s] swap "
-                        f"{format_rate_mib_per_s(sample.rate_bytes_per_s)} "
-                        f"— stable {watcher.stable_count}/"
-                        f"{watcher.stable_intervals_needed} at "
-                        f"{watcher.floor_seconds:.0f}s floor: admitting "
-                        "retry"
-                    )
-                    status, reason, lease, dropped = _swap_retry_readmission(
-                        state=state,
-                        stages=stages,
-                        plan=plan,
-                        eligs=[el for _, el, _ in items],
-                        watcher=watcher,
-                        samples=samples,
-                        out=out,
-                        now=now,
-                        do_sleep=do_sleep,
-                    )
-                    if dropped:
-                        # FR-24 per id: drifted ids leave the window
-                        # before any mutation; they stay pending for a
-                        # fresh authorization.
-                        dropped_ids = {vid for vid, _r in dropped}
-                        for dvid, dreason in dropped:
-                            for vid, _el, rec in items:
-                                if vid == dvid:
-                                    rec["state"] = (
-                                        "retry_not_executed_pending"
-                                    )
-                                    rec["message"] = dreason
-                                    break
-                            out(dreason)
-                        items = [
-                            entry for entry in items
-                            if entry[0] not in dropped_ids
-                        ]
-                    if status == "ok":
-                        if not items:
-                            terminal = "retry_not_executed_pending"
-                            break
-                        # The 180 s TOTAL cap (never restarted, D-04/
-                        # D-06) also gates the LAUNCH: re-admission
-                        # transitions (bounded stop grace, health waits,
-                        # probes) consume real time, and past the
-                        # ORIGINAL deadline the attempt must not start.
-                        # Whisper is STOPPED here (readmission stopped
-                        # it) — release the window's lease (restore
-                        # under the retry authority) before expiring
-                        # honestly.
-                        if watcher.expired:
-                            _release_retry_lease(
-                                lease,
-                                now=now,
-                                do_sleep=do_sleep,
-                                context=(
-                                    "a re-admission that consumed the "
-                                    "remaining cooldown cap"
-                                ),
-                            )
-                            message = (
-                                "cap exhausted during re-admission "
-                                "transitions: retry not executed, video "
-                                "pending (resumable by re-invoking). "
-                                "Whisper restored healthy."
-                            )
-                            for _vid, _el, rec in items:
-                                rec["state"] = "cooldown_expired"
-                                rec["message"] = message
-                            out(message)
-                            terminal = "cooldown_expired"
-                            break
-                        _execute_swap_retry(
-                            state=state,
-                            stages=stages,
-                            narrated=narrated,
-                            lease=lease,
-                            items=items,
-                            window=window,
-                            samples=samples,
-                            out=out,
-                            now=now,
-                            do_sleep=do_sleep,
-                        )
-                        terminal = "window_done"
-                        break
-                    if status == "new_authorization":
-                        # Every covered id drifted; the records were
-                        # already marked by the dropped loop above.
-                        assert reason is not None
-                        out(reason)
-                        terminal = "retry_not_executed_pending"
-                        break
-                    # Drift (FR-11): reset the count, NEVER the cap;
-                    # resampling continues inside the SAME 180 s budget
-                    # (the readmission already restored whisper where it
-                    # had stopped it).
-                    assert reason is not None
-                    out(reason)
-                    record["stable_resets"].append(
-                        {
-                            "elapsed_seconds": round(
-                                sample.elapsed_seconds, 3
-                            ),
-                            "reason": reason,
-                        }
-                    )
-                    watcher.reset_stability()
-                    phase = "resample"
-                    continue
-                if (
-                    sample.elapsed_seconds + 1e-9 >= next_narration
-                ):
-                    rate_text = format_rate_mib_per_s(
-                        sample.rate_bytes_per_s
-                    )
-                    remaining = max(
-                        0.0,
-                        watcher.cap_seconds - sample.elapsed_seconds,
-                    )
-                    if sample.rate_bytes_per_s is not None and (
-                        sample.rate_bytes_per_s
-                        > watcher.rate_limit_bytes_per_s
-                    ):
-                        mood = (
-                            "above "
-                            f"{config.SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S:.2f} MiB/s"
-                            if not above_narrated
-                            else "NOT recovered"
-                        )
-                        above_narrated = True
-                        out(
-                            f"[{sample.elapsed_seconds:.0f}s] swap "
-                            f"{rate_text} — {mood} (stable "
-                            f"{watcher.stable_count}/"
-                            f"{watcher.stable_intervals_needed}), "
-                            f"{remaining:.0f}s left"
-                        )
-                    else:
-                        out(
-                            f"[{sample.elapsed_seconds:.0f}s] swap "
-                            f"{rate_text} — stable "
-                            f"{watcher.stable_count}/"
-                            f"{watcher.stable_intervals_needed}, "
-                            f"{remaining:.0f}s left"
-                        )
-                    next_narration += (
-                        config.SWAP_RETRY_NARRATION_INTERVAL_SECONDS
-                    )
-                if watcher.expired:
-                    terminal = "cooldown_expired"
-                    break
-            # Only the SAMPLING expiry writes the generic message here;
-            # the re-admission gate above already recorded its own state
-            # and message (record state is terminal).
-            if terminal == "cooldown_expired":
-                message = (
-                    f"cap reached without "
-                    f"{watcher.stable_intervals_needed} stable intervals: "
-                    "retry not executed, video pending (resumable by "
-                    "re-invoking). Whisper remains healthy."
-                )
-                for _vid, _el, rec in items:
-                    if rec["state"] == "retry_eligible":
-                        rec["state"] = "cooldown_expired"
-                        rec["message"] = message
-                out(message)
-        except SwapCooldownMeasurementError as exc:
-            message = (
-                f"swap measurement unavailable: retry not executed, video "
-                f"pending (resumable by re-invoking) — {exc}"
-            )
-            for _vid, _el, rec in items:
-                if rec["state"] == "retry_eligible":
-                    rec["state"] = "measurement_unavailable"
-                    rec["message"] = message
-            out(message)
-            return
-        except _SwapRetryBlocked as exc:
-            for _vid, _el, rec in items:
-                if rec["state"] == "retry_eligible":
-                    rec["state"] = "blocked_global"
-                    rec["message"] = exc.reason
-            report["hard_stop_reason"] = exc.reason
-            out(exc.reason)
-            return
-        except KeyboardInterrupt:
-            message = (
-                "swap-retry interrupted: the video's retry state is "
-                "UNKNOWN for this invocation (nothing is assumed); the "
-                "applicable whisper restoration ran under the retry "
-                "authority unless its own report above says otherwise; "
-                "partial results are preserved by the stages"
-            )
-            for _vid, _el, rec in items:
-                if rec["state"] == "retry_eligible":
-                    rec["state"] = "interrupted_unknown"
-                    rec["message"] = message
-            out(message)
-            raise
-    except KeyboardInterrupt:
-        # T16 pre-mutation phases (read-only verification / consent
-        # ask): the inner handler already set interrupted_unknown when
-        # the interrupt landed inside the cooldown or attempt; here
-        # nothing has been stopped or started yet.
-        message = (
-            "swap-retry interrupted before any mutation "
-            "(verification/consent phase): nothing was stopped or "
-            "started; the video's retry state is UNKNOWN for this "
-            "invocation; re-invoke to be asked again"
-        )
-        any_pending = False
-        for _vid, _el, rec in items:
-            if rec["state"] == "retry_eligible":
-                rec["state"] = "interrupted_unknown"
-                rec["message"] = message
-                any_pending = True
-        if any_pending:
-            out(message)
-        raise
 
 
 def _phase_selection(
@@ -2525,8 +934,9 @@ def _merge_phase_report(batch: dict[str, Any], result: dict[str, Any]) -> None:
     for video_id, outcomes in result["stage_outcomes_this_run"].items():
         batch["stage_outcomes_this_run"].setdefault(video_id, {}).update(outcomes)
     batch["waiting_for_synthesis"] = result["waiting_for_synthesis"]
-    for name in ("interrupted", "whisper_restore_failed", "gpu_cleanup_failed"):
-        batch[name] = batch.get(name, False) or result[name]
+    batch["interrupted"] = batch.get("interrupted", False) or result[
+        "interrupted"
+    ]
     if result["failures"] or result["interrupted"]:
         batch["exit_code"] = 1
 
@@ -2575,11 +985,7 @@ def run_collection(
     browser_profile_base: Path | str | None = None,
     api_transport: Callable[..., Any] | None = None,
     env: Mapping[str, str] | None = None,
-    podman_runner: Callable[..., Any] | None = None,
     stages: StageFunctions | None = None,
-    swap_retry_monotonic: Callable[[], float] | None = None,
-    swap_retry_sleep: Callable[[float], None] | None = None,
-    swap_retry_vmstat_fn: Callable[[], Any] | None = None,
     auto_verify: bool = False,
     skip_browser_consent: bool = False,
     rescan: bool = False,
@@ -2592,10 +998,9 @@ def run_collection(
     is_video = False
     ref = parse_collection_url(collection_url)
 
-    from .runtime import default_urlopen, subprocess_runner
+    from .runtime import default_urlopen
 
     api_transport = api_transport or default_urlopen
-    podman_runner = podman_runner or subprocess_runner
     api_config, missing_env = load_text_api_config(env)
 
     preflight_report = preflight(
@@ -2663,7 +1068,6 @@ def run_collection(
         "batches": [],
         "phases": [],
         "verification": None,
-        "swap_retries": [],
         "run_authorization": {
             "human_decisions": human_decisions,
             "stage_windows": [],
@@ -2737,15 +1141,12 @@ def run_collection(
             out(f"collection-run report saved: {_persist_report(state, report)}")
             return 1, report
 
-    # Phase 2: freeze the inventory, bind the whisper identity read-only
-    # and ask HUMAN DECISION 2 — the ONE whole-current-run plan grant.
-    # The stage boundary is injectable; production defaults are built
-    # here (real stages + whisper lifecycle hooks), and the fixture
-    # suite injects doubles so NOTHING real ever runs in tests.
-    stages_exec = stages or build_stage_functions(
-        api_transport=api_transport,
-        podman_runner=podman_runner,
-    )
+    # Phase 2: freeze the inventory and ask HUMAN DECISION 2 — the ONE
+    # whole-current-run plan grant. The stage boundary is injectable;
+    # the production default is the plain real-stage bundle (no service
+    # lifecycle to wire), and the fixture suite injects doubles so
+    # NOTHING real ever runs in tests.
+    stages_exec = stages or default_stage_functions()
     narrated = _narrated_stages(stages_exec, out)
     frozen_ids, canonical_urls, stage_states, plan_counts = (
         _frozen_inventory(state, collection_url)
@@ -2768,14 +1169,6 @@ def run_collection(
             "plan itself)"
         )
     else:
-        reconcile = _reconcile_gpu_lease(state, stages_exec, out)
-        if reconcile.action != "none":
-            report["gpu_lease_reconcile"] = reconcile.to_dict()
-        if reconcile.blocks:
-            report["hard_stop_reason"] = f"gpu lease reconcile: {reconcile.detail}"
-            out(f"collection-run report saved: {_persist_report(state, report)}")
-            return 1, report
-        bound_info, whisper_note = _bind_whisper_identity(stages_exec, out)
         run_plan = RunPlan(
             collection_url=ref.collection_url,
             frozen_ids=frozen_ids,
@@ -2784,11 +1177,8 @@ def run_collection(
             batch_cap=cap,
             batch_count=math.ceil(len(frozen_ids) / cap),
             plan_counts=plan_counts,
-            whisper_bound=bound_info.describe() if bound_info is not None else None,
-            whisper_note=whisper_note,
             text_api_origin=api_config.origin() if api_config else None,
             text_api_model=api_config.model if api_config else None,
-            whisper_info=bound_info,
             retry_failed=retry_failed,
         )
         plan_window = build_run_plan_window(run_plan, auto_verify=auto_verify)
@@ -2837,7 +1227,6 @@ def run_collection(
         "vision": ("vision",),
         "synthesis": ("synthesis",),
     }
-    swap_retry_offered: set[str] = set()
     if authorization is not None:
         try:
             for phase, required_stages in phase_stages.items():
@@ -2852,8 +1241,7 @@ def run_collection(
                         f"{len(batch_ids)} frozen id(s) ({', '.join(batch_ids)})"
                     )
                     selection = _phase_selection(state, batch_ids, canonical_urls, cap)
-                    # One runner per phase/window: no consumed standing-restore
-                    # flags are shared with a later real stop cycle.
+                    # One runner per phase/window.
                     runner = GuidedRun(
                         state, stages=narrated, consent=authorization, out=out,
                         auto_synthesizer=auto_synthesizer,
@@ -2865,7 +1253,7 @@ def run_collection(
                             "excluded": [], "notes": [], "failures": [],
                             "cleanup_notes": [], "consent_log": [],
                             "stage_outcomes_this_run": {}, "waiting_for_synthesis": [],
-                            "interrupted": False, "whisper_restore_failed": False,
+                            "interrupted": False,
                             "phases": [],
                         })
                     batch_report = report["batches"][batch_index]
@@ -2880,39 +1268,13 @@ def run_collection(
                     if result["interrupted"]:
                         report["interrupted"] = True
                         report["hard_stop_reason"] = (
-                            "interrupted: partial evidence preserved; service "
-                            "cleanup may be UNKNOWN; new authorization required"
+                            "interrupted: partial evidence preserved; new "
+                            "authorization required"
                         )
-                    elif result["whisper_restore_failed"]:
-                        report["hard_stop_reason"] = (
-                            "whisper restoration failed: ALL further progress is "
-                            "blocked; verify the service state explicitly; no "
-                            "rollback is performed or implied"
-                        )
-                    elif result["gpu_cleanup_failed"]:
-                        report["hard_stop_reason"] = "isolated GPU cleanup unverified: ALL further progress blocked"
                     elif result["progress_blocked_reason"] is not None:
                         report["hard_stop_reason"] = result["progress_blocked_reason"]
                     if report["hard_stop_reason"] is not None:
                         break
-                    if phase == "vision":
-                        # Only ORIGINAL attempts made in this window may earn
-                        # a retry. Unattempted same-window ids remain pending,
-                        # even if an older invocation left eligible evidence.
-                        attempted_ids = [
-                            call.split(":", 1)[1] for call in result["stage_calls"]
-                            if call.startswith("vision:")
-                        ]
-                        _run_swap_retry_flow(
-                            state=state, stages=stages_exec, narrated=narrated,
-                            human=consent, human_decisions=human_decisions,
-                            plan=run_plan, batch_ids=attempted_ids,
-                            offered=swap_retry_offered, out=out, report=report,
-                            monotonic=swap_retry_monotonic, sleep=swap_retry_sleep,
-                            vmstat_fn=swap_retry_vmstat_fn,
-                        )
-                        if report["hard_stop_reason"] is not None:
-                            break
 
                 # Intra-phase retries: retry failed items within the same phase
                 # up to retry_failed times before advancing to the next phase.
@@ -2973,36 +1335,13 @@ def run_collection(
                         if result["interrupted"]:
                             report["interrupted"] = True
                             report["hard_stop_reason"] = (
-                                "interrupted: partial evidence preserved; service "
-                                "cleanup may be UNKNOWN; new authorization required"
+                                "interrupted: partial evidence preserved; new "
+                                "authorization required"
                             )
-                        elif result["whisper_restore_failed"]:
-                            report["hard_stop_reason"] = (
-                                "whisper restoration failed: ALL further progress is "
-                                "blocked; verify the service state explicitly; no "
-                                "rollback is performed or implied"
-                            )
-                        elif result["gpu_cleanup_failed"]:
-                            report["hard_stop_reason"] = "isolated GPU cleanup unverified: ALL further progress blocked"
                         elif result["progress_blocked_reason"] is not None:
                             report["hard_stop_reason"] = result["progress_blocked_reason"]
                         if report["hard_stop_reason"] is not None:
                             break
-                        if phase == "vision":
-                            attempted_ids = [
-                                call.split(":", 1)[1] for call in result["stage_calls"]
-                                if call.startswith("vision:")
-                            ]
-                            _run_swap_retry_flow(
-                                state=state, stages=stages_exec, narrated=narrated,
-                                human=consent, human_decisions=human_decisions,
-                                plan=run_plan, batch_ids=attempted_ids,
-                                offered=swap_retry_offered, out=out, report=report,
-                                monotonic=swap_retry_monotonic, sleep=swap_retry_sleep,
-                                vmstat_fn=swap_retry_vmstat_fn,
-                            )
-                            if report["hard_stop_reason"] is not None:
-                                break
 
                 evidence["pending_ids"] = [
                     video_id for video_id in frozen_ids
@@ -3024,10 +1363,8 @@ def run_collection(
             # Phase 4: ONE grouped verification authorization covering
             # every ready id's exact validated candidate URLs. Skipped
             # after ANY nonrecoverable stop — an interruption OR a hard
-            # stop such as a failed whisper restore (whose invariant is
-            # "ALL further progress is blocked", verification and
-            # backlog writes included): pending work waits for a new
-            # invocation and its own new authorization.
+            # boundary failure: pending work waits for a new invocation
+            # and its own new authorization.
             if (
                 not report["interrupted"]
                 and report["hard_stop_reason"] is None
@@ -3086,7 +1423,6 @@ __all__ = [
     "RunPlan",
     "RunScopedAuthorization",
     "build_run_plan_window",
-    "build_stage_functions",
     "make_auto_synthesizer",
     "preflight",
     "run_collection",

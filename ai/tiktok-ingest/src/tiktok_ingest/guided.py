@@ -6,33 +6,26 @@ existing stage functions — ``fetch_url → prepare_video → run_vision_stage
 — behind explicit, per-window operator authorization, and stops at the
 synthesis boundary when the operator has not supplied the document.
 
+Every model call goes to the RESIDENT llm-hub services (llama-chat for
+vision, llm-hub-whisper for audio): this coordinator never starts,
+stops, loads or unloads any model or container, and there is no GPU
+lease or swap gating to coordinate.
+
 Honesty rules carried into this module (they are the product's rules,
 restated):
 
 - All progress is DERIVED from the product's own state (``Processed``
   entries, ``meta.json`` stage outcomes, fingerprints). This module keeps
   no second stage ledger and persists no stage state: its report is a
-  summary, never an authority parallel to the manifests. The ONE
-  persisted artifact is the GPU lease marker (see
-  :mod:`tiktok_ingest.gpu_lease`), lifecycle recovery state for the
-  whisper swap — never stage progress.
+  summary, never an authority parallel to the manifests.
 - ``synthesize --from-file`` is validated-document INGESTION only. The
   guided command never generates, edits or auto-fills a synthesis
   document and never calls a text model.
 - Stage outcome ``complete`` is NOT claim verdict ``confirmed``. The
   report keeps the two axes separate; verdicts live in
   ``verification.json`` and the emitted backlog entry.
-- A fired gate is final: no automatic retry, no continued GPU load. A
-  new invocation is a new authorization window (GateLedger semantics).
-- Whisper is a shared service this coordinator only manages through
-  the optional lifecycle hooks (identity-verified, bounded stop before
-  vision, verified restore under a standing authorization asked BEFORE
-  the stop). When those hooks are absent the documented standalone
-  behavior holds: the read-only stopped-check passes or vision is
-  blocked with the operator instruction. The ``guided-run`` CLI always
-  supplies the hooks (:func:`whisper_coordinated_stage_functions`), so
-  a running KNOWN service is coordinated automatically; programmatic
-  callers keep the operator-managed default.
+- A failed model request is final: no automatic retry inside the same
+  window. A new invocation is a new authorization window.
 - The guided command never edits ``backlog.jsonl`` statuses and never
   writes the blocklist; ``verify`` appends ``pending`` entries exactly
   as it does today (duplicate-guarded). Review stays with the existing
@@ -42,12 +35,11 @@ restated):
 
 Failure policy (simple, documented): network/CPU-stage failures are
 per-item (the failing ID is recorded and other IDs continue); ANY
-non-complete vision outcome (fired gate, error, interrupt) ends the GPU
-phase for every remaining ID — no further model load this invocation.
-The isolated Ollama server this command itself started is stopped at
-window end or failure (the GPU consent covers that stop). An abrupt
-kill cannot guarantee cleanup: recovery is by evidence of the real
-state (PID file, ``status``, stage fingerprints), never by promise.
+non-complete vision outcome (error, interrupt) ends the vision window
+for every remaining ID — no further vision requests this invocation.
+The resident llm-hub services are user-managed
+(``systemctl --user start llm-hub-chat`` / ``llm-hub-whisper``); a
+missing or unhealthy service blocks fail-closed with that instruction.
 """
 
 from __future__ import annotations
@@ -60,8 +52,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from . import config
-from . import gpu_lease
 from .collection import (
     build_collection_plan,
     resolve_collection,
@@ -77,20 +67,13 @@ from .engine import (  # noqa: F401 - re-exported seam (S2 single home)
     StageFunctions,
     run_dir_of,
 )
-from .gpu_lease import (  # noqa: F401 - re-exported bounds (S2 single home)
-    WHISPER_RESTORE_READY_DEADLINE_SECONDS,
-    WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS,
-)
-from .ollama_runtime import start_server, stop_server, wait_ready
 from .fetch import fetch_url
 from .prepare import prepare_video
-from .runtime import Runner, subprocess_runner
 from .state import Blocklist, Processed, StateRoot
 from .synthesis import run_synthesis_stage
 from .verify import run_verify_stage
-from .vision import assert_whisper_stopped, query_gpu, run_vision_stage
+from .vision import run_vision_stage
 from .whisper_client import health_precheck, run_audio_stage
-from .whisper_lifecycle import inspect_whisper, restore_whisper, stop_whisper
 
 # The canonical order this coordinator drives. "emit" is displayed but
 # performed inside the verify stage (duplicate-guarded backlog append).
@@ -102,11 +85,6 @@ GUIDED_STAGES: tuple[str, ...] = (
     "synthesis",
     "verify",
 )
-
-# Bounded read-only readiness wait after the ONE authorized whisper
-# restore. The bounds' single home is :mod:`tiktok_ingest.gpu_lease`
-# (the ONE shared wait, S2); they are re-exported here because callers
-# and tests reference them through this module.
 
 
 # --------------------------------------------------------------------------
@@ -262,11 +240,10 @@ class _GuidedRunScopedConsent(ConsentProvider):
 
     Every phase window is discharged by the underlying
     ``RunScopedAuthorization`` when it is covered by the exact scope named
-    in the single run-plan window (``tanda``/``prepare``/``fetch``/``gpu``/
-    ``whisper-stop``/``whisper-restore`` and, when the text API endpoint and
-    model are named, ``synthesis-api``). Anything outside that scope is
-    forwarded to the human as genuinely new scope — it is never
-    auto-granted.
+    in the single run-plan window (``tanda``/``prepare``/``fetch``/``gpu``
+    and, when the text API endpoint and model are named,
+    ``synthesis-api``). Anything outside that scope is forwarded to the
+    human as genuinely new scope — it is never auto-granted.
 
     ``verify`` is deliberately NOT part of the run plan: candidate URLs only
     exist after synthesis, so the grouped verification window always reaches
@@ -292,55 +269,9 @@ class _GuidedRunScopedConsent(ConsentProvider):
 # Injectable stage boundary (production defaults call the real stages)
 # --------------------------------------------------------------------------
 # StageFunctions itself lives in tiktok_ingest.engine (the S2 execution
-# seam); the production default constructors below stay here because
-# they wire the real pipeline functions (and the test seams that patch
-# ``guided.subprocess_runner``) into that boundary.
-
-
-def _ollama_reachable() -> bool:
-    """Read-only probe: does ANYTHING answer on the isolated port?
-
-    Used only to refuse adopting a preexisting process; version and
-    scope verification stay inside the vision stage preconditions.
-    """
-    import urllib.request
-
-    url = f"{config.OLLAMA_API_BASE.rstrip('/')}/api/version"
-    try:
-        with urllib.request.urlopen(url, timeout=2.0) as response:  # noqa: S310
-            response.read(64)
-        return True
-    except (OSError, ValueError):
-        return False
-
-
-def _wait_for_whisper_health(
-    health: Callable[[], tuple[bool, str]],
-    *,
-    deadline_seconds: float = WHISPER_RESTORE_READY_DEADLINE_SECONDS,
-    poll_interval_seconds: float = WHISPER_RESTORE_READY_POLL_INTERVAL_SECONDS,
-    monotonic: Callable[[], float] | None = None,
-    sleep: Callable[[float], None] | None = None,
-    waiting_feedback: Callable[[float], None] | None = None,
-) -> tuple[bool, str]:
-    """Thin delegation to the ONE shared readiness wait (S2).
-
-    The implementation lives in
-    :func:`tiktok_ingest.gpu_lease.wait_for_whisper_health` (identical
-    bounds: immediate first probe, one bounded interval between probes,
-    60 s deadline, ``KeyboardInterrupt`` never caught). This name stays
-    because tests patch ``guided.time`` for the deterministic clock: the
-    clock defaults are resolved HERE, in this module's namespace, so
-    that seam keeps working unchanged.
-    """
-    return gpu_lease.wait_for_whisper_health(
-        health,
-        deadline_seconds=deadline_seconds,
-        poll_interval_seconds=poll_interval_seconds,
-        monotonic=monotonic if monotonic is not None else time.monotonic,
-        sleep=sleep if sleep is not None else time.sleep,
-        waiting_feedback=waiting_feedback,
-    )
+# seam); the production default constructor below stays here because it
+# wires the real pipeline functions (and the test seams that patch
+# ``guided`` transports) into that boundary.
 
 
 def default_stage_functions() -> StageFunctions:
@@ -354,40 +285,7 @@ def default_stage_functions() -> StageFunctions:
             video_id, state=state, from_file=from_file
         ),
         verify=lambda video_id, state: run_verify_stage(video_id, state=state),
-        whisper_stopped=lambda: assert_whisper_stopped(subprocess_runner),
         whisper_health=lambda: health_precheck(),
-        ollama_reachable=_ollama_reachable,
-        ollama_start=lambda: start_server(),
-        ollama_wait_ready=lambda handle: wait_ready(),
-        ollama_stop=lambda handle: stop_server(handle),
-        gpu_free_mib=lambda: query_gpu(subprocess_runner).free_mib,
-    )
-
-
-def whisper_coordinated_stage_functions(
-    *, runner: Runner = subprocess_runner
-) -> StageFunctions:
-    """Production stages WITH the Phase 0 whisper lifecycle hooks.
-
-    This is what the ``guided-run`` CLI uses so it coordinates the KNOWN
-    shared whisper service exactly like ``collection-run`` already does:
-    when vision needs the GPU and that service is running, its identity
-    is verified read-only, the bounded stop runs only behind its TWO
-    explicit consent windows (``whisper-stop`` plus the STANDING
-    ``whisper-restore`` authorization asked BEFORE the stop), and the
-    same service is restored and health-checked afterwards — on success,
-    failure and interruption alike, with UNKNOWN semantics when the stop
-    or restore itself is interrupted. It adds NO new authority: the
-    hooks are the existing :mod:`tiktok_ingest.whisper_lifecycle`
-    functions and the coordinator keeps its fail-closed rules. The
-    programmatic default (:func:`default_stage_functions`) stays
-    operator-managed for callers that do not opt in.
-    """
-    return dataclasses.replace(
-        default_stage_functions(),
-        whisper_inspect=lambda: inspect_whisper(runner),
-        whisper_stop=lambda info: stop_whisper(info, runner=runner),
-        whisper_restore=lambda info: restore_whisper(info, runner=runner),
     )
 
 
@@ -869,28 +767,19 @@ def run_guided(
     human = consent if consent is not None else ConsoleConsentProvider()
     effective_stages = stages if stages is not None else default_stage_functions()
     frozen_ids = tuple(selection.ids)
-    reconcile = None
 
     # The run plan is the ONE upfront authorization for the whole tanda:
-    # it freezes the exact ids/URLs/service/endpoint so the single window
-    # names them honestly, and the covered per-phase windows are then
+    # it freezes the exact ids/URLs/endpoint so the single window names
+    # them honestly, and the covered per-phase windows are then
     # discharged programmatically instead of prompted one by one. Without
     # any eligible id there is nothing to authorize or run.
     if frozen_ids:
         from .collection_run import (
             RunPlan,
             RunScopedAuthorization,
-            _bind_whisper_identity,
-            _reconcile_gpu_lease,
             build_run_plan_window,
         )
 
-        reconcile = _reconcile_gpu_lease(state, effective_stages, out_fn)
-        if reconcile.blocks:
-            raise GuidedError(f"gpu lease reconcile: {reconcile.detail}")
-        bound_info, whisper_note = _bind_whisper_identity(
-            effective_stages, out_fn
-        )
         text_api_origin: str | None = None
         text_api_model: str | None = None
         if auto_synthesizer is not None:
@@ -921,13 +810,8 @@ def run_guided(
             batch_count=(len(frozen_ids) + effective_limit - 1)
             // effective_limit,
             plan_counts=plan_counts,
-            whisper_bound=(
-                bound_info.describe() if bound_info is not None else None
-            ),
-            whisper_note=whisper_note,
             text_api_origin=text_api_origin,
             text_api_model=text_api_model,
-            whisper_info=bound_info,
         )
         plan_window = build_run_plan_window(
             run_plan,
@@ -951,8 +835,6 @@ def run_guided(
                 "granted": False,
                 "window": plan_window.to_dict(),
             }
-            if reconcile.action != "none":
-                report["gpu_lease_reconcile"] = reconcile.to_dict()
             return 0, report
 
         authorization = RunScopedAuthorization(
@@ -979,10 +861,6 @@ def run_guided(
                 for item in selection.items
                 if item.canonical_url
             },
-            "whisper": {
-                "bound": run_plan.whisper_bound,
-                "note": run_plan.whisper_note,
-            },
             "text_api": (
                 {"origin": text_api_origin, "model": text_api_model}
                 if text_api_origin
@@ -990,8 +868,6 @@ def run_guided(
             ),
             "stage_windows": authorization.authorization_log,
         }
-    if reconcile is not None and reconcile.action != "none":
-        report["gpu_lease_reconcile"] = reconcile.to_dict()
     exit_code = 1 if (report["failures"] or report["interrupted"]) else 0
     return exit_code, report
 
@@ -1015,5 +891,4 @@ __all__ = [
     "run_guided",
     "select_from_plan",
     "select_ids",
-    "whisper_coordinated_stage_functions",
 ]

@@ -4,22 +4,22 @@ Handles:
 1. TikTok collection URLs (e.g. /@author/collection/<slug> or /@author/playlist/<slug>)
    Delegates to collection_run with auto_verify=True and skip_browser_consent=True.
 2. TikTok direct video URLs (e.g. /@author/video/<id>)
-   Directly coordinates Whisper, Ollama, automatic text synthesis, and safe verification
-   under ONE single upfront run-plan consent in the live Curses TUI.
+   Runs vision/audio through the resident llm-hub services plus automatic
+   text synthesis and safe verification under ONE single upfront run-plan
+   consent in the live TUI.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .collection import CollectionError, parse_collection_url
 from .collection_run import make_auto_synthesizer, run_collection
-from .guided import narrate_stages, run_guided, whisper_coordinated_stage_functions
+from .guided import default_stage_functions, narrate_stages, run_guided
 from .fetch import PipelineError, _record_inventory, _utc_now, parse_tiktok_url
-from .runtime import default_urlopen, subprocess_runner
+from .runtime import default_urlopen
 from .state import StateRoot
 from .synthesis_api import load_text_api_config
 
@@ -38,7 +38,6 @@ def run_ingest(
     out: Callable[[str], None] | None = None,
     env: Mapping[str, str] | None = None,
     api_transport: Callable[..., Any] | None = None,
-    podman_runner: Callable[..., Any] | None = None,
     auto_verify: bool = True,
     skip_browser_consent: bool = True,
     rescan: bool = False,
@@ -48,7 +47,6 @@ def run_ingest(
     url_str = url.strip()
     env = dict(env if env is not None else os.environ)
     api_transport = api_transport or default_urlopen
-    podman_runner = podman_runner or subprocess_runner
 
     # 1. Try collection URL
     is_collection = False
@@ -68,7 +66,6 @@ def run_ingest(
             limit=limit,
             api_transport=api_transport,
             env=env,
-            podman_runner=podman_runner,
             auto_verify=auto_verify,
             skip_browser_consent=skip_browser_consent,
             rescan=rescan,
@@ -95,9 +92,7 @@ def run_ingest(
         if api_config is not None
         else None
     )
-    stages = narrate_stages(
-        whisper_coordinated_stage_functions(runner=podman_runner), out=out_fn
-    )
+    stages = narrate_stages(default_stage_functions(), out=out_fn)
 
     exit_code, report = run_guided(
         state=state,

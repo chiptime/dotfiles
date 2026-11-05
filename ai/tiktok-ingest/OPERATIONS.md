@@ -30,9 +30,9 @@ fetch-url <url> ──► gated extraction (pinned yt-dlp) + media validation
         ▼
 prepare <id> ──► frames (exact PTS) + 16 kHz mono WAV in the pinned container
         ▼
-vision <id> ──► gated local vision (isolated Ollama, qwen3.5:9b) ──► video.md
+vision <id> ──► vision via resident llm-hub chat (qwen-3.8-27b) ──► video.md
         ▼
-audio <id> ──► whisper WS transcription (large-v3, es) ──► audio.md
+audio <id> ──► llm-hub-whisper WS transcription (large-v3, es) ──► audio.md
         ▼
 synthesize <id> --from-file synthesis.json ──► validated + scrubbed synthesis.json
         │           (the pipeline NEVER synthesizes by itself; no model calls)
@@ -318,12 +318,10 @@ also accept `--share-root`. Verified command set:
 | Command | Purpose |
 |---|---|
 | `install-extractor` | Create local venv + pinned `yt-dlp==2026.08.19` (explicit, never implicit) |
-| `install-ollama` | Download + verify (sha256 + size) isolated Ollama 0.34.1 (explicit) |
-| `import-model` | Copy vision model from global store into isolated models dir (read-only source) |
 | `fetch-url <url>` | Canonical URL → gated extraction → validated media + cache |
 | `prepare <id>` | Frames + normalized WAV in the pinned container |
-| `vision <id>` | Gated local vision stage → `video.md` |
-| `audio <id>` | Whisper WS transcription → `audio.md` |
+| `vision <id>` | Vision stage through resident llm-hub chat → `video.md` |
+| `audio <id>` | llm-hub-whisper WS transcription → `audio.md` |
 | `synthesize <id> --from-file F` | Validate + scrub + persist a supplied synthesis document |
 | `verify <id>` | Bounded verification + backlog emission (`--force` re-runs past matching fingerprints) |
 | `status [<id>]` | Persisted per-video/per-stage outcomes + backlog emission state |
@@ -354,27 +352,32 @@ JSON. Reports are machine-local and are never written inside the
 repository. `summary --report latest` reads the newest report of a named
 collection; `summary --report <path>` reads an explicit file.
 
-## 6. Gate cleanup and operational validation limits
+## 6. Model serving — llm-hub (2026-11 migration)
 
-Any non-complete vision ending (fired gate, handled error, missed
-deadline, operator interrupt) triggers ONE bounded, idempotent unload
-attempt for this stage's model on this isolated server, then verifies
-empty `/api/ps` residency and observed GPU release. Original failure and
-cleanup failure are BOTH preserved; release is claimed only with positive
-evidence. The cleanup never stops other sessions' processes and never
-stops the isolated server itself (`ollama_runtime.stop_server` is
-CLI/operator-only).
+Every model call goes to the RESIDENT llm-hub services. tiktok-ingest
+starts, stops, loads and unloads nothing: no Ollama, no GPU lease, no
+swap gates and no container lifecycle remain in this package (the former
+gate-cleanup runbook and swap-retry runbook were removed with that
+machinery).
 
-Operationally validated so far (real GPU window): load → unload → release
-mechanism against real VRAM, zero overshoot vs baseline. NOT yet
-validated: cleanup after a REAL mid-inference gate fire (gates are never
-provoked per PRD section 6) and the multi-frame interrupt path (double
-tested with test doubles only).
+- **llm-hub-chat** (user unit `llm-hub-chat.service`): vision at
+  `http://127.0.0.1:8081/v1` (OpenAI-compatible chat completions, model
+  `qwen-3.8-27b` — the same resident multimodal model). If unreachable
+  or not serving the model, the vision stage records `blocked` with the
+  instruction `systemctl --user start llm-hub-chat`.
+- **llm-hub-whisper** (user unit `llm-hub-whisper.service`):
+  transcription at `ws://127.0.0.1:8765/ws/transcribe`, health at
+  `http://127.0.0.1:8766/health` (faster-whisper large-v3, CUDA float16,
+  always running). An unhealthy service blocks audio with the
+  instruction `systemctl --user start llm-hub-whisper`.
 
-Validation limits of the gates: they bound resource usage per stage; they
-do NOT validate content quality. A quiet host may pass a swap gate that a
-busy host fails — gate fires under ambient pressure are ambient, not
-defects.
+Both units are enabled by llm-hub's `install.sh`; both models fit
+together in 24 GiB, so there is no VRAM coordination between stages and
+no idle-sleep interplay to manage. A failed model request is final for
+its window (no auto-retry); re-invocation resumes with completed stages
+reused. FFmpeg/ffprobe for CPU preparation still run via podman from
+llm-hub's whisper image (`localhost/llm-hub_whisper-service:latest`,
+network-isolated, read-only).
 
 ## 7. What is tested and what is not
 
@@ -388,32 +391,31 @@ PYTHONPATH=ai/tiktok-ingest/src python3 -m unittest tiktok_ingest.tests.test_liv
 
 It never runs in the default suite: every test needs `TIKTOK_INGEST_LIVE=1`.
 With only that variable set, the environment checks still run (read-only:
-podman, the `voice-assistant-whisper` container and its health, the isolated
-Ollama with the vision model, and the pinned yt-dlp gate). The video and
-collection parts also need their URL variable and skip without it. The video part runs `ingest`
-end to end in a temporary state root (your real state is untouched) and
-REALLY stops and restores Whisper. The collection part opens the headed
+llm-hub chat answering and serving the vision model, llm-hub-whisper's
+health endpoint, and the pinned yt-dlp gate). The video and collection
+parts also need their URL variable and skip without it. The video part
+runs `ingest` end to end in a temporary state root (your real state is
+untouched); every model call goes to the resident llm-hub services and
+nothing is started or stopped. The collection part opens the headed
 browser (log in first) and is the canary for TikTok layout changes.
 
-Tested (720 tests in the 2026-09-23 local run, fixture-only, zero
-network/GPU/podman/ollama):
+Tested (fixture-only, zero network/GPU/podman/model weights):
 
 - The Phase 0 application layer with every external boundary doubled:
   the `collection-run` PHASE-FIRST driver (global order across more
   than five ids — all preparation, then all audio, then all vision,
   then eligible synthesis; resource windows of cap
   5; preparation-based audio eligibility; a failed vision window staying
-  closed with its remaining same-window ids pending even after a
-  successful retry; fresh whisper stop/restore cycles per vision
-  window; exclusion of completed/rejected ids; resume without stage
+  closed with its remaining same-window ids pending; exclusion of
+  completed/rejected ids; resume without stage
   repetition; second run with zero
   re-processing and zero duplicate entries), the TWO-decision
   authorization contract (browser grant naming the readiness
   checkpoint and the snapshot/audit writes; press-Enter readiness that
   is not an authorization; whole-current-run plan grant over the exact
   frozen ids/URLs with stage reuse states; covered stage windows
-  audited as `covered_by_run_plan`; unknown kinds, excess ids,
-  unapproved destinations and whisper config drift forwarded to the
+  audited as `covered_by_run_plan`; unknown kinds, excess ids and
+  unapproved destinations forwarded to the
   human and never auto-granted; ONE grouped verification window with
   the exact validated URLs), the browser boundary
   (run-scoped profile created/removed, readiness checkpoint,
@@ -426,10 +428,9 @@ network/GPU/podman/ollama):
   the outbound payload, tools/retrieval disabled in the request,
   single-attempt semantics, timeout/refusal/malformed resumable stops,
   results persisted only through the real strict validation), the
-  whisper lifecycle (identity verification before consent and before
-  any mutation, verified stop, same-service restore with
-  config/health checks, fail-closed reporting without rollback
-  promises), the whisper stop→vision→restore→health ordering and the
+  llm-hub migration invariants (a run with vision+audio issues no
+  podman lifecycle command and probes no Ollama endpoint; the
+  audio health precheck naming the systemd unit), the
   collection audio-before-vision ordering,
   and the launcher (usage, forwarding, exit codes, no secrets, no
   installs).
@@ -439,16 +440,14 @@ network/GPU/podman/ollama):
   exclusion of blocked/photo/complete ids, freshness against current
   state, zero prompts/calls on dry run and on every denial path
   (including EOF and non-interactive stdin), window contents naming
-  exactly the ids/destinations of that invocation, vision → verified
-  server stop → audio ordering, whisper-running blocking vision before
-  any load, preexisting Ollama never adopted, gate/error ending the GPU
-  window without retry, interrupt and failed-cleanup paths (audio
-  blocked after a failed server stop), the synthesis boundary (missing,
+  exactly the ids/destinations of that invocation, vision → health
+  precheck → audio ordering, a failed request ending the vision window
+  without retry, interrupt paths, the synthesis boundary (missing,
   malformed and valid documents; exact candidate-URL consent), pending
   entries left untouched, resume reusing complete stages without
   repetition, and CLI wiring/exit codes. The CLI wiring test proves the
-  `guided-run` command supplies the whisper lifecycle hooks (so a
-  running KNOWN service is coordinated) and narrates the summary on
+  `guided-run` command builds the plain production stage bundle (no
+  lifecycle hooks exist) and narrates the summary on
   stderr; prompt formatting and per-stage narration are asserted
   directly, and the end-of-run summary reuses the `summary` row/next
   derivation.
@@ -462,8 +461,8 @@ network/GPU/podman/ollama):
   recorded verify/emit fingerprints).
 - Safe-URL validation, bounded retrieval with fakes, star parser,
   taxonomy normalization, atomic writes, duplicate-guarded emission,
-  blocklist permanence, collection-inventory honesty rules, gate-failure
-  cleanup paths with operation-order logging.
+  blocklist permanence, collection-inventory honesty rules, and the
+  bounded container probes with operation-order logging.
 - The backlog review CLI: listing/detail, strict decisions format with
   malformed-input refusal (including the multi-line-JSON-as-JSONL
   incident), duplicate/unknown IDs, concurrent-change detection, stale
@@ -472,9 +471,9 @@ network/GPU/podman/ollama):
   collision-free exclusive backups with hash verification, idempotent
   re-application and CLI wiring/exit codes.
 
-Not tested by the suite (by design): real extraction against TikTok, real
-GPU inference, real whisper service, the live browser scan, and any
-end-to-end run with real state. Those require separate operator
+Not tested by the suite (by design): real extraction against TikTok,
+real model requests to the llm-hub services, the live browser scan, and
+any end-to-end run with real state. Those require separate operator
 authorization per the MVP-PRD and remain manual procedures.
 
 ## 8. Guided runs (`guided-run`)
@@ -503,49 +502,32 @@ report it prints is a summary, never a second ledger.
 `guided-run` builds a run plan from its selection and asks exactly ONE
 `run-plan` authorization window before anything runs. The window names
 every frozen id and canonical URL, the full stage sequence, the batch
-limit, the KNOWN shared whisper service identity bound read-only before
-the plan (with its bounded stop and standing restore), the isolated
-Ollama lifecycle, and — when automatic synthesis applies — the text API
+limit, and — when automatic synthesis applies — the text API
 endpoint/model. On grant, the covered per-phase windows are discharged
 automatically and audited (never fabricated human yeses):
 
 - `tanda`, `prepare`, `gpu` — every id inside the frozen inventory;
 - `fetch` — every destination an exact frozen canonical URL;
-- `whisper-stop`, `whisper-restore` — the exact service identity bound
-  read-only before the plan;
 - `synthesis-api` — the endpoint and EXACT model named in the plan.
 
-Anything outside that scope — a new id, an unapproved URL, a drifted
-whisper configuration or endpoint/model — is asked as genuinely new
-scope and is NEVER auto-granted.
+Anything outside that scope — a new id, an unapproved URL or a different
+endpoint/model — is asked as genuinely new scope and is NEVER
+auto-granted.
 
 **Verification keeps its own grouped decision**: candidate URLs only
 exist after synthesis, so ONE separate `verify` window lists every exact
 validated URL before any retrieval.
 
-The covered `gpu` window keeps its existing semantics: isolated Ollama
-lifecycle + gated vision for all pending ids, then audio through the
-shared whisper service. Ids whose vision was already complete are named
-for transcription outright; ids that reach audio only when their vision
-completes inside the window are CONDITIONAL (a vision failure, a fired
-gate or a denial means that id's audio does not run); ids whose audio is
-already complete are reused, never re-transcribed. The grant covers
-STARTING and STOPPING the isolated server this run started (stop runs at
-window end or on failure); a server already answering on the isolated
-port is NEVER adopted (identity/scope cannot be verified from outside) —
-stop it explicitly and re-invoke. Gates are the existing ones,
-unweakened: ≥20 GiB free VRAM before every Qwen load, the swap gate
-below, zero CPU offload, a fired gate is FINAL for the window.
-
-Swap gate: swap I/O is measured from `/proc/vmstat` against the immediate
-pre-phase baseline and checked after every frame. A delta over 512 MiB
-trips only while the swap rate since the previous sample (bytes over
-elapsed monotonic seconds) is above 1 MiB/s, the same quiet threshold as
-the swap-retry cooldown; a short ambient spike that stays quiet does not
-trip. A delta of 1024 MiB or more always trips. An unmeasurable rate fails
-closed. An operator `--swap-limit-mib` above 1024 keeps its old meaning:
-anything over that budget trips. The gate id stays `swap_delta`, so
-swap-retry eligibility is unchanged.
+The covered `gpu` window keeps its existing shape: vision requests to
+the resident llm-hub chat service for all pending ids, then audio
+through the resident llm-hub-whisper service. Ids whose vision was
+already complete are named for transcription outright; ids that reach
+audio only when their vision completes inside the window are
+CONDITIONAL (a vision failure or a denial means that id's audio does
+not run); ids whose audio is already complete are reused, never
+re-transcribed. A failed model request is FINAL for the window (no
+auto-retry); nothing is started, stopped, loaded or unloaded by the
+run.
 
 Denial, EOF, Ctrl-C or a non-interactive environment stop without
 assuming consent (only a literal `yes` grants a window; there is no
@@ -594,26 +576,15 @@ after the curses session ends, so stdout stays parseable.
 The fallback is the SAME `ConsoleConsentProvider` + stderr narration used
 before this change, so behavior on any non-TTY path is byte-identical.
 
-### Whisper (coordinated automatically when the known service is running)
+### Resident model services (no coordination)
 
-Vision requires the whisper service STOPPED and audio requires it
-healthy. `guided-run` coordinates the KNOWN shared service through the
-same bounded, identity-checked lifecycle `collection-run` uses (see the
-whisper coordination section below): when it is running, its identity is
-verified read-only BEFORE the run-plan window and bound into the plan,
-so the `whisper-stop` (bounded `podman stop --timeout 30`, positively
-verified) and the standing `whisper-restore` windows are discharged by
-that grant before any mutation, and the SAME service is restored and
-health-checked once the GPU window ends — normally, on failure, or after
-an interruption (a Ctrl-C never grants a window and never triggers a new
-prompt). A drifted service/configuration falls outside the plan and is
-asked as new scope (fail-closed on denial); if the stopped-check passes
-(nothing running) nothing is touched. Non-interactive stdin and EOF still
-fail closed. Audio's health precheck is unchanged: after visions complete
-(each vision stage verifies its own unload — empty residency plus
-observed GPU release — before the next phase), a health precheck runs; if
-unhealthy, every pending audio id is `blocked` with the resume
-instruction.
+Vision and audio are plain requests to the resident llm-hub services
+(section 6); `guided-run` never stops, starts, inspects or restores any
+container — there is no whisper precondition for vision. Audio keeps its
+health precheck: before transcription, `llm-hub-whisper`'s health
+endpoint must answer; if unhealthy, every pending audio id is `blocked`
+with the `systemctl --user start llm-hub-whisper` resume instruction.
+Non-interactive stdin and EOF still fail closed.
 
 ### Synthesis boundary (hard stop)
 
@@ -628,15 +599,12 @@ is asked for that id.
 ### Failure, cleanup and resume policy
 
 Simple and conservative: network/CPU failures are per-id (other ids
-continue); ANY non-complete vision outcome (fired gate, error,
-interrupt) ends the GPU window for every remaining id — no further GPU
-load this invocation, no auto-retry. If the isolated-server stop fails,
-audio is NOT attempted: the run says so explicitly and names the PID
-file. Ctrl-C passes through the applicable cleanup (the server this run
-started is stopped); partial results are preserved by the stages
-themselves. An abrupt kill cannot guarantee cleanup: recover from the
-evidence of the real state (`status`, the PID file at
-`~/.local/share/tiktok-ingest/ollama/ollama.pid`, stage fingerprints) —
+continue); ANY non-complete vision outcome (error, interrupt) ends the
+vision window for every remaining id — no further vision requests this
+invocation, no auto-retry. There is no service cleanup to perform (the
+llm-hub units stay resident); partial results are preserved by the
+stages themselves. An abrupt kill leaves nothing to roll back: recover
+from the evidence of the real state (`status`, stage fingerprints) —
 never from a promise. Re-invoking requires NEW authorization for the
 pending operations.
 
@@ -703,17 +671,15 @@ second state.
     state, never from a promise.
 3. **Run-plan grant (decision 2 of 2)**: right after the capture the
     eligible inventory is FROZEN (exact ids, canonical download URLs,
-    stage reuse states) and the known whisper service identity is bound
-    read-only. ONE window asks you to accept the WHOLE current run:
-    the collection-wide phase order (preparation ALL → audio ALL →
+    stage reuse states). ONE window asks you to accept the WHOLE current
+    run: the collection-wide phase order (preparation ALL → audio ALL →
     vision ALL → eligible synthesis ALL) crossed in resource windows of
-    at most five ids, the stage pipeline, the whisper stop/restore
-    authority for the exact bound service, the synthesis
+    at most five ids, the stage pipeline, the synthesis
     endpoint/model, and the deferred grouped verification. Denial stops
     before any processing. Stage windows provably inside
     this scope are discharged by the grant and audited as
-    `covered_by_run_plan`; unknown kinds, excess ids, unapproved
-    destinations or whisper config drift are asked as genuinely new
+    `covered_by_run_plan`; unknown kinds, excess ids or unapproved
+    destinations are asked as genuinely new
     scope — never auto-granted.
 4. **Phase-first resource windows**: the frozen inventory is processed
     in GLOBAL phase order — preparation ALL → audio ALL → vision ALL →
@@ -722,18 +688,16 @@ second state.
     per phase (a preparation window, then audio windows, then vision
     windows). Each window runs through the existing `guided-run` phase
     machinery (section 8) and its stage windows are discharged by the
-    plan grant; a fresh coordinator is built per window so whisper
-    stop/restore authority can never leak across real stop cycles. No
-    synthesis request is made until every original vision window and
-    its separately consented retry have ended. Audio eligibility is
-    PREPARATION completion, not vision completion. A failed vision
-    window stays closed and its remaining same-window ids stay pending
-    EVEN after a successful retry; later frozen normal windows keep the
-    existing attempt policy. Only a restoration failure, an unknown
-    interrupt, or a global precondition blocks ALL later effects,
-    grouped verification included. Completed and blocklisted ids were
-    already excluded by the freeze, the loop is bounded by construction
-    and nothing outside the frozen scope is absorbed.
+    plan grant; a fresh coordinator is built per window. No synthesis
+    request is made until every vision window has ended. Audio
+    eligibility is PREPARATION completion, not vision completion. A
+    failed vision window stays closed and its remaining same-window ids
+    stay pending; later frozen normal windows keep the existing attempt
+    policy. Only a boundary failure, an interrupt, or a global
+    precondition blocks ALL later effects, grouped verification
+    included. Completed and blocklisted ids were already excluded by
+    the freeze, the loop is bounded by construction and nothing outside
+    the frozen scope is absorbed.
 5. **Automatic synthesis**: runs as its OWN collection phase, only
     after the vision phase has ended for the whole frozen selection;
     each id still needs complete vision and audio evidence. Configured
@@ -757,237 +721,25 @@ second state.
     `backlog-show` → `backlog-decide` → `backlog-plan` →
     `backlog-apply`.
 
-### Whisper coordination (collection-run and guided-run)
+### Local model backend (llm-hub)
 
-Collection audio runs BEFORE any vision stop cycle: the shared service
-must already be RUNNING and healthy for the audio phase (its own `gpu`
-window states that health must pass before work, with no authority to
-start a missing service). The bounded stop/restore cycles below belong
-to each vision resource window; after a restore the service is left
-ready for the next vision window (which stops it again) and for the
-operator afterwards.
+The local backend for BOTH vision and synthesis is llm-hub's
+`llama-chat` (llama.cpp, Qwen3.8-27B multimodal, 64k context, reasoning
+off) at `http://127.0.0.1:8081/v1`; vision calls it directly with model
+`qwen-3.8-27b`, and the automatic synthesis adapter uses the
+`TIKTOK_INGEST_TEXT_API_*` environment (base URL, key, model) exported
+from `shell/exports.sh` (not secrets). `ai/tiktok-ingest/install.sh`
+(idempotent) links and enables the user units
+`ai/services/llm-hub-chat.service` and `llm-hub-whisper.service`, which
+start the services after a host/WSL restart. Transcription runs on the
+resident `llm-hub-whisper` (WS `:8765`, health `:8766`).
 
-If the known shared service `voice-assistant-whisper` is running when
-vision needs the GPU, collection-run verifies its identity and
-configuration read-only BEFORE the run-plan window and binds that
-exact identity into the grant. The coordinator still asks TWO
-separate windows BEFORE any mutation: the `whisper-stop` window
-(bounded `podman stop
---timeout 30`, positively verified — no arbitrary or unidentified
-workload is ever stopped) and a STANDING `whisper-restore`
-authorization for the recovery of the SAME service/configuration —
-both discharged by the plan grant when (and only when) the window's
-service text matches the binding; a drifted configuration is asked as
-genuinely new scope and fails closed on denial. Denial of either
-blocks BEFORE any mutation (no stop happens). The
-restore then runs under that prior authorization once the GPU window
-ends — normally, on failure, or after an interruption (Ctrl-C, which
-itself never grants anything and never triggers a new prompt; SIGTERM
-and SIGHUP — `kill`, `systemctl stop`, a closed terminal — take the
-same interruption path, and a repeated signal does not abort the
-cleanup already running) —
-UNLESS the interruption lands inside the stop itself: then the stop
-result is UNKNOWN, NO restore is attempted (it cannot be verified that
-the stop was ours/completed) and manual verification/recovery of the
-exact service is required. In every restore that does run, the SAME
-container is started exactly ONCE, identity/configuration are verified,
-and health is validated before the service is reported restored through
-a BOUNDED read-only readiness wait: the first health probe is immediate
-(an
-already-healthy service does not wait), a transiently unreachable
-endpoint is retried at a fixed ~1s interval, the run prints a single
-`waiting for Whisper readiness` line while polling, and a 60s monotonic
-deadline ends ALL progress — the report then states the actual
-started-but-not-healthy service state with the last real probe detail.
-Worst-case overshoot past the deadline is one probe (the health
-precheck's own 5s timeout bound). The one authorized start is never
-repeated and the wait itself implies no new consent. A failed restore
-or deadline-exceeded health wait — or an interruption that leaves the
-restore or its health check incomplete — blocks
-ALL further progress, reports the actual partial service state with
-recovery instructions and promises no rollback. `guided-run` drives this
-same lifecycle: its CLI supplies the identity-bound hooks, so a
-single-tanda run stops the known service before its vision window and
-restores it afterwards under this same standing authorization. Only a
-programmatic caller that builds `StageFunctions` without the hooks keeps
-the operator-managed behavior (blocks with instructions).
-
-### GPU lease marker and startup reconcile
-
-Every Whisper stop (the vision window and the swap retry) goes through
-one GPU lease (`gpu_lease.py`). Before the stop command is issued, the
-lease writes `<state root>/active_gpu_lease.json` (default
-`~/.local/state/tiktok-ingest/active_gpu_lease.json`). The marker holds
-the owner PID and its process start time, a timestamp, and the verified
-Whisper identity: name, image, and the identity environment keys only,
-never secrets. It is removed only after a verified healthy restore. A
-failed restore, a health timeout, or an interruption keeps it. Checking
-and writing the marker, and the whole startup reconcile, run under an
-exclusive lock on `active_gpu_lease.lock` next to it, so two runs can never
-both take the lease or both restore the service. The lock file stays in
-place; the kernel releases the lock when the process exits.
-
-At the start of every `collection-run`, `guided-run` and `ingest`, before
-the Whisper identity is bound and before any GPU work, the run reconciles
-a marker left behind by a previous run:
-
-- **Owner still running** (same PID and start time): another run holds
-  the GPU window. The new run stops with "another tiktok-ingest run ...
-  currently holds the GPU window" and touches nothing. A run also refuses
-  to stop Whisper whenever a live foreign process owns the marker.
-- **Owner dead, Whisper stopped with the same identity:** the service is
-  started once under the restore authorization granted by the run that
-  stopped it, with no new prompt. Identity is verified and the bounded
-  60 s health wait applies. The marker is then removed. This also covers
-  a run interrupted inside `podman stop`: that run still never restores
-  the service itself (its stop result is UNKNOWN), but the marker proves
-  the stop was ours, so the next run restores it.
-- **Owner dead, Whisper already running:** the stale marker is removed
-  and the service is not touched.
-- **Anything unproven** (identity differs, container missing, inspect
-  fails, unreadable marker or one without a recorded owner PID and start
-  time, failed start, health timeout or a failing health probe): the run stops
-  before any GPU work. `collection-run` records
-  `hard_stop_reason: "gpu lease reconcile: ..."`; `guided-run` exits with
-  the same message. The marker is kept. Verify the container manually,
-  remove the marker, and re-run.
-
-Reports carry `gpu_lease_reconcile: {action, detail}` whenever a marker
-was found. `action` is one of `cleared`, `restored`, `blocked`, or
-`blocked_live_owner`.
-
-### Bounded vision swap-retry (collection-run only)
-
-After a vision resource window whose vision stage failed ONLY the
-`swap_delta` gate with positively verified cleanup, collection-run may
-offer ONE extra vision
-attempt for that video THIS invocation. It is never automatic and never
-covered by the run-plan grant. When a batch leaves MORE THAN ONE id
-retry-eligible, every eligible id joins ONE shared-lifecycle window
-(D-11/FR-26): one consent ask naming every covered id, one cooldown,
-one whisper stop, ONE isolated-Ollama start — the model loads once for
-the whole window — the vision re-run per covered id in sequence, then
-one server stop and one whisper restore. The window CLOSES at the first
-covered id whose re-run fails the swap gate again: that id keeps its
-failed-attempt evidence, the remaining covered ids are not attempted
-and stay pending/resumable (no second window this invocation). An id
-whose scope fingerprints drifted since the consent is dropped from the
-window at re-admission and stays pending for a fresh authorization.
-
-**What you see, in order.**
-
-1. The window ends normally: the fired gate closed the GPU window (the
-   remaining same-window ids stay pending — that rule is NOT relaxed),
-   the isolated server stopped, and the standing authorization restored
-   the SAME whisper service. The retry verifies that restoration
-   positively BEFORE any prompt; a mismatched identity/configuration or
-   an unhealthy service blocks all progress (the existing
-   service-restoration hard stop, not a retry failure).
-2. A DEDICATED `vision-swap-retry` window names EVERY covered video id,
-   the measured overshoot per id (e.g. `+18.56 MiB over the 512 MiB
-   budget`), the cooldown bounds, the unchanged gates and stage
-   deadline, the whisper stop/restore under this new named lifecycle
-   authority, the shared isolated-Ollama lifecycle when the window
-   covers more than one id (one model load for all of them), the exact
-   scope fingerprints per id (model/media/sampling — any change is a NEW
-   authorization question), and the effects of a second failure.
-   Denial/EOF/non-TTY stops without assuming consent; every covered id
-   stays pending and resumable.
-3. After consent a READ-ONLY cooldown samples the cumulative
-   `pswpin + pswpout` counters every 5 s: admission no earlier than
-   60 s, one hard cap of 180 s from cooldown start that instability,
-   expiry-near misses and re-admission drift NEVER restart (only the
-   consecutive-stable count resets), stability = 3 consecutive
-   intervals ≤ 1 MiB/s. The rate is computed from the cumulative
-   counters — never from a decreasing occupied-swap reading — and
-   unreadable, missing or decreasing counters fail closed with a
-   terminal state DISTINCT from expiry. Narration goes to stderr every
-   15 s with the measured rate, the stable count and the remaining
-   time; sustained above-threshold rates are reported as NOT recovered.
-4. Re-admission stops whisper again under the retry authority, re-checks
-   the identical configuration at that moment, and probes fresh free
-   VRAM after the transition. Final-conditions drift (VRAM no longer
-   free, service state changed) restores whisper and resumes sampling
-   inside the SAME 180 s cap — never a fresh budget. A post-stop
-   measurement failure or an interrupt at that boundary restores the
-   SAME service under the retry authority before reporting its terminal
-   state: the shared service is never left stopped behind the window.
-   Each new attempt takes its immediate baselines only at its own start.
-5. The single vision-only re-run reuses valid fetch/prepare results and
-   never repeats completed audio, synthesis or verification. The
-   original attempt's stage record, gate evidence and partial artifacts
-   are archived unmodified first (`vision-attempt-N/` inside the run
-   dir, plus the additive `swap_retry` provenance in `meta.json`); the
-   retry is additional evidence, never a replacement. That archive runs
-   under the retry authority's restore guarantee: a failing archive step
-   restores the SAME service before it is reported as the terminal
-   `blocked_global` state — the shared service is never left stopped.
-   The final stdout JSON keeps its shape and gains an additive per-video
-   retry object (`swap_retries`).
-
-**Terminal states (distinct, honest).** `retry_declined_pending`,
-`blocked_global` (restoration/lifecycle failure), `cooldown_expired`
-("retry not executed, video pending"), `measurement_unavailable`
-(distinct from expiry), `retry_complete`, `retry_exhausted` (no third
-attempt, no re-prompt), `interrupted_unknown`, and
-`retry_not_executed_pending` (a preexisting isolated server is never
-adopted, or scope fingerprints changed after consent — a new
-authorization question). A failed second attempt ends the matter for
-this invocation; retry exhaustion is video/window-scoped and is
-reported differently from the global service-restoration hard stop.
-
-**Not claimed.** The 5 s / 60 s / 180 s / 3×1 MiB/s values are proposed
-heuristics, not efficacy evidence: the cooldown measures and bounds the
-wait, it never promises that waiting cures swap pressure. Later frozen
-resource windows reconcile exactly as the pre-existing driver does — the
-retry adds no window and no model load beyond the one
-separately-consented attempt. A real-GPU validation trial (V3) requires
-separate authorization.
-
-### Local synthesis backend on the shared GPU (llm-hub)
-
-The reference local backend is the `llm-hub-chat` container
-(llama.cpp, Qwen3.8-27B UD-IQ4_XS, 64k context, reasoning off) at
-`http://127.0.0.1:8081/v1` with model `qwen-3.8-27b`; the API key is
-any non-empty value. These three values are exported from
-`shell/exports.sh` (not secrets). `ai/tiktok-ingest/install.sh`
-(idempotent) links and enables `ai/services/llm-hub-chat.service`, which
-starts only that container after a host/WSL restart; it deliberately
-avoids `podman-restart.service`, which starts every `restart: always`
-container on the machine and, if one of them hangs past its timeout,
-SIGKILLs the conmon processes and leaves containers stuck in
-`Stopping`. The container must already exist (`podman-compose -f
-podman-compose.yml up -d llama-chat` in llm-hub). It shares the GPU with
-vision, and vision is fail-closed on free VRAM:
-
-- **Gate.** Before EVERY Qwen vision load, at least
-  `free_vram_gate_mib` (20480 MiB) must be free. Failing it records the
-  vision stage as `blocked`, closes the GPU window for the rest of that
-  vision window and never retries automatically.
-- **Awake backend always blocks vision.** Loaded, `llm-hub-chat`
-  holds about 15,600 MiB (measured on a 24 GiB RTX 4090), so no vision
-  load can pass the gate while it is awake.
-- **Idle sleep releases it.** The container runs with
-  `--sleep-idle-seconds 60`: after 60 s without requests it unloads
-  the model and holds 0 MiB (measured: stopped and asleep read the
-  same VRAM). The next synthesis request wakes it in about 10 s.
-- **Known limitation: a resident synthesis model blocks the next
-  vision phase.** Within ONE collection-run invocation every vision
-  window precedes synthesis (phase-first order), so this is now mainly
-  a resume/re-run case: when a NEW invocation's first vision window
-  opens less than 60 s after a previous invocation's last synthesis,
-  the model is still resident and vision blocks. Nothing is
-  lost: items without an `emit` fingerprint are re-planned as
-  `partial_resumable` and their valid completed stages are reused.
-  Wait at least 60 s and re-run the same command. The preparation phase
-  at the start of an invocation normally exceeds 60 s, so this is rare.
-- **Other GPU consumers count too.** The gate measures the whole
-  device, including the Windows desktop under WSLg and any other
-  container. Historical vision sessions that passed started at
-  1,164–2,440 MiB used; `voice-assistant-whisper` is stopped by the
-  whisper coordination above before vision. If vision still blocks
-  with `llm-hub-chat` asleep, find the remaining consumer with
-  `nvidia-smi` before re-running; never lower the gate.
+Both models are resident together (≈23 of 24 GiB measured with both
+awake): there is no free-VRAM gate, no idle-sleep interplay and no
+coordination between vision, synthesis and transcription any more. If a
+service is down its stage blocks fail-closed with the exact
+`systemctl --user start <unit>` instruction; start it and re-run —
+completed stages are reused with zero re-inference.
 
 ### Exit codes
 
@@ -1026,7 +778,8 @@ not per-item backlog status, so those rows show `backlog: n/a`.
 [--state-root DIR]`) serves the Phase 1 interface at
 `http://127.0.0.1:8484/` and opens the browser. It binds to 127.0.0.1 only;
 a busy port fails loudly, with no fallback. Ctrl+C stops it; an active web
-run is cancelled and joined first so the GPU lease cleanup runs.
+run is cancelled and joined first so the engine's interruption handling
+runs.
 
 Views (all read from disk on every request, nothing cached as authority):
 Collections (declared vs observed counts, status, end-of-list evidence,
@@ -1050,7 +803,8 @@ Deny; browser login readiness is a "Ready" button. Narration streams over
 server-sent events with the same lines the CLI prints. Cancel is
 cooperative: it denies a pending window or interrupts at the next narration
 line; a long stage call finishes first, bounded by its own timeout. Only one
-run at a time, and a GPU lease held by another live process refuses the start.
+run at a time. (Stale `active_gpu_lease.json` files left by pre-migration
+runs are ignored, never deleted.)
 
 Security: every non-GET request needs the per-start token from the page
 (`X-TI-Token`); `Host` and `Origin` must be the loopback address; responses

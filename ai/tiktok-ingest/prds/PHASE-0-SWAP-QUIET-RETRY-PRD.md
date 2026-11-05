@@ -1,5 +1,11 @@
 # PRD — Phase 0 Addendum: Bounded Vision Swap-Retry After Measured Quiet
 
+> **Superseded by the llm-hub migration (2026-11):** the swap-retry
+> machinery this PRD specifies (cooldown watcher, re-admission, GPU
+> lease, evidence archive) was REMOVED from tiktok-ingest together with
+> the swap gate it responded to. Historical `meta.json` `swap_retry`
+> evidence still loads. Kept as history.
+
 **Status:** DRAFT. This PRD records product requirements only. It authorizes
 NO implementation, NO execution, NO network/browser/GPU/service operation, NO
 production state mutation, NO commit and NO push. It does not modify the

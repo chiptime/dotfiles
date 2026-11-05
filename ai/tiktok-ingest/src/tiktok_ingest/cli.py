@@ -9,17 +9,12 @@ Subcommands:
   extraction -> validated shared media in the working cache.
 - ``prepare <id>``       validated media -> baseline frames + 16 kHz mono
   WAV with full provenance inside the pinned FFmpeg container.
-- ``install-ollama``     explicitly download the pinned isolated Ollama
-  archive, verify sha256 AND size exactly, extract under the share root
-  and delete the archive. NEVER runs implicitly; refuses any mismatch
-  without retry.
-- ``import-model``       explicitly copy the vision model manifest +
-  blobs from the GLOBAL Ollama store (read-only) into the isolated
-  models directory, verifying every digest. NEVER runs implicitly.
-- ``vision <id>``        gated local vision over the prepared frames
-  (isolated Ollama, whisper MUST be stopped; fails closed).
-- ``audio <id>``         full-audio transcription through the reused
-  whisper WS service (large-v3, fixed es; health precheck; fails closed).
+- ``vision <id>``        vision over the prepared frames through the
+  resident llm-hub chat service (OpenAI-compatible chat completions;
+  readiness precheck; fails closed).
+- ``audio <id>``         full-audio transcription through the resident
+  llm-hub-whisper WS service (large-v3, fixed es; health precheck;
+  fails closed).
 - ``synthesize <id>``    validated-document ingestion of an explicitly
   operator-supplied synthesis JSON (``--from-file``); strict schema,
   credential scrub, no model calls, no credentials.
@@ -60,10 +55,9 @@ Subcommands:
                          authorization window before each effectful
                          phase, a hard stop at the synthesis boundary
                          when no document was supplied, and no writes of
-                         its own. It coordinates the KNOWN shared
-                         whisper service automatically (verified stop
-                         before vision, standing restore after, under
-                         explicit consent) and narrates per-stage
+                         its own. Vision and audio are requests to the
+                         resident llm-hub services (nothing is started,
+                         stopped or loaded); it narrates per-stage
                          progress plus a readable end-of-run summary on
                          stderr. Never starts anything without its
                          window; ``--dry-run`` only prints the plan.
@@ -116,17 +110,12 @@ from .contracts import BACKLOG_STATUSES, utc_now_iso
 from .extractor import ExtractorError
 from .guided import (
     GuidedError,
+    default_stage_functions,
     narrate_stages,
     parse_synthesis_args,
     run_guided,
-    whisper_coordinated_stage_functions,
 )
 from .ingest import IngestError, run_ingest
-from .ollama_runtime import (
-    OllamaRuntimeError,
-    import_model,
-    install_ollama,
-)
 from .fetch import PipelineError, fetch_url, parse_tiktok_url, video_status
 from .prepare import PrepareError, prepare_video
 from .review import (
@@ -247,84 +236,19 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("video_id", nargs="?", default=None, help="optional video ID")
     add_state_root(status)
 
-    install_ollama_parser = subparsers.add_parser(
-        "install-ollama",
-        help=(
-            "explicitly download, verify (sha256 + size) and extract the "
-            f"pinned isolated Ollama {config.GATES.isolated_ollama_version} "
-            "runtime (never runs implicitly)"
-        ),
-        description=(
-            "Downloads the official archive once, verifies the recorded "
-            "sha256 AND byte size EXACTLY, extracts it under the local "
-            "share root and deletes the archive. Any mismatch is refused "
-            "without retry. No sudo, no global installs."
-        ),
-    )
-    install_ollama_parser.add_argument(
-        "--share-root",
-        type=Path,
-        default=None,
-        help="local share root (default: %(default)s)",
-    )
-
-    import_model_parser = subparsers.add_parser(
-        "import-model",
-        help=(
-            "explicitly copy the vision model from the GLOBAL Ollama store "
-            "into the isolated models directory (read-only source; never "
-            "runs implicitly)"
-        ),
-        description=(
-            "Copies the model manifest and every blob from the global "
-            "store, verifying each digest against the manifest and the "
-            "copy. Refuses on ANY mismatch with no partial import; never "
-            "writes to the global store; never pulls from the network."
-        ),
-    )
-    import_model_parser.add_argument(
-        "--model",
-        default=config.VISION_MODEL,
-        help="model name:tag to import (default: %(default)s)",
-    )
-    import_model_parser.add_argument(
-        "--share-root",
-        type=Path,
-        default=None,
-        help="local share root (default: %(default)s)",
-    )
-    import_model_parser.add_argument(
-        "--global-store",
-        type=Path,
-        default=None,
-        help="global Ollama store to read from (default: ~/.ollama)",
-    )
-
     vision = subparsers.add_parser(
         "vision",
-        help="run the gated local vision stage for a prepared video ID",
+        help="run the local vision stage for a prepared video ID",
         description=(
-            "Local VLM pass over the prepared frames through the ISOLATED "
-            "Ollama runtime. Fails closed unless the whisper container is "
-            "STOPPED (verified read-only; never stopped by this code) and "
-            "the isolated server answers on 127.0.0.1:11435. Enforces all "
-            "benchmark resource gates with no retries after a gate fires."
+            "VLM pass over the prepared frames through the RESIDENT llm-hub "
+            "chat service (OpenAI-compatible chat completions, model "
+            f"{config.VISION_MODEL}). Fails closed unless llm-hub answers "
+            "and serves the model. One request per frame (plus bounded "
+            "targeted rereads); no retries after a failure."
         ),
     )
     vision.add_argument("video_id", help="stable TikTok video ID previously prepared")
     add_state_root(vision)
-    vision.add_argument(
-        "--swap-limit-mib",
-        type=int,
-        default=None,
-        metavar="MIB",
-        help=(
-            "OPERATOR-AUTHORIZED swap-gate budget change for THIS run only "
-            f"(default {config.GATES.swap_delta_limit_mib} MiB); values at or "
-            "below the default are ignored; the deviation is recorded in the "
-            "durable gate report"
-        ),
-    )
     vision.add_argument(
         "--force",
         action="store_true",
@@ -619,27 +543,22 @@ def build_parser() -> argparse.ArgumentParser:
             "existing fetch -> prepare -> vision -> audio -> synthesis "
             "(--from-file ingestion) -> verify stages for one operator-"
             "confirmed tanda (batch cap 5). It asks exactly ONE upfront "
-            "run-plan authorization window naming every id, canonical URL, "
-            "the bound KNOWN whisper service stop/restore, the isolated "
-            "Ollama lifecycle and the batch limits; on grant the covered "
-            "phase windows (tanda, prepare, fetch, gpu, whisper-stop, "
-            "whisper-restore and the configured synthesis API) run without "
-            "further prompts, while verification keeps its OWN grouped "
-            "decision for the exact candidate URLs. Any window outside the "
-            "plan is asked as genuinely new scope; denial, EOF or a "
-            "non-interactive environment stops without assuming consent. "
-            "Progress is derived from the product's own "
+            "run-plan authorization window naming every id, canonical URL "
+            "and the batch limits; on grant the covered phase windows "
+            "(tanda, prepare, fetch, gpu and the configured synthesis API) "
+            "run without further prompts, while verification keeps its OWN "
+            "grouped decision for the exact candidate URLs. Any window "
+            "outside the plan is asked as genuinely new scope; denial, EOF "
+            "or a non-interactive environment stops without assuming "
+            "consent. Progress is derived from the product's own "
             "manifests/fingerprints; this command keeps no second state "
             "and writes nothing of its own. The synthesis boundary is a "
             "hard stop: without --synthesis ID=PATH it reports the "
             "video.md/audio.md paths and how to resume; it NEVER "
-            "generates content. The KNOWN shared whisper service is "
-            "coordinated automatically when it is running: identity is "
-            "verified read-only before the plan, it is stopped before "
-            "vision and restored after the GPU window (on success, failure "
-            "or interruption). The isolated Ollama server is started only "
-            "inside the consented GPU window and stopped at window end or "
-            "failure. Backlog entries are appended as pending by verify "
+            "generates content. Vision and audio are requests to the "
+            "resident llm-hub services (user units llm-hub-chat / "
+            "llm-hub-whisper): this command starts, stops and loads "
+            "nothing. Backlog entries are appended as pending by verify "
             "only; review stays with backlog-list/show/decide/plan/apply."
         ),
     )
@@ -693,20 +612,17 @@ def build_parser() -> argparse.ArgumentParser:
             "handles login/captcha and signals readiness at a press-Enter "
             "checkpoint that is not an authorization), then ONE "
             "whole-current-run authorization covers the frozen inventory "
-            "(exact ids/URLs, batches of at most five, whisper stop/restore "
-            "of the identity bound read-only, synthesis endpoint/model, "
-            "one-attempt retry policy) while eligible items process "
-            "through the EXISTING stages (fetch -> prepare -> vision -> "
-            "audio -> synthesis -> verify); stage windows inside that "
-            "scope are discharged by the grant and audited. Synthesis is "
+            "(exact ids/URLs, batches of at most five, synthesis "
+            "endpoint/model, one-attempt retry policy) while eligible "
+            "items process through the EXISTING stages (fetch -> prepare "
+            "-> vision -> audio -> synthesis -> verify); stage windows "
+            "inside that scope are discharged by the grant and audited. "
+            "Vision and audio are requests to the resident llm-hub "
+            "services: no container lifecycle or GPU coordination. "
+            "Synthesis is "
             "automatic through ONE OpenAI-compatible text API configured "
             "by TIKTOK_INGEST_TEXT_API_BASE_URL/_API_KEY/_MODEL and "
             "always validated by the existing strict document contract. "
-            "After a batch whose vision fails ONLY the swap_delta gate "
-            "with verified cleanup, ONE bounded vision retry per video "
-            "per invocation may be offered behind its own explicit "
-            "consent and a read-only measured cooldown (never automatic, "
-            "never covered by the run-plan grant). "
             "Verification runs under ONE grouped authorization showing "
             "every exact validated candidate URL. Output is local pending "
             "backlog entries only; review stays with the backlog CLI. "
@@ -907,22 +823,6 @@ def main(argv: list[str] | None = None) -> int:
             ok, reason = verify_installation(venv_dir)
             print(reason)
             return 0 if ok else 1
-
-        if args.command == "install-ollama":
-            share_root = args.share_root or config.SHARE_ROOT
-            binary = install_ollama(Path(share_root) / "ollama")
-            print(f"isolated Ollama installed at {binary}")
-            return 0
-
-        if args.command == "import-model":
-            share_root = args.share_root or config.SHARE_ROOT
-            report = import_model(
-                args.model,
-                global_store=args.global_store or config.GLOBAL_OLLAMA_STORE,
-                isolated_models=Path(share_root) / "ollama" / "models",
-            )
-            print(json.dumps(report.__dict__, indent=2, sort_keys=True))
-            return 0
 
         state = StateRoot(args.state_root) if args.state_root is not None else StateRoot()
 
@@ -1138,9 +1038,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(text, file=sys.stderr, flush=True)
 
             if args.dry_run:
-                stages = narrate_stages(
-                    whisper_coordinated_stage_functions(), out=_ux
-                )
+                stages = narrate_stages(default_stage_functions(), out=_ux)
                 exit_code, report = run_guided(
                     state=state,
                     collection=args.collection,
@@ -1158,7 +1056,7 @@ def main(argv: list[str] | None = None) -> int:
                 with tui.terminal_ui() as session:
                     out_fn = session.out if session.out is not None else _ux
                     stages = narrate_stages(
-                        whisper_coordinated_stage_functions(), out=out_fn
+                        default_stage_functions(), out=out_fn
                     )
                     exit_code, report = run_guided(
                         state=state,
@@ -1330,9 +1228,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except PrepareError as exc:
         print(f"prepare error: {exc}", file=sys.stderr)
-        return 2
-    except OllamaRuntimeError as exc:
-        print(f"ollama provisioning error: {exc}", file=sys.stderr)
         return 2
     except VisionError as exc:
         print(f"vision error: {exc}", file=sys.stderr)

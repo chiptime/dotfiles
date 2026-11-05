@@ -1,5 +1,12 @@
 # PRD — Phase 0: One Collection, One Command
 
+> **Partial supersession (llm-hub migration, 2026-11):** the model-runtime
+> parts of this PRD are history — the isolated Ollama lifecycle, gated
+> vision and the Whisper stop/restore coordination were removed; every
+> model call goes to the resident llm-hub services now. The consent
+> architecture, phase-first windows, synthesis adapter and grouped
+> verification remain as specified.
+
 **Status:** Planning documentation only. This PRD records product requirements;
 it authorizes no implementation, execution, service operation, network, browser
 or GPU use, commit, or push.

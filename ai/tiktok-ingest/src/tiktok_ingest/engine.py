@@ -1,11 +1,10 @@
 """Stage engine: the consent-gated stage execution under guided-run.
 
 Extracted from :mod:`tiktok_ingest.guided` (S2): this module owns WHAT
-runs — fetch/prepare preparation, the whisper stop/restore coordination
-around the GPU lease, the vision/audio GPU window, the synthesis
-ingestion + verify boundary, the per-stage report records and the run
-report — with NO terminal I/O and NO authorization decision of its own.
-Every operator-facing seam is an injected adapter:
+runs — fetch/prepare preparation, the vision/audio model-inference
+window, the synthesis ingestion + verify boundary, the per-stage report
+records and the run report — with NO terminal I/O and NO authorization
+decision of its own. Every operator-facing seam is an injected adapter:
 
 - ``approve(window) -> bool`` — the consent adapter; it DECIDES the
   window (interactive prompt, run-plan scope, test double). Building a
@@ -14,28 +13,24 @@ Every operator-facing seam is an injected adapter:
 - ``notify(text)`` — the narration adapter (progress lines). The engine
   never prints.
 
-The honesty rules are unchanged from the guided coordinator (see
-:mod:`tiktok_ingest.guided`): progress is derived from the product's own
-state, the GPU lease marker is the ONE persisted lifecycle artifact, a
-fired gate is final, and whisper is coordinated only through the
-lifecycle hooks resolved through ``StageFunctions``. ``GuidedRun`` is
-the thin driver wiring ``consent.ask`` -> ``approve`` and ``out`` ->
-``notify``; call order, messages, consent windows, report keys/defaults
-and state are byte-identical to the pre-extraction coordinator (S4).
+Every model call goes to the RESIDENT llm-hub services (chat for vision,
+whisper WS for audio): the engine loads, unloads, starts and stops
+nothing. The honesty rules are unchanged from the guided coordinator
+(see :mod:`tiktok_ingest.guided`): progress is derived from the
+product's own state, and a failed request is final for its window.
+``GuidedRun`` is the thin driver wiring ``consent.ask`` -> ``approve``
+and ``out`` -> ``notify``.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
-import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import config
-from . import gpu_lease
 from .contracts import utc_now_iso
-from .gpu_lease import WHISPER_RESTORE_READY_DEADLINE_SECONDS
 from .state import Processed, StateRoot
 from .synthesis import SynthesisDocument
 
@@ -92,15 +87,10 @@ class StageFunctions:
     Production defaults close over the REAL pipeline functions with
     their production transports. Every callable must return the stage's
     normal outcome object (``.outcome``/``.reason``) and keep the
-    stage's own guarantees (fail-closed preconditions, gates, cleanup).
-
-    Phase 0 optional hooks (default ``None`` keeps the documented
-    standalone behavior — whisper stays operator-managed and blocks are
-    surfaced): when ALL THREE whisper lifecycle hooks are provided,
-    ``collection-run`` additionally coordinates bounded, identity-checked
-    stop/restore of the KNOWN shared whisper service behind their own
-    consent windows. The hooks are injectable for the fixture suite;
-    nothing real runs in tests.
+    stage's own guarantees (fail-closed preconditions, deadlines,
+    verified reuse). Both model-serving services are RESIDENT llm-hub
+    units: nothing here starts, stops or inspects any container, and no
+    model is loaded or unloaded by this pipeline.
     """
 
     fetch: Callable[[str, StateRoot], Any]
@@ -109,36 +99,10 @@ class StageFunctions:
     audio: Callable[[str, StateRoot], Any]
     synthesize: Callable[[str, StateRoot, Path | None], Any]
     verify: Callable[[str, StateRoot], Any]
-    # Raises with an operator-readable requirement unless NO whisper
-    # container is running (read-only podman query).
-    whisper_stopped: Callable[[], None]
-    # (healthy, detail) for the shared whisper WS service (read-only).
+    # (healthy, detail) for the resident llm-hub-whisper WS service
+    # (read-only health probe; used as the fail-closed precheck before
+    # audio work).
     whisper_health: Callable[[], tuple[bool, str]]
-    # True when something already answers on the isolated Ollama port.
-    ollama_reachable: Callable[[], bool]
-    ollama_start: Callable[[], Any]
-    ollama_wait_ready: Callable[[Any], str]
-    ollama_stop: Callable[[Any], None]
-    # Optional Phase 0 whisper lifecycle coordination (all-or-nothing):
-    # inspect returns the service identity/config (or None); stop and
-    # restore perform the bounded, verified mutations of the KNOWN
-    # shared service only (see whisper_lifecycle).
-    whisper_inspect: Callable[[], Any] | None = None
-    whisper_stop: Callable[[Any], Any] | None = None
-    whisper_restore: Callable[[Any], Any] | None = None
-    # Phase 0 addendum: read-only free-VRAM probe (MiB) used ONLY by the
-    # collection-run swap-retry re-admission drift check (PRD FR-10/
-    # FR-11). ``None`` keeps older fixture doubles working unchanged;
-    # the vision stage's own admission gate stays authoritative in every
-    # case — this seam only enables the pre-attempt drift check.
-    gpu_free_mib: Callable[[], int] | None = None
-
-    def whisper_lifecycle_ready(self) -> bool:
-        return (
-            self.whisper_inspect is not None
-            and self.whisper_stop is not None
-            and self.whisper_restore is not None
-        )
 
 
 # --------------------------------------------------------------------------
@@ -183,25 +147,6 @@ def run_dir_of(state: StateRoot, video_id: str) -> str | None:
 _run_dir_of = run_dir_of
 
 
-def lease_from_stages(
-    stages: StageFunctions, state: StateRoot
-) -> gpu_lease.GpuLease:
-    """The ONE lease wiring (S3): a GPU lease whose lifecycle hooks are
-    resolved through a stage bundle at call time, with the state-root
-    lease marker. The stage engine's primary whisper swap and the
-    collection driver's swap-retry window both build their lease here,
-    so the hook/marker glue exists in exactly one place."""
-
-    return gpu_lease.GpuLease(
-        hooks=gpu_lease.LeaseHooks(
-            stop=lambda info: stages.whisper_stop(info),
-            restore=lambda info: stages.whisper_restore(info),
-            health=lambda: stages.whisper_health(),
-        ),
-        marker=gpu_lease.LeaseMarkerFile(state),
-    )
-
-
 # --------------------------------------------------------------------------
 # The stage engine
 # --------------------------------------------------------------------------
@@ -211,10 +156,10 @@ class StageEngine:
     """One consent-gated stage execution over a selection.
 
     Everything of the former ``GuidedRun`` body except the adapters:
-    stage execution, the whisper swap through the GPU lease, per-stage
-    records, interruption bookkeeping and report building. Call order,
-    messages, consent windows and report shape are byte-identical to the
-    pre-extraction coordinator (S4); only the I/O seams moved.
+    stage execution, per-stage records, interruption bookkeeping and
+    report building. Vision and audio are plain requests to the
+    resident llm-hub services — there is no service lifecycle, lease or
+    GPU coordination to own.
     """
 
     def __init__(
@@ -242,28 +187,6 @@ class StageEngine:
         self.failures: list[dict[str, str]] = []
         self.cleanup_notes: list[str] = []
         self._interrupted = False
-        self._gpu_cleanup_failed = False
-        # Whisper coordination (Phase 0 hooks): the GPU LEASE is the
-        # single owner of this run's stop/restore swap (S1/S3) — it
-        # writes the persisted marker BEFORE the stop, performs exactly
-        # ONE start attempt, restores under the standing authorization
-        # obtained BEFORE the stop, never restores when an interruption
-        # landed inside the stop itself, and records honest bookkeeping
-        # this coordinator maps onto its operator-facing reports. The
-        # hooks are resolved through self.stages at call time.
-        self._gpu_lease = lease_from_stages(stages, state)
-        self.whisper_restore_failed = False
-        # Standing-restore bookkeeping: the restore/recovery authorization
-        # is asked BEFORE the stop (a Ctrl-C never grants anything, and a
-        # fresh prompt may be unavailable after an interrupt), so recovery
-        # runs under that prior authorization — never re-asked, never
-        # retried, and always reported honestly.
-        self._whisper_restore_authorized = False
-        # Set when an interruption leaves a cleanup outcome UNKNOWN (for
-        # example a Ctrl-C landing inside the whisper stop itself): the
-        # generic interruption message must then NOT claim that the
-        # applicable cleanup ran.
-        self._interrupt_cleanup_uncertain = False
         self._progress_blocked_reason: str | None = None
         self._vision_window_closed = False
 
@@ -406,387 +329,13 @@ class StageEngine:
             outcome = self.stages.prepare(item.video_id, self.state)
             self._record(report_items, item, "prepare", outcome)
 
-    def _whisper_pre_vision(
-        self, selection: Selection, report_items: dict
-    ) -> bool:
-        """Ensure the whisper precondition for vision, coordinating the
-        KNOWN shared service when (and only when) lifecycle hooks exist.
-
-        Without hooks this is the documented standalone behavior: the
-        read-only stopped-check either passes or vision is blocked with
-        the operator instruction. With hooks, a running service is
-        identity-verified against the known shared service, then TWO
-        separate consent windows are asked BEFORE any mutation: the
-        bounded stop, and the STANDING restore/recovery authorization
-        for the same service/configuration (an interrupt never grants a
-        window, and a fresh prompt may be unavailable after one, so the
-        exact recovery authorization is obtained up front). Any denial
-        or failed verification blocks BEFORE any mutation. Returns True
-        when vision may proceed.
-        """
-        pending = [
-            item for item in selection.items
-            if self._item_stage_state(item, "prepare") == "complete"
-            and self._item_stage_state(item, "vision") != "complete"
-        ]
-        if not pending:
-            return True
-        try:
-            self.stages.whisper_stopped()
-            return True
-        except Exception as exc:  # noqa: BLE001 - operator-facing block
-            if not self.stages.whisper_lifecycle_ready():
-                for item in pending:
-                    self.failures.append(
-                        {
-                            "id": item.video_id,
-                            "stage": "vision",
-                            "outcome": "blocked",
-                            "reason": str(exc),
-                        }
-                    )
-                    report_items.setdefault(item.video_id, {})["vision"] = {
-                        "outcome": "blocked",
-                        "reason": str(exc),
-                        "reused": False,
-                    }
-                self._notify(f"vision blocked before any model load: {exc}")
-                return False
-            inspect = self.stages.whisper_inspect
-            stop = self.stages.whisper_stop
-            assert inspect is not None and stop is not None  # narrowing
-            info = inspect()
-            if info is None:
-                reason = (
-                    "the whisper stopped-check failed but the known shared "
-                    "service cannot be identified (podman inspect finds no "
-                    "such container); refusing to touch any service — "
-                    f"original check: {exc}"
-                )
-                self._block_vision_all(pending, report_items, reason)
-                return False
-            # Identity verification BEFORE the consent window: the
-            # operator is never asked to authorize stopping something
-            # that would then fail the identity check (P0-FR-11).
-            from .whisper_lifecycle import WhisperLifecycleError
-            from .whisper_lifecycle import verify_known_service as _verify
-
-            try:
-                _verify(info)
-            except WhisperLifecycleError as verify_exc:
-                reason = (
-                    f"whisper identity verification failed BEFORE any "
-                    f"mutation or consent: {verify_exc}"
-                )
-                self._block_vision_all(pending, report_items, reason)
-                return False
-            service_text = getattr(info, "describe", lambda: str(info))()
-            window = ConsentWindow(
-                kind="whisper-stop",
-                title=(
-                    "stop the KNOWN shared whisper service for the vision "
-                    "window (identity verified)"
-                ),
-                ids=tuple(item.video_id for item in pending),
-                destinations=(service_text,),
-                operations=(
-                    f"podman stop --timeout 30 of exactly {service_text}",
-                    "positive verification that it is no longer running",
-                ),
-                limits=(
-                    "bounded stop: SIGTERM with a 30s grace, then podman "
-                    "escalates to SIGKILL",
-                    "only the known shared service is ever stopped — no "
-                    "arbitrary or unidentified workload",
-                    "the stop runs ONLY if the separate restore/recovery "
-                    "authorization below is also granted: without it, no "
-                    "mutation happens at all",
-                ),
-                effects=(
-                    "the shared whisper service releases its GPU residency "
-                    "until restored after this batch",
-                    "the SAME service/configuration is restored under the "
-                    "standing authorization asked next — after the vision "
-                    "window, on failure, and on interruption (Ctrl-C)",
-                ),
-            )
-            if not self._ask(window):
-                reason = (
-                    "whisper-stop window denied: no service was stopped "
-                    "and no mutation occurred; vision is blocked for this "
-                    "invocation"
-                )
-                self._block_vision_all(pending, report_items, reason)
-                return False
-            # Standing recovery authorization, asked BEFORE the stop: an
-            # interrupt (Ctrl-C) never grants a window, and after one a
-            # fresh prompt may be unavailable — so the exact restore/recovery
-            # authorization for the SAME service/configuration is obtained
-            # up front. It is a SEPARATE consent, never the stop consent
-            # reused. Denial blocks BEFORE any mutation.
-            restore_window = ConsentWindow(
-                kind="whisper-restore",
-                title=(
-                    "standing recovery authorization: restore the SAME "
-                    "service after the window (asked BEFORE the stop)"
-                ),
-                ids=tuple(item.video_id for item in pending),
-                destinations=(service_text,),
-                operations=(
-                    f"podman start of exactly {service_text} once the GPU "
-                    "window ends — normally, on failure, or after an "
-                    "interruption (Ctrl-C) — WITHOUT asking again",
-                    "positive verification of the same name/image/config",
-                    "health check of the whisper service before any audio "
-                    "work",
-                ),
-                limits=(
-                    "one start attempt per execution context; no automatic "
-                    "retry",
-                    "this authorization is asked BEFORE the stop: denial "
-                    "means the stop never runs (no mutation occurs) and "
-                    "vision stays blocked",
-                    "it covers ONLY this run's recovery of this exact "
-                    "service/configuration — it is not the stop consent "
-                    "reused and never carries into another run or batch",
-                    "restore/health failure (or an interruption during the "
-                    "restore) blocks ALL further progress and is reported "
-                    "with the actual partial state; no rollback is "
-                    "performed or implied",
-                ),
-                effects=(
-                    "the shared whisper service returns to GPU residency "
-                    "with its recorded identity/configuration",
-                    "audio transcription may proceed only after restored "
-                    "health is positively validated",
-                ),
-            )
-            if not self._ask(restore_window):
-                reason = (
-                    "whisper-restore standing authorization denied: without "
-                    "an exact prior authorization for the recovery of this "
-                    "service, the stop does not happen (no mutation "
-                    "occurred); vision is blocked for this invocation — "
-                    "re-invoke to be asked again"
-                )
-                self._block_vision_all(pending, report_items, reason)
-                return False
-            try:
-                # The lease is the single owner of the swap (S1): it
-                # persists the lease marker BEFORE issuing the stop (S3)
-                # and performs the stop through the verified hook. The
-                # lease starts ONLY here, after BOTH consents.
-                self._gpu_lease.acquire(info)
-            except KeyboardInterrupt:
-                # The stop result is UNKNOWN: the interruption may have
-                # landed before, during or after the actual termination.
-                # Never guess and never restore — the stop cannot be
-                # verified as ours/completed, so recovery under the
-                # standing authorization does not apply here. No retry,
-                # no vision/audio on this path; re-raise keeps the run
-                # interrupted. The operator gets the exact service and
-                # the manual verification/recovery instruction.
-                self._interrupt_cleanup_uncertain = True
-                reason = (
-                    f"whisper stop was interrupted: the stop result is "
-                    f"UNKNOWN — the service ({service_text}) may be "
-                    "RUNNING or STOPPED; verify it explicitly (podman "
-                    "inspect/ps) and recover manually with this exact "
-                    "service; NO restore was attempted because the stop "
-                    "cannot be verified as completed by this run; no "
-                    "further GPU work runs this invocation; no rollback "
-                    "is performed or implied"
-                )
-                self.failures.append(
-                    {
-                        "id": "*",
-                        "stage": "whisper-stop",
-                        "outcome": "failed",
-                        "reason": reason,
-                    }
-                )
-                self.cleanup_notes.append(reason)
-                self._notify(reason)
-                raise
-            except Exception as stop_exc:  # noqa: BLE001 - surfaced
-                reason = (
-                    f"whisper stop failed: {stop_exc}; the service state "
-                    "must be verified explicitly before any GPU work; no "
-                    "rollback is performed or implied"
-                )
-                self._block_vision_all(pending, report_items, reason)
-                return False
-            self._whisper_restore_authorized = True
-            self.cleanup_notes.append(
-                "shared whisper service stopped by this run after identity "
-                "verification and TWO explicit consents (stop + standing "
-                "restore); the restore runs under that standing "
-                "authorization once the GPU window ends — normally, on "
-                "failure, or after an interruption — and a restore/health "
-                "failure blocks all progress with the actual partial state "
-                "reported (no rollback promised)"
-            )
-            return True
-
-    def _block_vision_all(
-        self,
-        pending: list[GuidedItem],
-        report_items: dict,
-        reason: str,
-    ) -> None:
-        for item in pending:
-            self.failures.append(
-                {
-                    "id": item.video_id,
-                    "stage": "vision",
-                    "outcome": "blocked",
-                    "reason": reason,
-                }
-            )
-            report_items.setdefault(item.video_id, {})["vision"] = {
-                "outcome": "blocked",
-                "reason": reason,
-                "reused": False,
-            }
-        self._notify(f"vision blocked before any model load: {reason}")
-
-    def _whisper_pre_audio(self, selection: Selection, report_items: dict) -> bool:
-        """Restore the whisper service THIS run stopped, before audio.
-
-        Runs after the vision window (and the isolated-Ollama stop), on
-        success AND failure paths of the batch. The restore executes
-        under the STANDING authorization obtained BEFORE the stop (the
-        separate ``whisper-restore`` window): it is never re-asked and
-        never inferred. Returns True when audio may proceed (including
-        when we never stopped anything).
-        """
-        if self._gpu_lease.stopped_info is None:
-            return True
-        return self._whisper_restore_now(
-            report_items, context="after the vision window"
-        )
-
-    def _whisper_restore_now(self, report_items: dict, *, context: str) -> bool:
-        """Restore under the standing authorization; report honestly.
-
-        The GPU lease owns the swap mechanics (S1): the ONE bounded start
-        of the SAME container (positive identity/config verification
-        inside the hook), the persisted marker clear on the verified
-        healthy path (S3), and exactly-once bookkeeping. This coordinator
-        keeps the operator-facing honesty: after the start comes a
-        BOUNDED read-only readiness wait (first probe immediate, fixed
-        interval, small monotonic deadline — the ONE shared wait, S2),
-        and any failure — or an interruption that leaves the restore
-        incomplete — blocks ALL further progress (audio included): the
-        run reports the actual partial service state with instructions
-        and promises no rollback. Never re-asked, never retried, and
-        the start itself is never repeated: one attempt per execution
-        context, polling only.
-        """
-        lease = self._gpu_lease
-        if lease.restore_attempted:
-            # The ONE authorized restore already ran (or was in flight):
-            # never a second start, never a re-ask — only the recorded
-            # outcome decides whether progress may continue.
-            return lease.restore_completed
-        info = lease.stopped_info
-        assert info is not None  # narrowing: callers check before calling
-        service_text = getattr(info, "describe", lambda: str(info))()
-        restore = self.stages.whisper_restore
-        assert restore is not None  # narrowing: hooks are all-or-nothing
-        try:
-            outcome = lease.restore_once(
-                waiting_feedback=lambda deadline: self._notify(
-                    f"waiting for Whisper readiness after the restore "
-                    f"(read-only health polling for up to {deadline:.0f}s; "
-                    "no further start is attempted)"
-                ),
-                # Resolved HERE so tests patching ``engine.time`` keep
-                # driving the deterministic clock through this seam.
-                monotonic=time.monotonic,
-                sleep=time.sleep,
-            )
-        except KeyboardInterrupt:
-            # The interruption itself is never granted anything. Where it
-            # landed decides the honest report: inside the start the
-            # restore outcome is UNKNOWN; inside the readiness wait the
-            # service WAS started (identity verified) and only its health
-            # is UNKNOWN. No retry in either case.
-            self.whisper_restore_failed = True
-            if lease.restore_interrupt_phase == "start":
-                reason = (
-                    f"whisper restore was interrupted {context}: the service "
-                    f"stopped by this run ({service_text}) is in an UNKNOWN "
-                    "state (the start may or may not have completed) — verify "
-                    "it explicitly (podman inspect/ps, health endpoint); ALL "
-                    "further progress is blocked; no rollback is performed or "
-                    "implied"
-                )
-            else:
-                reason = (
-                    f"whisper restore health wait was interrupted {context}: "
-                    f"the service {service_text} was STARTED (identity "
-                    "verified) but its health is UNKNOWN (the readiness "
-                    "polling may or may not have completed) — verify it "
-                    "explicitly (health endpoint, podman inspect/ps); ALL "
-                    "further progress is blocked; the ONE authorized start "
-                    "already happened and is never repeated; no rollback is "
-                    "performed or implied"
-                )
-            self.failures.append(
-                {"id": "*", "stage": "whisper-restore", "outcome": "failed", "reason": reason}
-            )
-            self.cleanup_notes.append(reason)
-            self._notify(reason)
-            raise
-        if outcome.status == "restore_failed":
-            exc = outcome.error
-            assert exc is not None  # narrowing: status carries the error
-            self.whisper_restore_failed = True
-            reason = (
-                f"whisper restore failed {context}: {exc}; the service "
-                f"stopped by this run ({service_text}) may still be "
-                "STOPPED or partially started — verify its state "
-                "explicitly; ALL further progress is blocked; no rollback "
-                "is performed or implied"
-            )
-            self.failures.append(
-                {"id": "*", "stage": "whisper-restore", "outcome": "failed", "reason": reason}
-            )
-            self.cleanup_notes.append(reason)
-            self._notify(reason)
-            return False
-        if outcome.status == "health_timeout":
-            detail = outcome.detail
-            self.whisper_restore_failed = True
-            reason = (
-                f"restored whisper service did not become healthy within "
-                f"{WHISPER_RESTORE_READY_DEADLINE_SECONDS:.0f}s "
-                f"({detail}); the service {service_text} was started but "
-                "is NOT healthy — ALL further progress is blocked; verify "
-                "the service state explicitly; the ONE authorized start "
-                "is never repeated; no rollback is performed or implied"
-            )
-            self.failures.append(
-                {"id": "*", "stage": "whisper-restore", "outcome": "failed", "reason": reason}
-            )
-            self.cleanup_notes.append(reason)
-            self._notify(reason)
-            return False
-        self.cleanup_notes.append(
-            f"shared whisper service restored and healthy {context} "
-            f"({outcome.detail[:120]})"
-        )
-        return True
-
     def _vision_phase(self, selection: Selection, report_items: dict) -> list[str]:
-        """Run pending vision stages inside one consented GPU window.
+        """Run pending vision stages inside one consented window.
 
-        Order and safety come from the stage itself (whisper-stopped
-        precheck, GateLedger, verified unload). This coordinator only
-        adds: explicit consent, isolated-server lifecycle for a server
-        IT started, and the stop-on-failure policy. Returns the ids whose
-        vision is complete after the phase.
+        Order and safety come from the stage itself (llm-hub readiness
+        precheck, per-stage deadline). This coordinator only adds:
+        explicit consent and the stop-on-failure policy. Returns the ids
+        whose vision is complete after the phase.
         """
         pending = [
             item for item in selection.items
@@ -798,109 +347,19 @@ class StageEngine:
                 item.video_id for item in selection.items
                 if self._item_stage_state(item, "vision") == "complete"
             ]
-        if self.stages.whisper_lifecycle_ready():
-            self._notify(
-                "gpu phase: whisper must be STOPPED for vision — when it is "
-                "running, this run stops the KNOWN shared service behind "
-                "explicit consent and restores it under the standing "
-                "authorization"
-            )
-        else:
-            self._notify(
-                "gpu phase: whisper service must be STOPPED for vision "
-                "(operator-managed; this command never stops or starts it)"
-            )
-        handle: Any = None
-        try:
-            try:
-                self.stages.whisper_stopped()
-            except Exception as exc:  # noqa: BLE001 - operator-facing block
-                for item in pending:
-                    self.failures.append(
-                        {
-                            "id": item.video_id,
-                            "stage": "vision",
-                            "outcome": "blocked",
-                            "reason": str(exc),
-                        }
-                    )
-                    report_items.setdefault(item.video_id, {})["vision"] = {
-                        "outcome": "blocked",
-                        "reason": str(exc),
-                        "reused": False,
-                    }
-                self._notify(f"vision blocked before any model load: {exc}")
-                return [
-                    item.video_id for item in selection.items
-                    if self._item_stage_state(item, "vision") == "complete"
-                ]
-            if self.stages.ollama_reachable():
-                reason = (
-                    "isolated Ollama already answers on "
-                    f"{config.OLLAMA_API_BASE}; guided-run never adopts a "
-                    "preexisting process (identity and scope cannot be "
-                    "verified from outside); stop it explicitly and re-invoke"
+        for item in pending:
+            self.stage_calls.append(f"vision:{item.video_id}")
+            outcome = self.stages.vision(item.video_id, self.state)
+            self._record(report_items, item, "vision", outcome)
+            if getattr(outcome, "outcome", "") != "complete":
+                # Stop-on-failure policy: no further vision requests for
+                # ANY id this invocation; completed stages stay reused.
+                self._vision_window_closed = True
+                self._notify(
+                    "vision window ended: no further vision requests this "
+                    "invocation (the failure is final for the window)"
                 )
-                for item in pending:
-                    self.failures.append(
-                        {
-                            "id": item.video_id,
-                            "stage": "vision",
-                            "outcome": "blocked",
-                            "reason": reason,
-                        }
-                    )
-                    report_items.setdefault(item.video_id, {})["vision"] = {
-                        "outcome": "blocked",
-                        "reason": reason,
-                        "reused": False,
-                    }
-                return [
-                    item.video_id for item in selection.items
-                    if self._item_stage_state(item, "vision") == "complete"
-                ]
-            handle = self.stages.ollama_start()
-            self.cleanup_notes.append(
-                "isolated Ollama started by this run; consent covers its stop "
-                "at window end or failure"
-            )
-            self.stages.ollama_wait_ready(handle)
-            for item in pending:
-                self.stage_calls.append(f"vision:{item.video_id}")
-                outcome = self.stages.vision(item.video_id, self.state)
-                self._record(report_items, item, "vision", outcome)
-                if getattr(outcome, "outcome", "") != "complete":
-                    # Stop-on-failure policy: no further GPU load for ANY
-                    # id this invocation; the stage's own bounded cleanup
-                    # and verified unload already ran inside the stage.
-                    self._vision_window_closed = True
-                    self._notify(
-                        "gpu window ended: no further model load this "
-                        "invocation (gate/error is final for the window)"
-                    )
-                    break
-        finally:
-            if handle is not None:
-                try:
-                    self.stages.ollama_stop(handle)
-                    self.cleanup_notes.append("isolated Ollama stopped cleanly")
-                except Exception as exc:  # noqa: BLE001 - surfaced, never hidden
-                    self.cleanup_notes.append(
-                        f"ISOLATED OLLAMA STOP FAILED: {exc}; the server this "
-                        "run started may still be running — stop it explicitly "
-                        f"(pid file {config.OLLAMA_PID_PATH})"
-                    )
-                    self.failures.append(
-                        {
-                            "id": "*",
-                            "stage": "gpu-cleanup",
-                            "outcome": "failed",
-                            "reason": f"isolated Ollama stop failed: {exc}",
-                        }
-                    )
-                    # Explicit block: with the server cleanup unverified the
-                    # GPU window does not advance to audio.
-                    self._gpu_cleanup_failed = True
+                break
         return [
             item.video_id for item in selection.items
             if self._item_stage_state(item, "vision") == "complete"
@@ -919,9 +378,10 @@ class StageEngine:
         healthy, detail = self.stages.whisper_health()
         if not healthy:
             reason = (
-                f"whisper service not ready for audio ({detail}); start it "
-                "explicitly (operator-managed), then re-invoke guided-run — "
-                "completed vision stages are reused with zero re-inference"
+                f"llm-hub-whisper is not ready for audio ({detail}); start it "
+                "with `systemctl --user start llm-hub-whisper`, then re-invoke "
+                "guided-run — completed vision stages are reused with zero "
+                "re-inference"
             )
             for item in pending:
                 self.failures.append(
@@ -959,14 +419,16 @@ class StageEngine:
             ids=tuple(item.video_id for item in pending),
             operations=(
                 "unconditional full-audio transcription of exactly the prepared "
-                "ids above through the shared whisper WS service; no vision "
-                "completion is required",
-                "no isolated Ollama lifecycle or vision model load",
+                "ids above through the resident llm-hub-whisper WS service; no "
+                "vision completion is required",
+                "no vision requests in this window (audio-only)",
             ),
             limits=(
                 f"audio deadline {config.BUDGETS.audio_stage_deadline_seconds}s per id",
                 "completed audio is reused, never re-transcribed; no retry",
-                "health must pass before work; no authority to start a missing service",
+                "health must pass before work; the service is user-managed "
+                "(systemctl --user start llm-hub-whisper) — this command "
+                "never starts or stops it",
             ),
             effects=("persists audio evidence and the existing audio stage record",),
         )
@@ -1004,9 +466,9 @@ class StageEngine:
         # Conditional audio: ids that reach audio ONLY if their vision
         # completes inside this window. The consent line must state that
         # condition honestly — audio is possible, never guaranteed: a
-        # vision failure, a fired gate or a denial means no audio for
-        # that id. Ids whose audio is already complete are reused, never
-        # re-transcribed, and are named as such.
+        # vision failure or a denial means no audio for that id. Ids whose
+        # audio is already complete are reused, never re-transcribed, and
+        # are named as such.
         audio_pending_ids = {item.video_id for item in audio_pending}
         audio_conditional = [
             item for item in audio_possible
@@ -1024,25 +486,25 @@ class StageEngine:
                 window_ids.append(item.video_id)
         if audio_pending and audio_conditional:
             audio_operation = (
-                "full-audio transcription through the shared whisper WS "
-                f"service for the {len(audio_pending)} vision-complete "
+                "full-audio transcription through the resident llm-hub-whisper "
+                f"WS service for the {len(audio_pending)} vision-complete "
                 f"id(s), and CONDITIONALLY for the {len(audio_conditional)} "
                 "id(s) whose vision completes inside this window — if an "
-                "id's vision fails, a gate fires or the window closes, "
-                "that id's audio does not run"
+                "id's vision fails or the window closes, that id's audio "
+                "does not run"
             )
         elif audio_pending:
             audio_operation = (
-                "full-audio transcription through the shared whisper WS "
-                "service per pending id"
+                "full-audio transcription through the resident llm-hub-whisper "
+                "WS service per pending id"
             )
         elif audio_conditional:
             audio_operation = (
-                "conditional full-audio transcription through the shared "
-                f"whisper WS service for the {len(audio_conditional)} id(s) "
-                "whose vision completes inside this window — audio runs "
-                "only after that id's vision succeeds; vision failure, a "
-                "fired gate or denial means no audio runs"
+                "conditional full-audio transcription through the resident "
+                f"llm-hub-whisper WS service for the {len(audio_conditional)} "
+                "id(s) whose vision completes inside this window — audio runs "
+                "only after that id's vision succeeds; vision failure or "
+                "denial means no audio runs"
             )
         else:
             audio_operation = "no audio transcription (none pending)"
@@ -1053,123 +515,56 @@ class StageEngine:
             )
         window = ConsentWindow(
             kind="gpu",
-            title=("local vision-only GPU window" if vision_only
-                   else "local GPU inference window (vision and/or audio)"),
+            title=("local vision-only window" if vision_only
+                   else "local model-inference window (vision and/or audio)"),
             ids=tuple(window_ids),
             operations=(
                 (
-                    "isolated Ollama lifecycle (start + stop) around the vision "
-                    f"stages on {config.OLLAMA_API_BASE}"
-                    if vision_pending
-                    else "no isolated Ollama lifecycle (no vision pending)"
-                ),
-                (
-                    f"gated vision inference ({config.VISION_MODEL}) per pending id"
+                    "vision inference requests to the RESIDENT llm-hub chat "
+                    f"service ({config.LLM_HUB_CHAT_API_BASE}, model "
+                    f"{config.VISION_MODEL}) per pending id"
                     if vision_pending
                     else "no vision inference (none pending)"
                 ),
                 audio_operation,
             ),
             limits=(
-                f"free VRAM >= {config.GATES.free_vram_gate_mib} MiB before each "
-                f"{config.VISION_MODEL} load",
-                f"swap delta <= {config.GATES.swap_delta_limit_mib} MiB per phase",
-                "zero CPU offload (any offloaded layer fails the run)",
-                "a fired gate is FINAL for this window: no auto-retry",
                 f"vision deadline {config.BUDGETS.vision_stage_deadline_seconds}s, "
-                f"audio deadline {config.BUDGETS.audio_stage_deadline_seconds}s",
+                f"audio deadline {config.BUDGETS.audio_stage_deadline_seconds}s "
+                "per id",
+                "no automatic retry; a failed request is final for this "
+                "window",
+                "the llm-hub services must already be running (user units "
+                "llm-hub-chat / llm-hub-whisper); this run never starts, "
+                "stops or inspects any container",
             ),
             effects=(
-                "loads the vision model on the GPU and verifies unload after "
-                "the stage (empty residency + observed release)",
-                (
-                    "whisper must be STOPPED for vision and RUNNING for "
-                    "audio — when it is running, this run coordinates the "
-                    "KNOWN shared service behind explicit consent (bounded "
-                    "stop before vision, standing restore after the window)"
-                    if self.stages.whisper_lifecycle_ready()
-                    else "whisper must be STOPPED for vision and RUNNING "
-                    "for audio — both are operator actions; this command "
-                    "never manages that service"
-                ),
-                "the isolated Ollama server started here is stopped at window "
-                "end or on failure",
+                "per-frame chat-completions requests to the resident llm-hub "
+                "chat model and full-audio transcription requests to the "
+                "resident llm-hub-whisper service; no model load/unload and "
+                "no GPU coordination is performed by this run",
             ),
         )
         if not self._ask(window):
             selection.notes.append(
-                "gpu window denied: no inference ran and no server was started"
+                "gpu window denied: no inference ran and no service was touched"
             )
             return
-        # Whisper precondition (Phase 0 coordination when hooks exist):
-        # without it vision below blocks in _vision_phase as before.
-        if not self._whisper_pre_vision(selection, report_items):
-            if vision_only:
-                self._progress_blocked_reason = (
-                    "whisper vision precondition failed: service state/authority "
-                    "must be resolved before further collection progress"
-                )
-                return
-            selection.notes.append(
-                "vision blocked by the whisper precondition; audio for "
-                "already-vision-complete ids may still proceed (the "
-                "service is running in that case)"
-            )
-            # A service stopped by THIS run cannot exist on this path (a
-            # successful stop implies vision was unblocked), so there is
-            # nothing to restore; audio eligibility is decided by the
-            # audio phase's own health precheck.
-            self._audio_phase(
-                selection,
-                report_items,
-                [
-                    item.video_id for item in selection.items
-                    if self._item_stage_state(item, "vision") == "complete"
-                ],
-            )
-            return
+        self._notify(
+            "model-inference window: vision frames go to the resident "
+            "llm-hub chat service and audio to the resident llm-hub-whisper "
+            "service; this run starts and stops nothing"
+        )
         try:
             vision_complete = self._vision_phase(selection, report_items)
-            if self._gpu_cleanup_failed:
-                selection.notes.append(
-                    "audio NOT attempted: the isolated Ollama stop failed and the "
-                    "GPU window does not advance while cleanup is unverified; "
-                    "resolve the server state explicitly, then re-invoke (vision "
-                    "results already complete are reused)"
-                )
-                # The whisper service this run stopped is STILL restored: an
-                # authorized window never leaves it stopped behind a block.
-                self._whisper_pre_audio(selection, report_items)
-                return
-            if not self._whisper_pre_audio(selection, report_items):
-                return
             if not vision_only:
                 self._audio_phase(selection, report_items, vision_complete)
         except KeyboardInterrupt:
-            # An interrupt never grants anything and never skips recovery.
-            # The isolated Ollama server this run started was already
-            # stopped by _vision_phase's finally; the whisper service this
-            # run stopped is recovered here ONLY under the standing
-            # authorization obtained BEFORE the stop — never re-asked
-            # (a Ctrl-C must not depend on a fresh prompt), never retried.
             self._notify(
-                "interrupted during the GPU window: the isolated Ollama "
-                "server this run started was stopped by the window "
-                "cleanup; the whisper service this run stopped (if any) "
-                "is recovered next under its prior standing authorization"
+                "interrupted during the model-inference window: partial "
+                "results are preserved by the stages themselves; "
+                "re-invocation needs new authorization for pending operations"
             )
-            if self._gpu_lease.stopped_info is not None:
-                if not self._gpu_lease.restore_attempted:
-                    self._whisper_restore_now(
-                        report_items, context="after interruption (Ctrl-C)"
-                    )
-                elif not self._gpu_lease.restore_completed:
-                    # A restore was already in flight when the interrupt
-                    # landed: _whisper_restore_now's own handler already
-                    # reported the UNKNOWN state and appended the failure
-                    # record. Keep the blocking invariant (idempotent),
-                    # with NO retry, NO new ask and NO duplicate report.
-                    self.whisper_restore_failed = True
             raise
         except Exception as exc:  # unexpected boundary failure, not a stage outcome
             self._progress_blocked_reason = f"GPU boundary failed: {exc}"
@@ -1177,13 +572,6 @@ class StageEngine:
                 "id": "*", "stage": "gpu", "outcome": "failed",
                 "reason": self._progress_blocked_reason,
             })
-        finally:
-            # Also recover after an unexpected exception from start/readiness
-            # hooks. Ordinary success and interrupt paths already consumed the
-            # single restore; the lease's bookkeeping makes this check
-            # idempotent.
-            if self._gpu_lease.stopped_info is not None and not self._gpu_lease.restore_attempted:
-                self._whisper_restore_now(report_items, context="after GPU boundary exit")
 
     def _synthesis_and_verify_phase(
         self,
@@ -1193,14 +581,10 @@ class StageEngine:
         *,
         verify: bool = True,
     ) -> None:
-        if (
-            self.whisper_restore_failed
-            or self._gpu_cleanup_failed
-            or self._interrupt_cleanup_uncertain
-            or self._progress_blocked_reason is not None
-        ):
+        if self._progress_blocked_reason is not None:
             selection.notes.append(
-                "synthesis and verification blocked: service/GPU recovery is not verified"
+                "synthesis and verification blocked: an earlier phase failed "
+                "at its boundary"
             )
             return
         waiting: list[dict[str, str]] = []
@@ -1340,8 +724,6 @@ class StageEngine:
     ) -> dict[str, Any]:
         """One resource slice; the collection driver owns all barriers.
 
-        Each call uses a fresh runner so standing restore authority and its
-        consumed start attempt can never leak across actual stop cycles.
         This does not change the public guided-run selection or phase
         order. (Public since S2 so ``collection-run`` stops depending on
         the private ``GuidedRun`` hook; the driver keeps a one-line
@@ -1378,14 +760,9 @@ class StageEngine:
                 self._synthesis_and_verify_phase(selection, report_items, {}, verify=False)
         except KeyboardInterrupt:
             self._interrupted = True
-            if self._interrupt_cleanup_uncertain:
-                self._notify(
-                    "interrupted: cleanup state is NOT fully known; verify "
-                    "and recover the exact Whisper service manually before progress"
-                )
             selection.notes.append(
-                "phase interrupted: partial stage evidence preserved; cleanup "
-                "is unknown if the service stop itself was interrupted"
+                "phase interrupted: partial stage evidence preserved; "
+                "re-invocation needs new authorization for pending operations"
             )
         except Exception as exc:
             self._progress_blocked_reason = f"collection {phase} boundary failed: {exc}"
@@ -1432,21 +809,11 @@ class StageEngine:
             self._synthesis_and_verify_phase(selection, report_items, synthesis_docs)
         except KeyboardInterrupt:
             self._interrupted = True
-            if self._interrupt_cleanup_uncertain:
-                self._notify(
-                    "interrupted: partial results are preserved by the "
-                    "stages themselves; cleanup state is NOT fully known "
-                    "— see the UNKNOWN whisper-stop note above, verify "
-                    "and recover the exact service manually before any "
-                    "further GPU work; re-invocation needs new "
-                    "authorization for pending operations"
-                )
-            else:
-                self._notify(
-                    "interrupted: partial results are preserved by the stages "
-                    "themselves; applicable cleanup ran; re-invocation needs new "
-                    "authorization for pending operations"
-                )
+            self._notify(
+                "interrupted: partial results are preserved by the stages "
+                "themselves; re-invocation needs new authorization for "
+                "pending operations"
+            )
         return self.build_report(selection, report_items, mode="execute")
 
     def build_report(
@@ -1481,8 +848,6 @@ class StageEngine:
             "cleanup_notes": list(self.cleanup_notes),
             "waiting_for_synthesis": waiting,
             "interrupted": self._interrupted,
-            "whisper_restore_failed": self.whisper_restore_failed,
-            "gpu_cleanup_failed": self._gpu_cleanup_failed,
             "progress_blocked_reason": self._progress_blocked_reason,
             "vision_window_closed": self._vision_window_closed,
             "stage_outcomes_this_run": report_items,

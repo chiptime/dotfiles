@@ -1,9 +1,9 @@
 """Stability guarantees: no external call or termination can hang a run.
 
-Covers the roadmap "Stability phase 1" items: every podman / nvidia-smi /
-process probe carries a finite timeout, a stalled Whisper service ends in
-an explicit deadline outcome instead of a forever-blocking read, and
-SIGTERM/SIGHUP reach the existing interrupt-cleanup paths.
+Covers the roadmap "Stability phase 1" items: every container probe
+carries a finite timeout, a stalled Whisper service ends in an explicit
+deadline outcome instead of a forever-blocking read, and SIGTERM/SIGHUP
+reach the existing interrupt-cleanup paths.
 """
 
 from __future__ import annotations
@@ -15,8 +15,6 @@ from pathlib import Path
 from unittest import mock
 
 from tiktok_ingest import cli, runtime
-from tiktok_ingest import whisper_lifecycle as wl
-from tiktok_ingest.ollama_runtime import verify_pid_gone
 from tiktok_ingest.prepare import StageDeadlineExceeded, resolve_image_id
 from tiktok_ingest.tests.test_whisper_client import (
     FIXED_MASK,
@@ -24,7 +22,6 @@ from tiktok_ingest.tests.test_whisper_client import (
     handshake_ok,
     text_frame,
 )
-from tiktok_ingest.vision import assert_whisper_stopped, query_gpu
 from tiktok_ingest.whisper_client import transcribe_audio
 
 
@@ -49,101 +46,18 @@ class RecordingRunner:
         raise AssertionError(f"no call starting with {prefix!r}: {self.calls!r}")
 
 
-def _inspect_json(running: bool) -> str:
-    import json
-
-    return json.dumps(
-        [
-            {
-                "Name": f"/{wl.WHISPER_CONTAINER_NAME}",
-                "ImageName": "img",
-                "Config": {"Image": "img", "Env": []},
-                "State": {"Running": running, "Status": "running" if running else "exited"},
-            }
-        ]
-    )
-
-
 class SubprocessTimeoutTests(unittest.TestCase):
-    """Every lifecycle/probe subprocess passes a finite, positive timeout."""
+    """Every container-probe subprocess passes a finite, positive timeout."""
 
     def assertBounded(self, value: float | None) -> None:
         self.assertIsNotNone(value, "subprocess call has no timeout")
         assert value is not None
         self.assertGreater(value, 0)
 
-    def test_inspect_whisper_is_bounded(self) -> None:
-        runner = RecordingRunner({"podman inspect": (0, _inspect_json(True), "")})
-        wl.inspect_whisper(runner)
-        self.assertBounded(runner.timeout_for(["podman", "inspect"]))
-
-    def test_stop_whisper_is_bounded_beyond_the_grace(self) -> None:
-        runner = RecordingRunner({"podman inspect": (0, _inspect_json(False), "")})
-        info = wl.WhisperServiceInfo(
-            name=wl.WHISPER_CONTAINER_NAME, image="img", state="running", running=True, env=()
-        )
-        wl.stop_whisper(info, runner=runner)
-        stop_timeout = runner.timeout_for(["podman", "stop"])
-        self.assertBounded(stop_timeout)
-        assert stop_timeout is not None
-        # podman itself escalates to SIGKILL after the grace; our bound
-        # must leave room for that escalation to finish.
-        self.assertGreater(stop_timeout, wl.STOP_GRACE_SECONDS)
-        self.assertBounded(runner.timeout_for(["podman", "ps"]))
-
-    def test_restore_whisper_is_bounded(self) -> None:
-        runner = RecordingRunner({"podman inspect": (0, _inspect_json(True), "")})
-        info = wl.WhisperServiceInfo(
-            name=wl.WHISPER_CONTAINER_NAME, image="img", state="exited", running=False, env=()
-        )
-        wl.restore_whisper(info, runner=runner)
-        self.assertBounded(runner.timeout_for(["podman", "start"]))
-
-    def test_vision_probes_are_bounded(self) -> None:
-        runner = RecordingRunner({"nvidia-smi": (0, "24576, 1000, 23576\n", "")})
-        query_gpu(runner)
-        assert_whisper_stopped(runner)
-        self.assertBounded(runner.timeout_for(["nvidia-smi"]))
-        self.assertBounded(runner.timeout_for(["podman", "ps"]))
-
     def test_resolve_image_id_is_bounded(self) -> None:
         runner = RecordingRunner({"podman inspect": (0, "a" * 64 + "\n", "")})
         resolve_image_id("localhost/ffmpeg:pinned", runner=runner)
         self.assertBounded(runner.timeout_for(["podman", "inspect"]))
-
-    def test_pid_probe_is_bounded(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            pid_path = Path(tmp) / "ollama.pid"
-            pid_path.write_text("4242", encoding="ascii")
-            runner = RecordingRunner()
-            verify_pid_gone(pid_path, runner=runner)
-        self.assertBounded(runner.timeout_for(["kill"]))
-
-    def test_timed_out_stop_fails_closed(self) -> None:
-        # A hung podman surfaces as the runner's normalized timeout result
-        # (rc 124) and must stop the stage, never be read as a success.
-        runner = RecordingRunner({"podman stop": (124, "", "runner timeout after 90s")})
-        info = wl.WhisperServiceInfo(
-            name=wl.WHISPER_CONTAINER_NAME, image="img", state="running", running=True, env=()
-        )
-        with self.assertRaisesRegex(wl.WhisperLifecycleError, "runner timeout"):
-            wl.stop_whisper(info, runner=runner)
-
-    def test_timed_out_inspect_is_not_a_missing_container(self) -> None:
-        # Partial stderr captured before the timeout must not be read as
-        # "the container does not exist".
-        runner = RecordingRunner(
-            {"podman inspect": (124, "", "runner timeout after 30s: no such")}
-        )
-        with self.assertRaises(wl.WhisperLifecycleError):
-            wl.inspect_whisper(runner)
-
-    def test_timed_out_pid_probe_does_not_confirm_exit(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            pid_path = Path(tmp) / "ollama.pid"
-            pid_path.write_text("4242", encoding="ascii")
-            runner = RecordingRunner({"kill": (124, "", "runner timeout after 15s")})
-            self.assertFalse(verify_pid_gone(pid_path, runner=runner))
 
 
 class StallingSocket:

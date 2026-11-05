@@ -10,6 +10,15 @@ Instagram collections into a personal knowledge library organized by interest
 sections and filtered by the operator's tastes (Phase 2). The backlog is the
 review step on the way there, not the destination.
 
+> **Superseded by the llm-hub migration (2026-11):** every model call now
+> goes to the resident llm-hub services (chat for vision, whisper WS for
+> audio). The isolated-Ollama lifecycle, the Whisper stop/restore
+> coordination, the GPU lease and the swap-retry machinery described
+> below were REMOVED (task T3 of
+> `odd/tasks/tiktok-ingest-llm-hub.md`); the sections that describe them
+> are kept as history. There is no GPU residency overlap to manage and no
+> swap gate to trip.
+
 ## Current foundation
 
 The processing engine already provides:
@@ -100,10 +109,14 @@ run-collection.sh
 - Reuse existing stage functions and fingerprints rather than adding another job
   ledger.
 - Coordinate the isolated Ollama lifecycle under explicit consent.
+  *(Superseded by the llm-hub migration: no Ollama lifecycle exists.)*
 - Add bounded, identity-checked management of the known shared Whisper service so
   the normal path can stop it for vision and restore it for audio. Restoration
   failure blocks progress and remains visible.
-- Stop the affected resource window after a fired gate; never retry automatically.
+  *(Superseded by the llm-hub migration: whisper is a resident llm-hub
+  unit and is never stopped or restored.)*
+- Stop the affected resource window after a failed request; never retry
+  automatically. (Kept; the gate wording is historical.)
 - Produce an aggregate progress report without making it a second state authority.
 
 ### Work package 0.3 — Automatic text synthesis
@@ -138,8 +151,11 @@ run-collection.sh
 - [ ] Recommendation links are excluded and collection completeness is reported
       honestly.
 - [ ] The operator performs no normal technical command between stages.
-- [ ] Vision and Whisper never overlap in GPU residency.
-- [ ] Isolated Ollama cleanup and shared Whisper restoration are positively checked.
+- [x] Vision and Whisper never overlap in GPU residency.
+      *(Superseded: both models are RESIDENT together on llm-hub; there is
+      no residency overlap to manage since the 2026-11 migration.)*
+- [x] Isolated Ollama cleanup and shared Whisper restoration are positively checked.
+      *(Superseded: that machinery was removed; nothing needs cleanup.)*
 - [ ] Only sanitized evidence text reaches the configured text API.
 - [ ] Provider failure and process interruption preserve resumable progress.
 - [ ] Re-running the same collection performs zero unnecessary audiovisual work.
@@ -147,13 +163,14 @@ run-collection.sh
 
 ## Stability track
 
-**Outcome:** a run either finishes or stops with an explicit, resumable outcome,
-and the shared Whisper service is never left stopped. This track runs alongside
-the product phases and comes before any further orchestration feature work.
+**Outcome:** a run either finishes or stops with an explicit, resumable outcome.
+This track runs alongside the product phases and comes before any further
+orchestration feature work. *(The "shared Whisper service is never left
+stopped" clause is historical: since the llm-hub migration no service is
+ever stopped by a run.)*
 
 Review baseline (2026-11-03): 944 tests passing, all with fakes; no live
-integration coverage. Recent fixes cluster on Whisper restoration in individual
-failure branches and on curses terminal handling.
+integration coverage. Recent fixes cluster on curses terminal handling.
 
 ### S1 — Nothing can hang (done)
 
@@ -174,7 +191,11 @@ failure branches and on curses terminal handling.
   a global timer would only duplicate the per-stage deadlines.
 - Coverage: `tests/test_bounded_calls.py`.
 
-### S2 — One owner for the GPU swap (done)
+### S2 — One owner for the GPU swap (done; machinery REMOVED 2026-11)
+
+> Superseded by the llm-hub migration: `gpu_lease.py`, its marker and the
+> startup reconcile were deleted. Stale `active_gpu_lease.json` files in
+> old state roots are simply ignored.
 
 - `gpu_lease.py` owns every Whisper stop and restore: exactly one start per
   window, no restore after an interruption inside the stop, and one shared
@@ -207,6 +228,7 @@ failure branches and on curses terminal handling.
 - Done: the GPU lease is built in one place (`engine.lease_from_stages`) for
   the primary swap and the swap retry. Restore outcome mapping stays per
   driver because each emits its own pinned messages.
+  *(Removed with the lease in the llm-hub migration.)*
 - Done: `pipeline.py` renamed to `fetch.py`.
 - Original plan:
 - Extract a stage engine (items + phase in, outcomes out) with no TUI and no
@@ -216,11 +238,13 @@ failure branches and on curses terminal handling.
   `GuidedRun._execute_collection_phase` and keep swap-retry logic in one place.
 - Rename `pipeline.py` to reflect what it does (URL fetch and validation).
 
-### S4 — Realistic gates and live checks (done)
+### S4 — Realistic gates and live checks (done; gates REMOVED 2026-11)
 
 - Done: swap gate trips over 512 MiB only while swap I/O exceeds 1 MiB/s;
   1024 MiB always trips. The cgroup option was dropped: the isolated Ollama
   is a direct child process with no cgroup of its own.
+  *(Superseded by the llm-hub migration: the swap gate, the VRAM gates and
+  `--swap-limit-mib` were removed; vision is served by a resident model.)*
 - Done: opt-in live smoke test `tests/test_live_smoke.py`
   (`TIKTOK_INGEST_LIVE`, `TIKTOK_INGEST_LIVE_URL`,
   `TIKTOK_INGEST_LIVE_COLLECTION`).
@@ -310,32 +334,26 @@ Phase requirements: [Phase 3 PRD](prds/PHASE-3-DESTINATIONS-PRD.md).
 
 **Outcome:** large collections can be processed in a reasonable time.
 
-Measured on 2026-11-04 (live `series-7455…` run, 19 items): the vision model
-itself is fast (median 2 s per frame, image encode 13–53 ms, GPU mostly idle)
-but the machine has 17 GiB RAM, and sustained swap I/O (~4.6 MiB/s) repeatedly
-trips the S5 swap gate during vision windows. Each trip stops the window and
-the retry reloads the model; the isolated llama-server started 20 times in one
-afternoon and one 47-frame video took over two wall-clock hours of which ~90 s
-were inference. The bottleneck is the gate/reload thrash, not the model.
+RESOLVED by the llm-hub migration (2026-11): vision runs on the resident
+llm-hub chat model (~9 s per frame measured on the 27B), there is no
+per-video model load, no swap gate and no retry window. The historical
+measurement below is kept for context only.
 
-- Vision model residency (DONE 2026-11-04, D-11/FR-26): the bounded
-  swap-retry now runs as ONE batched window per batch — one consent, one
-  cooldown, one whisper stop, ONE isolated-Ollama start (the model loads
-  once for every covered id) — instead of one full lifecycle per video.
-  Measured motivation: ~20 isolated `llama-server` starts in one
-  afternoon; a 47-frame video took 2 h wall for ~90 s inference.
-- Evaluate a smaller vision model (for example Qwen2.5-VL 3B) or a leaner
-  quant: less RAM pressure means fewer gate trips; A/B quality on the
-  benchmark fixtures before switching.
+Measured on 2026-11-04 (live `series-7455…` run, 19 items, pre-migration):
+the vision model itself was fast but the 17 GiB machine's sustained swap
+I/O repeatedly tripped the S5 swap gate; the isolated llama-server started
+20 times in one afternoon and one 47-frame video took over two wall-clock
+hours of which ~90 s were inference. The bottleneck was the gate/reload
+thrash, not the model — which is why the runtime moved to llm-hub.
+
+- Vision model residency: DONE and then superseded — the swap-retry batched
+  window and its cooldown were removed with the rest of the swap machinery;
+  the model is permanently resident on llm-hub now.
 - Reduce frames per video (scene-detection sampling toward 12–16 frames
-  instead of ~48): less time under memory pressure and less total inference.
+  instead of ~48): still open; less total inference per video.
 - Measure minutes per video wall-clock vs inference on a real collection once
   the Phase 0 checklist is closed, and project the time for the operator's
   real collection sizes.
-- Operational practice (2026-11-04): run collections in an exclusive time
-  window when the desktop is otherwise idle — the 17 GiB machine trips the
-  swap gate far less when no other workload holds memory. Scheduled or
-  unattended runs stay deferred.
 - Reduce operator interventions per collection (single consent per run).
 - Resume the incomplete collection scan before starting new collections.
 

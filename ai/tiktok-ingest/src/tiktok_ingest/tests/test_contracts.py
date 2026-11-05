@@ -145,6 +145,50 @@ class ProvenanceHeaderTests(unittest.TestCase):
             )
 
 
+class HistoricalManifestCompatTests(unittest.TestCase):
+    """S7: manifests written before the llm-hub migration still load.
+
+    Historical ``meta.json`` files carry a ``swap_retry`` object and a
+    typed gate ledger under ``resource_gates``. The migration removed the
+    machinery that WROTE them, but loading old artifacts must keep
+    working (a re-run simply recomputes stages; old fingerprints stop
+    matching).
+    """
+
+    def test_historical_swap_retry_and_gate_ledger_still_load(self) -> None:
+        data = fixtures.sample_manifest().to_dict()
+        data["resource_gates"] = {
+            "free_vram_gate_mib": 20480,
+            "vision": {
+                "gates": [
+                    {
+                        "gate": "swap_delta",
+                        "passed": False,
+                        "detail": {
+                            "delta_bytes": 700 * 1024 * 1024,
+                            "limit_bytes": 512 * 1024 * 1024,
+                        },
+                    }
+                ],
+                "cleanup": {"release_verified": True},
+            },
+        }
+        data["swap_retry"] = {
+            "original": {
+                "stage_record": None,
+                "failure_reason": "swap_delta gate fired",
+            },
+            "consent": {"granted": True},
+            "attempt": {"outcome": "complete"},
+        }
+        restored = JobManifest.from_dict(json.loads(json.dumps(data)))
+        self.assertEqual(restored.swap_retry, data["swap_retry"])
+        gates = restored.resource_gates["vision"]["gates"]
+        self.assertEqual(gates[0]["gate"], "swap_delta")
+        # Round-trip keeps the historical evidence byte-equal.
+        self.assertEqual(restored.to_dict()["swap_retry"], data["swap_retry"])
+
+
 class InventoryAndProcessedTests(unittest.TestCase):
     def test_inventory_entry_round_trip_and_validation(self) -> None:
         from tiktok_ingest.contracts import InventoryEntry

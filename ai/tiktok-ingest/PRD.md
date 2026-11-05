@@ -3,6 +3,14 @@
 Status: **Draft, approved for implementation planning; hybrid ingestion revision for discussion.** Not implemented. This update authorizes documentation only, not implementation or SDD.
 Owner: Bruno. Last updated: 2026-09-16.
 
+> **Superseded by the llm-hub migration (2026-11):** every model call now
+> goes to the resident llm-hub services (chat for vision at :8081,
+> whisper WS at :8765 with health at :8766, both user systemd units).
+> The isolated-Ollama provisioning, the single-GPU whisper/vision
+> sequencing and the GPU-release rules this PRD describes are history:
+> both models are resident together and tiktok-ingest manages no model
+> runtime. See README.md "Model serving — llm-hub".
+
 **Design in brief:** use the browser only to inventory/update a collection and handle human authentication. Use cached HTTP metadata and a capability-probed media/subtitle extractor for individual items; analyse downloaded media locally, then send only evidence markdown to the reasoning API. Mandatory visual analysis remains unchanged; additional visual enrichment is optional, not a replacement for that requirement.
 
 ## 1. Problem

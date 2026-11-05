@@ -11,19 +11,41 @@ contracts). Operator-facing operational procedures (end-to-end flow,
 backlog review lifecycle, verify semantics and their limits) live in
 [OPERATIONS.md](OPERATIONS.md).
 
+## Model serving — llm-hub (2026-11 migration)
+
+Every model call goes to the RESIDENT llm-hub services; tiktok-ingest
+manages no model runtime at all (no Ollama, no GPU lease, no swap retry,
+no container lifecycle — that machinery was removed):
+
+- **llm-hub-chat** — vision (`/v1/chat/completions`, model `qwen-3.8-27b`,
+  resident multimodal) at `http://127.0.0.1:8081/v1`, and the same server
+  family serves synthesis through the separately configured text API
+  (`TIKTOK_INGEST_TEXT_*` env).
+- **llm-hub-whisper** — transcription at `ws://127.0.0.1:8765/ws/transcribe`
+  with its health endpoint at `http://127.0.0.1:8766/health`
+  (faster-whisper large-v3, CUDA float16, always running; both models fit
+  in 24 GiB next to each other).
+
+Both are user systemd units — `llm-hub-chat.service` and
+`llm-hub-whisper.service` (enabled by llm-hub's `install.sh`). If a
+service is down, the corresponding stage blocks fail-closed with the
+exact `systemctl --user start <unit>` instruction; tiktok-ingest never
+starts, stops or inspects any container. FFmpeg/ffprobe (CPU preparation)
+run via podman from llm-hub's whisper image
+(`localhost/llm-hub_whisper-service:latest`).
+
 ## What Milestone 1 contains
 
 - `src/tiktok_ingest/config.py` — adopted defaults as constants and frozen
-  dataclasses: `VISION_MODEL` (`qwen3.5:9b`, with `qwen3.8:27b` reserved for
-  high-density rereads only, never default), `WHISPER_MODEL` (`large-v3`),
+  dataclasses: `LLM_HUB_CHAT_API_BASE` / `VISION_MODEL` (`qwen-3.8-27b`
+  served by llm-hub llama-chat), `WHISPER_MODEL` (`large-v3`),
   `WHISPER_LANGUAGE` (`es`, fixed), full-audio-primary transcript policy
   (native subtitles auxiliary), hybrid sampling (64 baseline + 8 targeted),
   operating budgets (batch 5, media 10 min / 250 MiB, fetch 5 min, HTTP 2
-  concurrent metadata / 24 h TTL, CPU prep 20 min / 2 GiB, vision 10 min,
-  audio 10 min, 10 GiB working cache) and isolation/gate constants
-  (isolated Ollama `0.34.1` on loopback, global `0.14.2` untouched, 20480
-  MiB free-VRAM gate, 512 MiB swap-delta limit, 12288 MiB VRAM delta for
-  `qwen3.5:9b`, never Whisper+vision GPU-resident together).
+  concurrent metadata / 24 h TTL, CPU prep 20 min / 2 GiB, vision 15 min,
+  audio 10 min, 10 GiB working cache) and the llm-hub-whisper WS/health
+  endpoints. (The former isolated-Ollama provisioning and VRAM/swap gate
+  constants were removed by the 2026-11 llm-hub migration.)
 - `src/tiktok_ingest/contracts.py` — stage outcome enum (`complete`,
   `partial`, `blocked`, `unsupported`, `failed`, `budget_exceeded`,
   `not_applicable`; every outcome carries a reason), fixed taxonomy roots
@@ -83,7 +105,8 @@ backlog review lifecycle, verify semantics and their limits) live in
   exposed in the sampling manifest.
 - `src/tiktok_ingest/prepare.py` — **CPU preparation in the pinned
   container**: FFmpeg/ffprobe run via podman from
-  `localhost/voice-assistant_whisper:latest`. The FULL immutable image ID
+  `localhost/llm-hub_whisper-service:latest` (llm-hub's whisper image; the
+  same ffmpeg 4.4.2 as the benchmark). The FULL immutable image ID
   is resolved read-only at runtime before first use and recorded
   (`51b152706d…` is a cross-check prefix only — never a digest source);
   resolution failure fails closed. Containers run `--network none`,
@@ -108,30 +131,22 @@ backlog review lifecycle, verify semantics and their limits) live in
 
 ## What Milestone 3 adds
 
-- `src/tiktok_ingest/vision.py` — gated local vision over prepared frames
-  through the ISOLATED Ollama runtime (`qwen3.5:9b`, loopback 11435):
-  benchmark resource gates via a one-window `GateLedger` (free VRAM, VRAM
-  delta, swap delta, zero CPU offload, unload verification), bounded
-  targeted rereads (≤ 8) inside the same residency, whisper-stopped
-  precheck (read-only), `video.md` with visible uncertainty flags, stage
-  record + resume fingerprint. No retries after a gate fires.
-  Gate-failure cleanup: any non-complete ending (fired gate, handled
-  error, missed deadline, operator interrupt) runs ONE bounded,
-  idempotent unload attempt for this stage's model on this isolated
-  server (never new inference, never other sessions' processes), then
-  verifies empty `/api/ps` residency and observed GPU release. The
-  cleanup report is recorded in `resource_gates["vision"]["cleanup"]`
-  and the outcome; the original failure and any cleanup failure are
-  BOTH preserved, and release is claimed only with positive evidence.
-  Whisper is never stopped or restored by this code.
+- `src/tiktok_ingest/vision.py` — vision over prepared frames through the
+  RESIDENT llm-hub chat service (OpenAI-compatible
+  `/v1/chat/completions`, model `qwen-3.8-27b`, one request per frame
+  plus bounded targeted rereads ≤ 8): readiness precheck (llm-hub must
+  answer `GET /v1/models` and serve the model, else `blocked`),
+  `video.md` with visible uncertainty flags, stage record + resume
+  fingerprint, 15-minute stage deadline. This stage never loads,
+  unloads, starts or stops any model or container. (Superseded: the
+  former isolated-Ollama runtime, VRAM/swap gates, whisper-stopped
+  precheck and unload-verification cleanup — removed 2026-11.)
 - `src/tiktok_ingest/whisper_client.py` — full-audio transcription through
-  the reused whisper WebSocket service (`large-v3`, fixed `es`, one
-  connection per job, health precheck): `audio.md` preserving method,
-  timing provenance and no-speech-vs-missing distinctions; fails closed.
-- `src/tiktok_ingest/ollama_runtime.py` — explicit `install-ollama`
-  (sha256 AND byte-size verified, isolated `HOME`/`OLLAMA_MODELS`) and
-  `import-model` (digest-verified copy from the global store, read-only
-  source). Never runs implicitly.
+  the RESIDENT llm-hub-whisper WebSocket service (`large-v3`, fixed `es`,
+  one connection per job, health precheck at
+  `http://127.0.0.1:8766/health`): `audio.md` preserving method, timing
+  provenance and no-speech-vs-missing distinctions; fails closed with a
+  message naming `systemctl --user start llm-hub-whisper`.
 
 ## What Milestone 4 adds
 
@@ -242,27 +257,21 @@ are never re-inferred implicitly.
 
 Consent asks exactly ONE run-plan window covering the whole tanda: it
 names every frozen id and canonical URL, the full stage sequence, the
-bound KNOWN whisper service identity and its stop/restore, the isolated
-Ollama lifecycle, the batch limits, and the text API endpoint/model when
-automatic synthesis applies. On grant, the covered per-phase windows
-(`tanda`, `prepare`, `fetch`, `gpu`, `whisper-stop`, `whisper-restore`,
-and the configured `synthesis-api`) are discharged automatically (audited
-as covered, never fabricated human yeses). Verification keeps its OWN
-grouped decision: candidate URLs only exist after synthesis, so ONE
-separate verification window names every exact validated URL before any
-retrieval. Denial, EOF, cancellation or a non-interactive environment
-stop without assuming consent; there is no global `--yes`; an
-authorization never persists into a later invocation. Any window whose
-ids/destinations/service fall outside the planned scope is asked as
-genuinely new scope and never auto-granted. The GPU window's grant
-covers starting AND stopping the isolated Ollama server this command
-started (stop runs at window end or on failure); a preexisting server
-answering on the isolated port is never adopted. The KNOWN shared
-whisper service is coordinated automatically when it is running: its
-identity is verified read-only before the run plan, it is stopped before
-vision and restored after the GPU window (on success, failure or
-interruption) under that grant, so a single-video run needs no manual
-`podman` commands. Each stage narrates a start/finish line with elapsed
+batch limits, and the text API endpoint/model when automatic synthesis
+applies. On grant, the covered per-phase windows (`tanda`, `prepare`,
+`fetch`, `gpu`, and the configured `synthesis-api`) are discharged
+automatically (audited as covered, never fabricated human yeses).
+Verification keeps its OWN grouped decision: candidate URLs only exist
+after synthesis, so ONE separate verification window names every exact
+validated URL before any retrieval. Denial, EOF, cancellation or a
+non-interactive environment stop without assuming consent; there is no
+global `--yes`; an authorization never persists into a later invocation.
+Any window whose ids/destinations fall outside the planned scope is
+asked as genuinely new scope and never auto-granted. Vision and audio
+are plain requests to the resident llm-hub services: nothing is
+started, stopped, loaded or unloaded, and a missing service blocks
+fail-closed with the `systemctl --user start llm-hub-chat` /
+`llm-hub-whisper` instruction. Each stage narrates a start/finish line with elapsed
 time and the run ends with a readable summary table; all of that UI is
 stderr-only, so the stdout JSON report keeps its exact shape.
 
@@ -337,80 +346,15 @@ Key boundaries:
   ALL. Fixed slices of at most five ids are RESOURCE WINDOWS visited
   ONCE per phase (a preparation window, an audio window, a vision
   window), never complete-pipeline batches. NO synthesis request is
-  made until every original vision window and its separately consented
-  retry have ended. Audio eligibility is preparation completion, NOT
-  vision completion. A failed vision window stays closed: its remaining
-  same-window ids stay pending EVEN after a successful retry, while
-  later frozen normal windows keep the existing attempt policy. Only a
-  restoration failure, an unknown interrupt, or a global precondition
+  made until every vision window has ended. Audio eligibility is
+  preparation completion, NOT vision completion. A failed vision window
+  stays closed: its remaining same-window ids stay pending while later
+  frozen normal windows keep the existing attempt policy. Only a
+  boundary failure, an interrupt, or a global precondition
   blocks ALL later effects, grouped verification included. The loop is
   bounded by construction and ids that become eligible later are never
   absorbed without a new scope decision. Progress reporting is a view
   derived from the product's stores — never a second ledger.
-- **Whisper coordination** (`src/tiktok_ingest/whisper_lifecycle.py`):
-  when the known shared service (`voice-assistant-whisper`) is running,
-  collection-run verifies its identity/configuration read-only BEFORE
-  the run-plan window and binds that exact identity into the grant;
-  the coordinator then asks TWO separate windows BEFORE any mutation —
-  `whisper-stop`
-  (bounded `podman stop --timeout 30`, positively verified) and a
-  STANDING `whisper-restore` authorization for the recovery of the SAME
-  service/configuration — both discharged by the plan grant when (and
-  only when) the service text matches the binding; a drifted
-  configuration is forwarded to the human as new scope. Denial of
-  either blocks BEFORE any mutation.
-  The restore runs under that prior authorization once the GPU window
-  ends — normally, on failure, or after an interruption (a Ctrl-C never
-  grants a window and never triggers a new prompt) — UNLESS the
-  interruption lands inside the stop itself: then the stop result is
-  UNKNOWN, no restore is attempted (the stop cannot be verified as
-  ours/completed) and manual verification of the exact service is
-  required. In every restore that does run: SAME container,
-  identity/config verification, and a bounded read-only health wait
-  before the service is reported restored. A failed
-  restore/health — or an interruption leaving the restore incomplete —
-  blocks ALL further progress, reports the actual partial state and
-  promises no rollback. `guided-run` uses the SAME coordination: its CLI
-  supplies the whisper lifecycle hooks, so a running known service is
-  stopped before vision and restored after the window under its
-  run-plan grant. Only a programmatic caller that builds its own
-  `StageFunctions` without those hooks keeps the operator-managed
-  behavior (blocks with instructions).
-  In the collection flow the shared service must already be RUNNING and
-  healthy for the AUDIO phase, which runs BEFORE any vision stop cycle;
-  each vision resource window then owns its own bounded stop/restore
-  cycle.
-- **Bounded vision swap-retry** (`src/tiktok_ingest/swap_cooldown.py`,
-  Phase 0 addendum): when a vision resource window's vision stage
-  fails ONLY the `swap_delta` gate with verified cleanup (decided from
-  the persisted TYPED gate id, never reason prose), collection-run may
-  offer ONE
-  extra vision attempt per video per invocation — never covered by the
-  run-plan grant: a dedicated `vision-swap-retry` consent window names
-  the id, the measured overshoot, the full budget, the whisper
-  stop/restore under this new lifecycle authority and the effects of a
-  second failure. Before the prompt, the vision window's standing
-  restore is positively verified (SAME service, healthy). After
-  consent, a
-  READ-ONLY cooldown samples the cumulative swap I/O counters every 5 s
-  (admission floor 60 s, hard cap 180 s that instability or drift never
-  restarts, stability = 3 consecutive intervals ≤ 1 MiB/s; unreadable or
-  decreasing counters fail closed distinctly from expiry; truthful 15 s
-  narration to stderr). Re-admission then stops whisper again under the
-  retry authority, re-checks the identical configuration and fresh free
-  VRAM (final-conditions drift resets the stability count inside the
-  SAME cap, never a fresh 180 s), and the single vision-only re-run
-  reuses fetch/prepare and never repeats completed audio/synthesis/
-  verify. The original failure evidence and partial artifacts are
-  archived unmodified (`vision-attempt-N/` + `meta.json` `swap_retry`,
-  append-only — no second ledger); the final stdout JSON gains an
-  additive per-video retry object. A fired gate still ends the original
-  GPU window: remaining same-window ids stay pending EVEN after a
-  successful retry, a failed second attempt ends the matter (no third,
-  no re-prompt), and retry exhaustion stays video/window-scoped — never
-  relabeled as the global service-restoration hard stop. Waiting is not
-  a cure: the cooldown measures, it promises nothing (V3 real-GPU
-  validation remains a separate authorization).
 - **Automatic synthesis** (`src/tiktok_ingest/synthesis_api.py`): runs
   as its OWN collection phase, only after the vision phase has ended
   for the whole frozen selection; each id still needs COMPLETE vision
@@ -440,9 +384,8 @@ Key boundaries:
   exact eligible ids and canonical URLs with stage reuse states,
   the collection-wide phase order (preparation ALL → audio ALL →
   vision ALL → eligible synthesis ALL) crossed in resource windows of
-  at most five ids, the whisper stop/restore authority for
-  the exact service identity bound read-only before the plan, the
-  synthesis endpoint/model, and the retry policy. Stage windows
+  at most five ids, the synthesis endpoint/model, and the retry policy.
+  Stage windows
   provably inside that scope (tanda, fetch, prepare, gpu,
   whisper-stop, whisper-restore, synthesis-api) are discharged by the
   run authorization wrapper and audited as `covered_by_run_plan` —
@@ -655,7 +598,7 @@ discover` rejects namespace-package start directories, so the start
 directory is the test package and `src` is put on `PYTHONPATH`.)
 
 Expected result: all tests pass (`OK`). The suite is fixture-only: no
-network, GPU, podman, ollama or model weights. Every external boundary
+network, GPU, podman or model weights. Every external boundary
 (subprocess, HTTP) is a fake in tests.
 
 ## Explicitly NOT implemented yet (Milestone 5)
@@ -664,13 +607,12 @@ network, GPU, podman, ollama or model weights. Every external boundary
   results, operational instructions for a real authorized run.
 
 Also not exercised yet: the REAL trial of the Phase 0 command — the
-live browser scan, automatic synthesis against a configured text API,
-whisper stop/restore coordination and the whole one-command journey
-exist and are fixture-tested (see "Phase 0 — One collection, one
-command"), but running them for real requires separate operator
-authorization per the Phase 0 PRD. GPU inference commands and resource
-gates exist, but the fixture suite does not exercise real GPU work.
-Adjacent workloads must not be stopped implicitly. Synthesis through
+live browser scan, automatic synthesis against a configured text API
+and the whole one-command journey exist and are fixture-tested (see
+"Phase 0 — One collection, one command"), but running them for real
+requires separate operator authorization per the Phase 0 PRD. Model
+requests go to the resident llm-hub services; the fixture suite does
+not exercise real GPU work. Adjacent workloads are never touched. Synthesis through
 `guided-run` remains operator-supplied (`--from-file`); only
 `collection-run` adds the automatic OpenAI-compatible adapter, and its
 output still passes the same strict validation.

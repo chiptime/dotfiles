@@ -3,22 +3,21 @@
 Covers the Phase 0 application layer end to end with fakes: the
 browser controller double, stage doubles that seed REAL durable state
 (so the product's fingerprints drive resume), the scripted/recording
-consent provider, the fake text-API transport and the fake podman
-runner. Zero network, zero browser, zero GPU, zero containers.
+consent provider and the fake text-API transport. Zero network, zero
+browser, zero GPU, zero containers.
 
 The TWO-decision authorization contract proven here (user-approved
 2026-09-30): ONE browser grant naming the readiness checkpoint and the
 snapshot/audit writes; a press-Enter readiness checkpoint that is NOT
 a yes/no authorization; ONE whole-current-run plan grant over the
 FROZEN inventory (exact ids/URLs/reuse states, batches of <= 5, each
-id attempted exactly once, whisper identity bound read-only, synthesis
-endpoint+model named upfront, verification deferred); and ONE grouped
+id attempted exactly once, synthesis endpoint+model named upfront,
+verification deferred); and ONE grouped
 verification authorization showing every exact validated candidate
 URL. Stage windows covered by the plan are discharged by the run
 authorization wrapper and audited as covered — never fabricated human
 yeses. Genuinely new scope (unknown kinds, excess ids, unapproved
-destinations, whisper config drift) is forwarded to the human and
-never auto-granted.
+destinations) is forwarded to the human and never auto-granted.
 """
 
 from __future__ import annotations
@@ -65,7 +64,6 @@ from tiktok_ingest.tests.fixtures import (
     write_sanitized_evidence,
 )
 from tiktok_ingest.tests.test_guided import fake_id, seed_job
-from tiktok_ingest.whisper_lifecycle import WhisperServiceInfo
 
 COLLECTION_URL = "https://www.tiktok.com/@fixture_author/collection/run-col"
 REF = parse_collection_url(COLLECTION_URL)
@@ -218,24 +216,6 @@ class SeedingConsent(RecordingConsent):
             self.seeded[video_id] = dict(stages)
 
 
-KNOWN_INFO = WhisperServiceInfo(
-    name="voice-assistant-whisper",
-    image="localhost/voice-assistant_whisper:latest",
-    state="running",
-    running=True,
-    env=(("COMPUTE_TYPE", "float16"), ("DEVICE", "cuda")),
-)
-
-OTHER_INFO = dataclasses.replace(KNOWN_INFO, name="some-other-whisper")
-
-# Same known name/image (passes verify_known_service) with a DIFFERENT
-# identity-relevant configuration: a run plan bound to DRIFTED_INFO must
-# NOT cover a stop/restore of the real KNOWN_INFO service.
-DRIFTED_INFO = dataclasses.replace(
-    KNOWN_INFO, env=(("COMPUTE_TYPE", "int8"), ("DEVICE", "cuda"))
-)
-
-
 def page_html(items: int) -> str:
     # Verified live shape: the collection container is marked with
     # data-e2e=collection-item-list (matches the browser defaults).
@@ -291,38 +271,16 @@ class CollectionStages:
     def __init__(
         self,
         *,
-        whisper_running: bool = False,
-        whisper_info: WhisperServiceInfo | None = KNOWN_INFO,
-        whisper_infos: list[WhisperServiceInfo | None] | None = None,
-        whisper_stop_fails: bool = False,
-        whisper_stop_raises_ki: bool = False,
-        whisper_restore_fails: bool = False,
-        whisper_restore_raises_ki: bool = False,
         whisper_healthy: bool = True,
-        ollama_already_running: bool = False,
         verify_emits_pending: bool = True,
         fetch_fails: bool = False,
         vision_raises: BaseException | None = None,
     ) -> None:
         self.calls: list[str] = []
-        self.whisper_running = whisper_running
-        self.whisper_info = whisper_info
-        # Optional scripted inspect sequence (popped per inspect call):
-        # used to make the plan-time binding see a DIFFERENT service
-        # configuration than the batch-time coordination does.
-        self.whisper_infos = list(whisper_infos) if whisper_infos else None
-        self.whisper_stop_fails = whisper_stop_fails
-        self.whisper_stop_raises_ki = whisper_stop_raises_ki
-        self.whisper_restore_fails = whisper_restore_fails
-        self.whisper_restore_raises_ki = whisper_restore_raises_ki
         self.whisper_healthy = whisper_healthy
-        self.ollama_already_running = ollama_already_running
         self.verify_emits_pending = verify_emits_pending
         self.fetch_fails = fetch_fails
         self.vision_raises = vision_raises
-        self.whisper_stops = 0
-        self.whisper_restores = 0
-        self.server_stops = 0
 
     def functions(self) -> StageFunctions:
         return StageFunctions(
@@ -332,15 +290,7 @@ class CollectionStages:
             audio=self.do_audio,
             synthesize=self.do_synthesize_unreachable,
             verify=self.do_verify,
-            whisper_stopped=self.do_whisper_stopped,
             whisper_health=self.do_whisper_health,
-            ollama_reachable=lambda: self.ollama_already_running,
-            ollama_start=self.do_ollama_start,
-            ollama_wait_ready=lambda handle: "0.34.1",
-            ollama_stop=self.do_ollama_stop,
-            whisper_inspect=self.do_whisper_inspect,
-            whisper_stop=self.do_whisper_stop,
-            whisper_restore=self.do_whisper_restore,
         )
 
     # -- stage doubles (seed REAL state) --------------------------------
@@ -428,63 +378,13 @@ class CollectionStages:
         mark_stage(state, video_id, "verify")
         return FakeOutcome("complete")
 
-    # -- whisper lifecycle hooks (doubles) ------------------------------
-
-    def do_whisper_stopped(self) -> None:
-        self.calls.append("whisper-stopped-check")
-        if self.whisper_running:
-            raise RuntimeError(
-                "stop the whisper service first: still running: "
-                "['voice-assistant-whisper']"
-            )
+    # -- service health double -------------------------------------------
 
     def do_whisper_health(self) -> tuple[bool, str]:
         self.calls.append("whisper-health-check")
         if self.whisper_healthy:
             return True, "healthy"
-        return False, "whisper health endpoint unreachable: fixture"
-
-    def do_whisper_inspect(self) -> WhisperServiceInfo | None:
-        self.calls.append("whisper-inspect")
-        if self.whisper_infos is not None:
-            info = self.whisper_infos.pop(0)
-            return info
-        if not self.whisper_running:
-            return None
-        return self.whisper_info
-
-    def do_whisper_stop(self, info: WhisperServiceInfo) -> WhisperServiceInfo:
-        self.calls.append("whisper-stop-op")
-        if self.whisper_stop_raises_ki:
-            # The interruption lands INSIDE the stop: its result is
-            # unknown, so the completed-stop counter must not move.
-            raise KeyboardInterrupt()
-        self.whisper_stops += 1
-        if self.whisper_stop_fails:
-            raise RuntimeError("fixture: stop did not verify")
-        # A verified stop changes the world: later stopped-checks pass.
-        self.whisper_running = False
-        return dataclasses.replace(info, running=False, state="exited")
-
-    def do_whisper_restore(self, info: WhisperServiceInfo) -> WhisperServiceInfo:
-        self.calls.append("whisper-restore-op")
-        self.whisper_restores += 1
-        if self.whisper_restore_raises_ki:
-            raise KeyboardInterrupt()
-        if self.whisper_restore_fails:
-            raise RuntimeError("fixture: restore failed")
-        self.whisper_running = True
-        return dataclasses.replace(info, running=True, state="running")
-
-    # -- ollama lifecycle -----------------------------------------------
-
-    def do_ollama_start(self) -> object:
-        self.calls.append("ollama-start")
-        return object()
-
-    def do_ollama_stop(self, handle: object) -> None:
-        self.calls.append("ollama-stop")
-        self.server_stops += 1
+        return False, "llm-hub-whisper health endpoint unreachable: fixture"
 
 
 def _run_dir_of(state: StateRoot, video_id: str) -> Path:
@@ -555,7 +455,6 @@ class CollectionRunTestCase(unittest.TestCase):
             browser_profile_base=self.profile_base,
             api_transport=api_transport,
             env=env if env is not None else API_ENV,
-            podman_runner=lambda argv, timeout=None: (0, "", ""),
             stages=stages.functions(),
             rescan=rescan,
             retry_failed=retry_failed,
@@ -790,7 +689,7 @@ class TestHappyPath(CollectionRunTestCase):
 
 class TestCollectionPhaseBarriers(CollectionRunTestCase):
     def test_global_order_across_seven_ids_and_two_resource_windows(self) -> None:
-        stages = CollectionStages(whisper_running=True)
+        stages = CollectionStages()
         consent = RecordingConsent()
         code, report, transport = self.run_collection(
             stages, consent, browser_html=page_html(7), shared_trace=True
@@ -806,8 +705,6 @@ class TestCollectionPhaseBarriers(CollectionRunTestCase):
         for before, after in zip(list(positions), list(positions)[1:]):
             self.assertLess(max(positions[before]), min(positions[after]), calls)
         self.assertEqual(consent.kinds, HUMAN_KINDS)
-        self.assertEqual(stages.whisper_stops, 2)
-        self.assertEqual(stages.whisper_restores, 2)
         self.assertEqual(len(transport.requests), 7)
         for batch in report["batches"]:
             self.assertLessEqual(len(batch["ids"]), 5)
@@ -836,24 +733,6 @@ class TestCollectionPhaseBarriers(CollectionRunTestCase):
         self.assertNotIn(fake_id(0), report["verification"]["ids"])
         self.assertEqual(len(Backlog(self.state).entries()), 6)
 
-    def test_restore_failure_blocks_previously_ready_mixed_batch(self) -> None:
-        seed_scan_for_run(self.state, [0, 1])
-        seed_job(
-            self.state, fake_id(0),
-            complete=("fetch", "prepare", "vision", "audio"), evidence=True,
-        )
-        stages = CollectionStages(whisper_running=True, whisper_restore_fails=True)
-        consent = RecordingConsent()
-        code, report, transport = self.run_collection(
-            stages, consent, browser_html=page_html(2)
-        )
-        self.assertEqual(code, 1)
-        self.assertIn("whisper restoration failed", report["hard_stop_reason"])
-        self.assertEqual(transport.requests, [], "no synthesis, including ready ids")
-        self.assertNotIn("verify", consent.kinds)
-        self.assertEqual(Backlog(self.state).entries(), [])
-
-
 # --------------------------------------------------------------------------
 # The run-plan grant (decision 2)
 # --------------------------------------------------------------------------
@@ -861,7 +740,7 @@ class TestCollectionPhaseBarriers(CollectionRunTestCase):
 
 class TestRunPlan(CollectionRunTestCase):
     def test_plan_window_names_frozen_scope_policies_and_consequences(self) -> None:
-        stages = CollectionStages(whisper_running=True)
+        stages = CollectionStages()
         consent = RecordingConsent()
         code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 0, report.get("hard_stop_reason"))
@@ -877,9 +756,10 @@ class TestRunPlan(CollectionRunTestCase):
         for n in range(3):
             self.assertIn(f"https://www.tiktok.com/@fixture_author/video/{fake_id(n)}", blob)
         self.assertIn("https://api.example.com/v1", blob, "synthesis endpoint named upfront")
-        self.assertIn(KNOWN_INFO.describe(), blob, "bound whisper identity named upfront")
         operations = " ".join(window.operations)
         self.assertIn("glm-5.3-flash", operations, "synthesis model named upfront")
+        self.assertIn("RESIDENT llm-hub chat", operations, "model backend named upfront")
+        self.assertNotIn("whisper coordination", operations)
         self.assertIn("one additional grouped", operations.lower())
         limits = " ".join(window.limits)
         self.assertIn("exactly ONE batch", limits)
@@ -895,23 +775,15 @@ class TestRunPlan(CollectionRunTestCase):
         self.assertEqual(run_plan["batch_count"], 1)
         self.assertEqual(run_plan["text_api"]["origin"], "https://api.example.com/v1")
         self.assertEqual(run_plan["text_api"]["model"], "glm-5.3-flash")
-        self.assertEqual(run_plan["whisper"]["bound"], KNOWN_INFO.describe())
-        # The binding was a read-only inspect BEFORE the plan window.
-        self.assertLess(
-            stages.calls.index("whisper-inspect"),
-            stages.calls.index("whisper-stopped-check"),
-            "plan-time identity binding precedes any batch coordination",
-        )
 
     def test_plan_denial_runs_no_stage(self) -> None:
-        stages = CollectionStages(whisper_running=True)
+        stages = CollectionStages()
         consent = RecordingConsent(deny={"run-plan"})
         code, report, _ = self.run_collection(stages, consent)
         self.assertEqual(code, 1)
         self.assertIn("run plan denied", report["hard_stop_reason"])
         self.assertEqual(report["batches"], [])
-        self.assertEqual(stages.calls, ["whisper-inspect"], "read-only binding only")
-        self.assertEqual(stages.whisper_stops, 0, "no mutation without the plan grant")
+        self.assertEqual(stages.calls, [], "nothing ran")
         self.assertEqual(Backlog(self.state).entries(), [])
         self.assertEqual(consent.kinds, ["browser", "run-plan"], "no later asks")
 
@@ -1044,8 +916,7 @@ class TestAuthorizationWrapper(CollectionRunTestCase):
             if entry["decision"] == "covered_by_run_plan":
                 self.assertTrue(
                     entry["window"]["kind"]
-                    in ("tanda", "fetch", "prepare", "gpu", "synthesis-api",
-                        "whisper-stop", "whisper-restore"),
+                    in ("tanda", "fetch", "prepare", "gpu", "synthesis-api"),
                     entry,
                 )
             else:
@@ -1064,8 +935,6 @@ class TestAuthorizationWrapper(CollectionRunTestCase):
             batch_cap=5,
             batch_count=1,
             plan_counts={},
-            whisper_bound=None,
-            whisper_note="",
             text_api_origin=None,
             text_api_model=None,
         )
@@ -1097,8 +966,6 @@ class TestAuthorizationWrapper(CollectionRunTestCase):
             batch_cap=5,
             batch_count=1,
             plan_counts={},
-            whisper_bound=None,
-            whisper_note="",
             text_api_origin="https://api.example.com/v1",
             text_api_model="glm-5.3-flash",
         )
@@ -1154,8 +1021,6 @@ class TestAuthorizationWrapper(CollectionRunTestCase):
             batch_cap=5,
             batch_count=1,
             plan_counts={},
-            whisper_bound=None,
-            whisper_note="",
             text_api_origin="https://api.example.com/v1",
             text_api_model="glm-5.3",
         )
@@ -1248,529 +1113,6 @@ class TestAuthorizationWrapper(CollectionRunTestCase):
         self.assertEqual(human5.kinds, ["synthesis-api"])
 
 
-# --------------------------------------------------------------------------
-# Whisper coordination
-# --------------------------------------------------------------------------
-
-
-class TestWhisperCoordination(CollectionRunTestCase):
-    def test_audio_before_stop_and_restore_after_vision(self) -> None:
-        stages = CollectionStages(whisper_running=True)
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 0, report.get("hard_stop_reason"))
-        calls = stages.calls
-        self.assertLess(
-            calls.index("whisper-stop-op"),
-            calls.index("ollama-start"),
-            "verified whisper stop precedes any model load",
-        )
-        self.assertLess(
-            calls.index("ollama-stop"),
-            calls.index("whisper-restore-op"),
-            "restore happens after the isolated server stops",
-        )
-        self.assertLess(
-            calls.index(f"audio:{fake_id(1)}"),
-            calls.index("whisper-stop-op"),
-            "collection audio finishes before any vision stop cycle",
-        )
-        self.assertLess(
-            calls.index(f"vision:{fake_id(1)}"),
-            calls.index("whisper-restore-op"),
-        )
-        self.assertEqual(stages.whisper_stops, 1)
-        self.assertEqual(stages.whisper_restores, 1)
-        # The whisper windows were covered by the plan — no human asks.
-        self.assertEqual(consent.kinds, HUMAN_KINDS)
-        covered = self.covered_kinds(report)
-        self.assertIn("whisper-stop", covered)
-        self.assertIn("whisper-restore", covered)
-        self.assertLess(
-            covered.index("gpu"), covered.index("whisper-stop"),
-            "gpu window (covered) precedes the covered whisper-stop",
-        )
-
-    def test_each_batch_stop_cycle_is_covered_no_extra_prompts(self) -> None:
-        stages = CollectionStages(whisper_running=True)
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(
-            stages, consent, browser_html=page_html(7)
-        )
-        self.assertEqual(code, 0, report.get("hard_stop_reason"))
-        # One stop/restore cycle per batch, each honored exactly once.
-        self.assertEqual(stages.whisper_stops, 2)
-        self.assertEqual(stages.whisper_restores, 2)
-        covered = self.covered_kinds(report)
-        self.assertEqual(covered.count("whisper-stop"), 2)
-        self.assertEqual(covered.count("whisper-restore"), 2)
-        self.assertEqual(consent.kinds, HUMAN_KINDS, "no per-batch human prompts")
-
-    def test_config_drift_fails_closed_to_a_new_authority_question(self) -> None:
-        # The plan binds DRIFTED_INFO (known name/image, different env);
-        # the batch then sees the real KNOWN_INFO service: the stop is
-        # NOT covered and must be asked as genuinely new scope.
-        stages = CollectionStages(
-            whisper_running=True,
-            whisper_infos=[DRIFTED_INFO, KNOWN_INFO],
-        )
-        consent = RecordingConsent(deny={"whisper-stop"})
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        self.assertEqual(
-            consent.kinds, ["browser", "run-plan", "whisper-stop"],
-            "drifted config is an extra-scope question, never auto-granted",
-        )
-        self.assertEqual(stages.whisper_stops, 0, "denial blocks before mutation")
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("vision:")], [],
-            "no vision without the drifted-config authority",
-        )
-        self.assertFalse(any(c == "ollama-start" for c in stages.calls))
-        self.assertEqual(Backlog(self.state).entries(), [])
-        drift_entry = [
-            e
-            for e in self.stage_windows(report)
-            if e["window"]["kind"] == "whisper-stop"
-        ][0]
-        self.assertEqual(drift_entry["decision"], "human_denied")
-
-    def test_unidentified_service_is_refused_before_any_window(self) -> None:
-        stages = CollectionStages(
-            whisper_running=True, whisper_info=OTHER_INFO
-        )
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        # Identity verification fails read-only at plan time (no bound)
-        # AND inside the batch coordination (blocked before any window).
-        self.assertEqual(consent.kinds, ["browser", "run-plan"])
-        self.assertNotIn("whisper-stop", self.covered_kinds(report))
-        self.assertEqual(report["run_plan"]["whisper"]["bound"], None)
-        self.assertIn("verification failed", report["run_plan"]["whisper"]["note"])
-        self.assertEqual(stages.whisper_stops, 0)
-        self.assertEqual([c for c in stages.calls if c.startswith("vision:")], [])
-
-    def test_restore_failure_blocks_all_progress_and_later_batches(self) -> None:
-        controller_html = page_html(7)  # two batches worth
-        stages = CollectionStages(
-            whisper_running=True, whisper_restore_fails=True
-        )
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(
-            stages, consent, browser_html=controller_html
-        )
-        self.assertEqual(code, 1)
-        self.assertIn("whisper restoration failed", report["hard_stop_reason"])
-        self.assertEqual(len(report["batches"]), 2, "all slices prepared before vision")
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")],
-            [f"audio:{fake_id(n)}" for n in range(7)],
-            "all completed audio remains preserved before failed restore",
-        )
-        self.assertNotIn(f"vision:{fake_id(5)}", stages.calls)
-        self.assertNotIn(f"vision:{fake_id(6)}", stages.calls)
-        self.assertNotIn("verify", consent.kinds)
-        self.assertTrue(
-            any("no rollback" in note for note in report["batches"][0]["cleanup_notes"]),
-            report["batches"][0]["cleanup_notes"],
-        )
-
-    def test_ctrl_c_during_stop_itself_reports_unknown_no_restore(self) -> None:
-        """W-1r: KI inside the whisper stop after the plan grant.
-
-        The stop result is UNKNOWN: no restore is attempted (it cannot
-        be verified that the stop was ours/completed), no vision runs,
-        prior audio remains preserved, the run is interrupted (exit 1), and the generic
-        "applicable cleanup ran" claim is replaced by the honest
-        cleanup-uncertain message.
-        """
-        stages = CollectionStages(
-            whisper_running=True, whisper_stop_raises_ki=True
-        )
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        self.assertTrue(report["interrupted"])
-        # The plan grant and BOTH covered whisper windows happened
-        # BEFORE the stop attempt — the standing consent is not weakened.
-        covered = self.covered_kinds(report)
-        self.assertIn("whisper-stop", covered)
-        self.assertIn("whisper-restore", covered)
-        self.assertLess(covered.index("whisper-stop"), covered.index("whisper-restore"))
-        # No human window and no covered window arrives after the KI.
-        self.assertEqual(consent.kinds, ["browser", "run-plan"])
-        self.assertEqual(covered[-1], "whisper-restore")
-        # The interrupted stop is never counted as completed...
-        self.assertEqual(stages.whisper_stops, 0)
-        # ...and NO restore, vision or Ollama lifecycle ran after prior audio.
-        self.assertEqual(stages.whisper_restores, 0)
-        self.assertNotIn("whisper-restore-op", stages.calls)
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("vision:")], []
-        )
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")],
-            [f"audio:{fake_id(n)}" for n in range(3)],
-        )
-        self.assertLess(
-            stages.calls.index(f"audio:{fake_id(2)}"), stages.calls.index("whisper-stop-op")
-        )
-        self.assertNotIn("ollama-start", stages.calls)
-        self.assertNotIn("ollama-stop", stages.calls)
-        self.assertEqual(Backlog(self.state).entries(), [])
-        # Explicit UNKNOWN note without a false promise.
-        batch = report["batches"][0]
-        notes = " ".join(batch["cleanup_notes"])
-        self.assertIn("stop result is", notes)
-        self.assertIn("UNKNOWN", notes)
-        self.assertIn("NO restore was attempted", notes)
-        self.assertIn("no rollback", notes)
-        self.assertTrue(
-            any(
-                f["stage"] == "whisper-stop" and "UNKNOWN" in f["reason"]
-                for f in batch["failures"]
-            ),
-            batch["failures"],
-        )
-        # The generic overclaim never appears on this path; the honest
-        # variant does.
-        self.assertFalse(
-            any("applicable cleanup ran" in m for m in self.messages),
-            self.messages,
-        )
-        self.assertTrue(
-            any("cleanup state is NOT fully known" in m for m in self.messages),
-            self.messages,
-        )
-
-    def test_ctrl_c_during_vision_after_stop_restores_under_standing_auth(
-        self,
-    ) -> None:
-        stages = CollectionStages(
-            whisper_running=True, vision_raises=KeyboardInterrupt()
-        )
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        self.assertTrue(report["interrupted"])
-        # The covered windows precede the interrupt; nothing is asked
-        # after it (human or covered).
-        covered = self.covered_kinds(report)
-        self.assertLess(covered.index("gpu"), covered.index("whisper-stop"))
-        self.assertLess(covered.index("whisper-stop"), covered.index("whisper-restore"))
-        self.assertEqual(covered[-1], "whisper-restore")
-        self.assertEqual(consent.kinds, ["browser", "run-plan"])
-        # Ollama cleanup (finally) still ran; whisper was stopped once and
-        # restored once under the standing authorization — with NO window
-        # asked after the interrupt.
-        self.assertIn("ollama-stop", stages.calls)
-        self.assertEqual(stages.whisper_stops, 1)
-        self.assertEqual(stages.whisper_restores, 1)
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")],
-            [f"audio:{fake_id(n)}" for n in range(3)],
-            "prior audio survives the interrupt and is never repeated",
-        )
-        self.assertLess(stages.calls.index(f"audio:{fake_id(2)}"), stages.calls.index("whisper-stop-op"))
-        notes = " ".join(report["batches"][0]["cleanup_notes"])
-        self.assertIn("restored and healthy", notes)
-
-    def test_ctrl_c_during_vision_with_restore_failure_blocks_everything(
-        self,
-    ) -> None:
-        stages = CollectionStages(
-            whisper_running=True,
-            vision_raises=KeyboardInterrupt(),
-            whisper_restore_fails=True,
-        )
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        self.assertTrue(report["interrupted"])
-        self.assertIn("ollama-stop", stages.calls, "Ollama finally cleanup kept")
-        self.assertEqual(stages.whisper_restores, 1, "one attempt, no retry")
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")],
-            [f"audio:{fake_id(n)}" for n in range(3)],
-            "audio already completed before failed recovery",
-        )
-        self.assertNotIn("verify", consent.kinds)
-        notes = " ".join(report["batches"][0]["cleanup_notes"])
-        self.assertIn("whisper restore failed", notes)
-        self.assertIn("no rollback", notes)
-
-    def test_ctrl_c_during_vision_with_health_failure_blocks(self) -> None:
-        class HealthyUntilRestore(CollectionStages):
-            def do_whisper_health(self) -> tuple[bool, str]:
-                if self.whisper_restores == 0:
-                    return True, "healthy before vision"
-                return super().do_whisper_health()
-
-        stages = HealthyUntilRestore(
-            whisper_running=True,
-            vision_raises=KeyboardInterrupt(),
-            whisper_healthy=False,
-        )
-        consent = RecordingConsent()
-        # The bounded restore-readiness wait must never really sleep in
-        # tests: deterministic clock, same bounded logical course (health
-        # stays false until the 60s deadline). Assertions unchanged.
-        from unittest import mock
-
-        from tiktok_ingest import engine, guided
-        from tiktok_ingest.tests.test_guided import FakeRestoreClock
-
-        # The restore-readiness clock moved to tiktok_ingest.engine with
-        # the stage engine (S2); stage narration keeps resolving
-        # guided.time, so both seams get the same deterministic clock.
-        with mock.patch.object(guided, "time", FakeRestoreClock()):
-            with mock.patch.object(engine, "time", FakeRestoreClock()):
-                code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        self.assertTrue(report["interrupted"])
-        self.assertEqual(stages.whisper_restores, 1)
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")],
-            [f"audio:{fake_id(n)}" for n in range(3)],
-        )
-        self.assertLess(stages.calls.index(f"audio:{fake_id(2)}"), stages.calls.index("whisper-stop-op"))
-        notes = " ".join(report["batches"][0]["cleanup_notes"])
-        self.assertIn("NOT healthy", notes)
-        self.assertIn("no rollback", notes)
-
-    def test_ctrl_c_during_restore_itself_reports_unknown_state(self) -> None:
-        stages = CollectionStages(
-            whisper_running=True,
-            vision_raises=KeyboardInterrupt(),
-            whisper_restore_raises_ki=True,
-        )
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        self.assertTrue(report["interrupted"])
-        self.assertEqual(
-            stages.whisper_restores, 1, "the interrupted restore is never retried"
-        )
-        self.assertEqual(
-            [c for c in stages.calls if c.startswith("audio:")],
-            [f"audio:{fake_id(n)}" for n in range(3)],
-        )
-        self.assertLess(stages.calls.index(f"audio:{fake_id(2)}"), stages.calls.index("whisper-stop-op"))
-        notes = " ".join(report["batches"][0]["cleanup_notes"])
-        self.assertIn("UNKNOWN", notes)
-        self.assertIn("no rollback", notes)
-
-
-def _retry_journey_stages(clock: Any, **kw: Any) -> Any:
-    """A retry-journey double whose whisper stop consumes real (fake) time.
-
-    Advancing the injected clock inside the stop makes the post-stop
-    transition sample take a genuine reading, so a scripted counter
-    failure lands exactly where the re-admission left the shared service
-    stopped.
-    """
-    from tiktok_ingest.tests.test_swap_retry import RetryCollectionStages
-
-    class ClockAdvancingStop(RetryCollectionStages):
-        def do_whisper_stop(self, info: WhisperServiceInfo) -> WhisperServiceInfo:
-            clock.sleep(1.0)
-            return super().do_whisper_stop(info)
-
-    return ClockAdvancingStop(**kw)
-
-
-class TestRetryWindowWhisperRestore(CollectionRunTestCase):
-    """A retry-window end after the re-admission stop must restore Whisper.
-
-    The re-admission stops the SAME known service under the retry
-    authority. When the window then ends for ANY reason — here an
-    unreadable/implausible swap counter at the post-stop transition
-    sample — the service must be restored under that same authority
-    before the failure is reported: never left stopped behind a normal
-    window end, and never a spurious hard stop in a later window.
-    """
-
-    def _run_journey(
-        self,
-        stages: Any,
-        vmstat: Any,
-        clock: Any,
-        *,
-        video_ns: list[int] | None = None,
-    ) -> tuple[int, dict[str, Any]]:
-        seed_scan_for_run(self.state, list(video_ns or [1, 2]))
-        count = len(video_ns or [1, 2])
-        controller = FakeBrowserController(page_html(count))
-        transport = FakeApiTransport(
-            [FakeApiResponse(sample_synthesis_document()) for _ in range(50)]
-        )
-        consent = RecordingConsent()
-        code, report = collection_run.run_collection(
-            collection_url=COLLECTION_URL,
-            state=self.state,
-            consent=consent,
-            out=self.messages.append,
-            browser_controller=controller,
-            browser_profile_base=self.profile_base,
-            api_transport=transport,
-            env=dict(API_ENV),
-            podman_runner=lambda argv, timeout=None: (0, "", ""),
-            stages=stages.functions(),
-            swap_retry_monotonic=clock,
-            swap_retry_sleep=clock.sleep,
-            swap_retry_vmstat_fn=vmstat,
-            rescan=True,
-        )
-        return code, report
-
-    def _run_handled_measurement_error(self) -> tuple[Any, int, dict[str, Any]]:
-        from tiktok_ingest.tests.test_swap_retry import (
-            FakeClock, ScriptedVmstat,
-        )
-
-        mib = 1024 * 1024
-        clock = FakeClock()
-        stages = _retry_journey_stages(
-            clock, whisper_running=True, vision_outcomes=["failed"]
-        )
-        # 12 quiet cooldown intervals admit the retry; the post-stop
-        # transition reading then reports a DECREASING cumulative counter
-        # (a handled measurement failure, distinct from expiry).
-        vmstat = ScriptedVmstat(deltas=[0.4 * mib] * 13 + [-5 * mib])
-        code, report = self._run_journey(stages, vmstat, clock)
-        return stages, code, report
-
-    def test_retry_window_handled_measurement_error_restores_whisper(self) -> None:
-        stages, code, report = self._run_handled_measurement_error()
-        self.assertEqual(code, 1)
-        self.assertEqual(
-            report["swap_retries"][0]["state"], "measurement_unavailable"
-        )
-        # The re-admission stopped the service; the handled measurement
-        # failure must NOT leave it stopped: it is restored under the
-        # retry authority (vision-window restore + retry-window restore).
-        self.assertEqual(stages.whisper_stops, 2)
-        self.assertEqual(stages.whisper_restores, 2)
-        self.assertTrue(stages.whisper_running)
-        # No spurious hard stop: the service is back, so later windows run.
-        self.assertIsNone(report["hard_stop_reason"])
-
-    def test_retry_window_handled_error_does_not_spuriously_hard_stop(self) -> None:
-        # Regression: the run that left the service stopped would make a
-        # later window's pre-retry whisper verification hard-stop with
-        # "the known whisper service is not running after the batch
-        # cycle". With the restore running, that spurious hard stop never
-        # appears.
-        stages, _code, report = self._run_handled_measurement_error()
-        self.assertIsNone(
-            report["hard_stop_reason"],
-            "a restored service must never produce the "
-            "'not running after the batch cycle' hard stop",
-        )
-        self.assertTrue(stages.whisper_running)
-
-    def test_retry_window_interrupt_after_stop_restores_whisper(self) -> None:
-        from tiktok_ingest.tests.test_swap_retry import FakeClock, ScriptedVmstat
-
-        class InterruptTransition(ScriptedVmstat):
-            def __call__(self) -> Any:
-                if self.calls == 13:  # the post-stop transition reading
-                    raise KeyboardInterrupt()
-                return super().__call__()
-
-        mib = 1024 * 1024
-        clock = FakeClock()
-        stages = _retry_journey_stages(
-            clock, whisper_running=True, vision_outcomes=["failed"]
-        )
-        vmstat = InterruptTransition(deltas=[0.4 * mib] * 13)
-        _code, report = self._run_journey(stages, vmstat, clock)
-        self.assertTrue(report["interrupted"])
-        # The verified stop is restored under the retry authority even
-        # though the run is interrupted.
-        self.assertEqual(stages.whisper_restores, 2)
-        self.assertTrue(stages.whisper_running)
-
-    def _run_archive_failure(
-        self, *, raise_error: bool
-    ) -> tuple[Any, int, dict[str, Any]]:
-        """Drive the retry journey with the ORIGINAL-evidence archive failing.
-
-        The re-admission stops the SAME known service under the retry
-        authority; the archive step then runs BEFORE the retry can
-        overwrite live paths. A failing archive (a raise, or the
-        manifest vanishing so it returns ``None`` unexpectedly) must not
-        leave that stopped service behind.
-        """
-        from unittest import mock
-
-        from tiktok_ingest.tests.test_swap_retry import (
-            FakeClock,
-            ScriptedVmstat,
-        )
-
-        mib = 1024 * 1024
-        clock = FakeClock()
-        stages = _retry_journey_stages(
-            clock, whisper_running=True, vision_outcomes=["failed"]
-        )
-        # Quiet swap the whole way: the re-admission succeeds, so the
-        # archive step is reached with whisper already stopped.
-        vmstat = ScriptedVmstat(deltas=[0.4 * mib] * 20)
-        if raise_error:
-            patcher = mock.patch.object(
-                collection_run,
-                "_archive_original_vision_attempt",
-                side_effect=OSError("fixture: archive copy failed"),
-            )
-        else:
-            patcher = mock.patch.object(
-                collection_run,
-                "_archive_original_vision_attempt",
-                return_value=None,
-            )
-        with patcher:
-            code, report = self._run_journey(stages, vmstat, clock)
-        return stages, code, report
-
-    def test_retry_archive_returning_none_after_stop_restores_whisper(self) -> None:
-        # The archive "returns unexpectedly" (the durable manifest
-        # vanished) after re-admission stopped whisper: the service must
-        # still be restored under the retry authority.
-        stages, code, report = self._run_archive_failure(raise_error=False)
-        self.assertEqual(code, 1)
-        self.assertEqual(report["swap_retries"][0]["state"], "blocked_global")
-        self.assertEqual(stages.whisper_stops, 2)
-        self.assertEqual(stages.whisper_restores, 2)
-        self.assertTrue(stages.whisper_running)
-        # The honest stop is the archive failure, never the stranded-
-        # service "not running after the batch cycle" hard stop.
-        self.assertIsNotNone(report["hard_stop_reason"])
-        self.assertNotIn(
-            "not running after the batch cycle", report["hard_stop_reason"]
-        )
-
-    def test_retry_archive_raising_after_stop_restores_whisper(self) -> None:
-        # The archive step RAISES after re-admission stopped whisper: the
-        # service must be restored under the retry authority before the
-        # failure is reported, and the run must not crash on the raw
-        # error (it reports the honest global block instead).
-        stages, code, report = self._run_archive_failure(raise_error=True)
-        self.assertEqual(code, 1)
-        self.assertEqual(report["swap_retries"][0]["state"], "blocked_global")
-        self.assertEqual(stages.whisper_stops, 2)
-        self.assertEqual(stages.whisper_restores, 2)
-        self.assertTrue(stages.whisper_running)
-        self.assertIsNotNone(report["hard_stop_reason"])
-        self.assertIn("archive", report["hard_stop_reason"])
-        self.assertNotIn(
-            "not running after the batch cycle", report["hard_stop_reason"]
-        )
-
-
-# --------------------------------------------------------------------------
-# Synthesis API coordination
 # --------------------------------------------------------------------------
 
 
@@ -1956,33 +1298,7 @@ class TestSynthesisApi(CollectionRunTestCase):
 
 
 # --------------------------------------------------------------------------
-# Ollama discipline through collection-run
-# --------------------------------------------------------------------------
-
-
-class TestOllama(CollectionRunTestCase):
-    def test_preexisting_isolated_server_is_never_adopted(self) -> None:
-        stages = CollectionStages(ollama_already_running=True)
-        consent = RecordingConsent()
-        code, report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 1)
-        self.assertFalse(any(c == "ollama-start" for c in stages.calls))
-        failures = report["batches"][0]["failures"]
-        self.assertTrue(
-            any("never adopts" in f["reason"] for f in failures), failures
-        )
-
-    def test_server_started_is_stopped_at_window_end(self) -> None:
-        stages = CollectionStages()
-        consent = RecordingConsent()
-        code, _report, _ = self.run_collection(stages, consent)
-        self.assertEqual(code, 0)
-        self.assertIn("ollama-start", stages.calls)
-        self.assertIn("ollama-stop", stages.calls)
-
-
-# --------------------------------------------------------------------------
-# Frozen inventory: once per id, no reattempts
+# The frozen driver discipline
 # --------------------------------------------------------------------------
 
 
@@ -2022,24 +1338,23 @@ class TestFrozenDriver(CollectionRunTestCase):
 
 
 class TestHardStopBlocksGroupedVerification(CollectionRunTestCase):
-    def test_restore_failure_after_ready_batch_skips_grouped_verify(self) -> None:
-        """Validator Check B regression: "ALL further progress is blocked"
-        must include the grouped verification phase.
+    def test_boundary_failure_after_ready_batch_skips_grouped_verify(self) -> None:
+        """Validator Check B regression: a hard stop must include the
+        grouped verification phase.
 
         One id already has validated synthesis (ready for verification);
-        batch 2's whisper restore fails -> the run hard-stops. No grouped
+        batch 2's vision stage raises an unexpected boundary error ->
+        the run hard-stops. No grouped
         verification prompt, no verify stage, no backlog write may happen
         afterwards; the ready results stay resumable in a NEW authorized
         run with zero re-inference.
         """
 
-        class SecondRestoreFails(CollectionStages):
-            def do_whisper_restore(
-                self, info: WhisperServiceInfo
-            ) -> WhisperServiceInfo:
-                if self.whisper_restores >= 1:
-                    self.whisper_restore_fails = True
-                return super().do_whisper_restore(info)
+        class SecondBatchVisionBreaks(CollectionStages):
+            def do_vision(self, video_id: str, state: StateRoot) -> FakeOutcome:
+                if video_id in (fake_id(5), fake_id(6)):
+                    raise RuntimeError("fixture vision boundary failure")
+                return super().do_vision(video_id, state)
 
         seed_scan_for_run(self.state, list(range(7)))
         seed_job(
@@ -2050,17 +1365,16 @@ class TestHardStopBlocksGroupedVerification(CollectionRunTestCase):
             fake_id(0), state=self.state, document_fn=sample_synthesis_document
         )
         self.assertEqual(outcome.outcome, "complete")
-        stages = SecondRestoreFails(whisper_running=True)
+        stages = SecondBatchVisionBreaks()
         consent = RecordingConsent()
         code, report, transport = self.run_collection(
             stages, consent, browser_html=page_html(7)
         )
         self.assertEqual(code, 1)
-        self.assertIn("whisper restoration failed", report["hard_stop_reason"])
+        self.assertIn("boundary failed", report["hard_stop_reason"])
         self.assertEqual(len(report["batches"]), 2)
-        self.assertEqual(stages.whisper_restores, 2, "batch 2 restore failed")
-        # Prior synthesis remains ready, but no NEW synthesis crossed the
-        # barrier before the second original vision window's failed restore.
+        # Prior synthesis remains ready, but no synthesis request crossed
+        # the barrier before the vision boundary failure.
         self.assertEqual(transport.requests, [])
         self.assertEqual(transport_ready(report), [])
         self.assertEqual(
@@ -2075,26 +1389,16 @@ class TestHardStopBlocksGroupedVerification(CollectionRunTestCase):
         self.assertEqual([c for c in stages.calls if c.startswith("verify:")], [])
         self.assertEqual(Backlog(self.state).entries(), [])
         # Resumable: a NEW authorized run completes the journey without
-        # repeating any completed media stage. After the failed restore the
-        # container still exists, stopped (real podman inspect reports it,
-        # it does not vanish): the new run reconciles the GPU lease marker
-        # left behind and restores the service before planning.
-        class StoppedContainer(CollectionStages):
-            def do_whisper_inspect(self) -> WhisperServiceInfo | None:
-                self.calls.append("whisper-inspect")
-                return dataclasses.replace(
-                    KNOWN_INFO,
-                    running=self.whisper_running,
-                    state="running" if self.whisper_running else "exited",
-                )
-
-        stages2 = StoppedContainer()
+        # repeating any completed media stage.
+        stages2 = CollectionStages()
         consent2 = RecordingConsent()
         code2, report2, _ = self.run_collection(stages2, consent2)
         self.assertEqual(code2, 0, report2.get("hard_stop_reason"))
         self.assertEqual(consent2.kinds, HUMAN_KINDS, "a new run asks again")
         self.assertEqual(
-            [c for c in stages2.calls if c.startswith("vision:")], [],
+            sorted(c for c in stages2.calls if c.startswith("vision:")),
+            [f"vision:{fake_id(5)}", f"vision:{fake_id(6)}"],
+            "only the two ids whose vision never completed re-run; the "
             "ready results resume with zero re-inference",
         )
         self.assertEqual(
@@ -2126,10 +1430,10 @@ def transport_ready(report: dict[str, Any]) -> list[str]:
 
 
 class TestRealConsoleConsentJourney(CollectionRunTestCase):
-    def test_two_batches_managed_whisper_need_exactly_three_yes_and_one_enter(
+    def test_two_batches_need_exactly_three_yes_and_one_enter(
         self,
     ) -> None:
-        stages = CollectionStages(whisper_running=True)
+        stages = CollectionStages()
 
         class CountingStdin(io.StringIO):
             lines_read = 0
@@ -2156,13 +1460,12 @@ class TestRealConsoleConsentJourney(CollectionRunTestCase):
             browser_profile_base=self.profile_base,
             api_transport=transport,
             env=API_ENV,
-            podman_runner=lambda argv, timeout=None: (0, "", ""),
             stages=stages.functions(),
         )
         self.assertEqual(code, 0, report.get("hard_stop_reason"))
         self.assertEqual(len(report["batches"]), 2)
         # EXACTLY three yes/no decisions and ONE readiness Enter across
-        # the whole two-batch run with managed whisper. (The browser
+        # the whole two-batch run. (The browser
         # window's DISPLAY text also mentions the checkpoint; count only
         # actual prompt lines, which start with the checkpoint wording.)
         asks = [l for l in provider_lines if "authorize this window?" in l]
@@ -2196,8 +1499,6 @@ class TestRealConsoleConsentJourney(CollectionRunTestCase):
         self.assertEqual(len(transport.requests), 7)
         self.assertEqual(len([c for c in stages.calls if c.startswith("verify:")]), 7)
         self.assertEqual(len(Backlog(self.state).entries()), 7)
-        self.assertEqual(stages.whisper_stops, 2)
-        self.assertEqual(stages.whisper_restores, 2)
 
 
 # --------------------------------------------------------------------------

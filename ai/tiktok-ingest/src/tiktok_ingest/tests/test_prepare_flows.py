@@ -77,7 +77,7 @@ class ContainerArgvTests(unittest.TestCase):
 
     def test_refuses_unresolved_image_ids(self) -> None:
         with self.assertRaises(PrepareError):
-            container_argv("localhost/voice-assistant_whisper:latest", ["true"])
+            container_argv("localhost/llm-hub_whisper-service:latest", ["true"])
 
 
 class ShowinfoParsingTests(unittest.TestCase):

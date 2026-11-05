@@ -14,7 +14,6 @@ One test per rule (S5/S6/S8, P1-FR-09/10/13/14/17):
 - stale / duplicate / unknown prompt answers rejected; consent and ready
   answers cannot be swapped between prompt kinds
 - second start while active -> 409 (S8 single writer)
-- live foreign GPU lease owner -> 409 (lease stays authoritative)
 - cancel while waiting on consent -> interrupted outcome, worker joined
 - cancel during narration -> KeyboardInterrupt path (report interrupted)
 - late SSE subscriber gets the buffer replay (S5)
@@ -47,7 +46,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 
-from tiktok_ingest import gpu_lease, guided
+from tiktok_ingest import guided
 from tiktok_ingest.engine import ConsentWindow
 from tiktok_ingest.state import StateRoot
 from tiktok_ingest.web.server import (
@@ -524,25 +523,26 @@ class SingleWriterTests(Harness):
         self.assertEqual(len(self.ingest.calls), 1)
 
 
-class GpuLeaseGuardTests(Harness):
-    def test_live_foreign_gpu_lease_owner_is_409(self) -> None:
-        marker = gpu_lease.LeaseMarkerFile(self.state_root, pid=1)
-        marker.write(
-            SimpleNamespace(name="voice-assistant-whisper", image="img", env=[])
-        )
-        status, body = self.post_json("POST", "/api/runs", _start_payload())
-        self.assertEqual(status, 409)
-        self.assertIn("holds the GPU window", body["error"])
-        self.assertIn("pid 1", body["error"])
-        self.assertFalse(self.ingest.calls)
+class StaleLeaseMarkerTests(Harness):
+    """S7: lease marker files left by pre-migration runs are simply ignored.
 
-    def test_own_process_marker_does_not_block(self) -> None:
-        marker = gpu_lease.LeaseMarkerFile(self.state_root)  # our own pid
-        marker.write(
-            SimpleNamespace(name="voice-assistant-whisper", image="img", env=[])
+    The GPU lease machinery is gone; a stale
+    ``active_gpu_lease.json`` (and its lock sidecar) must neither block
+    a new run nor crash the web runner — and is never deleted.
+    """
+
+    def test_stale_lease_marker_files_are_ignored(self) -> None:
+        marker = self.state_root.root / "active_gpu_lease.json"
+        marker.write_text(
+            '{"pid": 1, "service": "voice-assistant-whisper"}',
+            encoding="utf-8",
         )
+        lock = self.state_root.root / "active_gpu_lease.json.lock"
+        lock.write_text("", encoding="utf-8")
         status, _ = self.post_json("POST", "/api/runs", _start_payload())
         self.assertEqual(status, 202)
+        self.assertTrue(marker.exists())
+        self.assertTrue(lock.exists())
 
 
 class CancelTests(Harness):

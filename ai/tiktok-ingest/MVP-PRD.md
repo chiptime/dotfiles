@@ -4,6 +4,14 @@
 **Owner:** Bruno. **Date:** 2026-09-18; revised 2026-09-20 after implementation and pilot.
 **Authorization:** This artifact is documentation only; it authorizes no execution.
 
+> **Superseded by the llm-hub migration (2026-11):** every model call now
+> goes to the resident llm-hub services (chat for vision at :8081,
+> whisper WS at :8765 with health at :8766, both user systemd units).
+> The isolated-Ollama provisioning, the VRAM/swap gates and the
+> whisper stop/restore rules this MVP-PRD describes are history: both
+> models are resident together and tiktok-ingest manages no model
+> runtime. See README.md "Model serving — llm-hub".
+
 The MVP should turn an explicitly selected TikTok collection into a reviewable local
 backlog: what each video shows and says, which technologies it identifies, which
 claims primary sources support, and whether an action fits the operator's stack.

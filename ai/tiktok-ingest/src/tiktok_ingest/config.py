@@ -1,20 +1,20 @@
 """Adopted defaults and operating limits for the TikTok ingest MVP.
 
-This module encodes the user-adopted decisions (MVP-PRD section 5) as plain
-constants. It executes nothing: the isolation and resource-gate values are
-configuration only until a later milestone implements and tests them.
+This module encodes the user-adopted decisions as plain constants. It
+executes nothing. Every model call goes to the resident llm-hub services
+(superseded the former isolation-gate/Ollama provisioning constants in the
+2026-11 llm-hub migration).
 
 Sources:
-- P1: default vision model (MVP-PRD section 1, adopted).
+- P1: vision model served by llm-hub llama-chat (adopted).
 - P2: transcript policy, full Spanish audio primary (adopted override).
 - P3: hybrid sampling budget (adopted).
 - P4: operating budgets (adopted).
-- Isolation/gates: carried forward from MVP-PRD section 5 runtime gates.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 # --------------------------------------------------------------------------
@@ -188,113 +188,6 @@ class Budgets:
 
 
 BUDGETS = Budgets()
-
-# --------------------------------------------------------------------------
-# Phase 0 addendum: bounded vision swap-retry cooldown (PRD D-04).
-# Proposed operational heuristics requiring validation — NOT efficacy
-# claims (assumption A-03): waiting may or may not quiet the host.
-# Defined before IsolationGates: the S5 swap gate SHARES the quiet-rate
-# threshold below as its sustained-rate tolerance — ONE constant.
-# --------------------------------------------------------------------------
-
-# Read-only sampling interval of the cumulative swap I/O counters.
-SWAP_RETRY_COOLDOWN_INTERVAL_SECONDS = 5.0
-# Admission eligible no earlier than this, from cooldown start.
-SWAP_RETRY_COOLDOWN_FLOOR_SECONDS = 60.0
-# Hard total cap from cooldown start; NEVER restarted (instability or
-# final-conditions drift reset only the consecutive-stable count).
-SWAP_RETRY_COOLDOWN_CAP_SECONDS = 180.0
-# Stability = this many consecutive intervals at or below the rate limit.
-SWAP_RETRY_COOLDOWN_STABLE_INTERVALS = 3
-# Swap I/O need per interval computed from the CUMULATIVE counters.
-SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S = 1.0
-# Truthful progress narration cadence (stderr) during the cooldown.
-SWAP_RETRY_NARRATION_INTERVAL_SECONDS = 15.0
-
-# --------------------------------------------------------------------------
-# Isolation and resource gates — configuration only, NOT implemented here.
-# Any later execution requires separate authorization (MVP-PRD sections 5-7).
-# --------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class IsolationGates:
-    """Constants describing the required isolation and stop rules.
-
-    ``isolated_ollama_version`` is the verified isolated Ollama used for
-    Qwen, bound to loopback with isolated ``HOME`` and ``OLLAMA_MODELS``.
-    ``global_ollama_version`` is the host install: it is incompatible with
-    qwen3.5+ and must never be touched or used for this pipeline.
-    """
-
-    isolated_ollama_version: str = "0.34.1"
-    global_ollama_version: str = "0.14.2"
-    # Require at least this much free VRAM before every Qwen load.
-    free_vram_gate_mib: int = 20480
-    # Swap I/O delta per phase, measured from the immediate phase baseline.
-    swap_delta_limit_mib: int = 512
-    # S5 sustained-rate tolerance: a delta ABOVE swap_delta_limit_mib
-    # fires only when the recent per-sample swap I/O rate also exceeds
-    # this many MiB/s. The SAME constant the swap-retry cooldown watcher
-    # uses as its quiet threshold — shared, never duplicated.
-    swap_rate_limit_mib_per_s: float = SWAP_RETRY_COOLDOWN_RATE_LIMIT_MIB_PER_S
-    # S5 safety net: a delta at or above this ceiling ALWAYS fires,
-    # however quiet the recent rate — ambient tolerance is never
-    # unbounded swap growth.
-    swap_delta_ceiling_mib: int = 1024
-    # Per-model VRAM delta limits from the benchmark.
-    vram_delta_limit_mib: dict[str, int] = field(
-        default_factory=lambda: {"qwen3.5:9b": 12288}
-    )
-    # Whisper and vision models are never GPU-resident simultaneously.
-    allow_gpu_co_residency: bool = False
-    # Unload verification: post-phase VRAM must return to within this much
-    # of the session baseline (methodology section 5: +71 MiB observed
-    # against a 2,443 MiB baseline; tolerance ±512 MiB).
-    session_vram_tolerance_mib: int = 512
-
-
-GATES = IsolationGates()
-
-# --------------------------------------------------------------------------
-# Milestone 3: isolated Ollama runtime (methodology sections 2 and 5)
-# --------------------------------------------------------------------------
-
-# Official 0.34.1 linux archive identity. The sha256 AND the byte size are
-# BOTH verified exactly by ``install-ollama`` before extraction; any
-# mismatch is refused with no retry (methodology sections 2 and 8.7-8.8).
-# The URL is the official release location for the pinned version; it is
-# provenance, while the recorded hash/size pair is the authority.
-OLLAMA_ARCHIVE_URL = (
-    "https://github.com/ollama/ollama/releases/download/"
-    "v0.34.1/ollama-linux-amd64.tar.zst"
-)
-OLLAMA_ARCHIVE_SHA256 = (
-    "f361dc3992ec07e4ad429f4bb2d10d4663ba2c295f9a9a688c7d52f4ba650034"
-)
-OLLAMA_ARCHIVE_SIZE_BYTES = 1429323296
-
-# Isolated runtime tree under the share root, outside Git. HOME and
-# OLLAMA_MODELS are SEPARATE subdirectories: the global store must never be
-# touched, and HOME itself must be isolated or the isolated server rewrites
-# the real ``~/.ollama`` cache (methodology section 8.2).
-OLLAMA_DIR = SHARE_ROOT / "ollama"
-OLLAMA_BIN_PATH = OLLAMA_DIR / "bin" / "ollama"
-OLLAMA_HOME_DIR = OLLAMA_DIR / "home"
-OLLAMA_MODELS_DIR = OLLAMA_DIR / "models"
-OLLAMA_SERVER_LOG_PATH = OLLAMA_DIR / "server.log"
-OLLAMA_PID_PATH = OLLAMA_DIR / "ollama.pid"
-
-# Loopback-only binding on the benchmark port (never 11434: the global
-# server owns it).
-OLLAMA_HOST = "127.0.0.1"
-OLLAMA_PORT = 11435
-OLLAMA_API_BASE = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}"
-
-# Read-only view of the host Ollama store: snapshot source for the
-# bit-identical before/after check and blob source for ``import-model``.
-# NEVER written by this pipeline.
-GLOBAL_OLLAMA_STORE = Path.home() / ".ollama" / "models"
 
 # --------------------------------------------------------------------------
 # llm-hub-whisper WS service endpoints (faster-whisper large-v3, CUDA float16)

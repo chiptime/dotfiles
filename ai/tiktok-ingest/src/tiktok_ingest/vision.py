@@ -28,7 +28,6 @@ import base64
 import dataclasses
 import hashlib
 import json
-import os
 import time
 import urllib.request
 from pathlib import Path
@@ -36,13 +35,8 @@ from typing import Any, Callable
 
 from . import config
 from .contracts import JobManifest, StageOutcome, StageRecord, StageResult, utc_now_iso
-from .gates import parse_nvidia_smi_mib, parse_vmstat_swap
 from .prepare import Runner, StageClock, StageDeadlineExceeded, container_argv, resolve_image_id
-from .runtime import (
-    PODMAN_QUERY_TIMEOUT_SECONDS,
-    PROBE_TIMEOUT_SECONDS,
-    subprocess_runner,
-)
+from .runtime import subprocess_runner
 from .state import Blocklist, Processed, StateRoot, atomic_write_bytes
 from .validation import sha256_of_file
 
@@ -204,32 +198,8 @@ def frame_flags(response_text: str, done_reason: str | None) -> dict[str, bool]:
 
 
 # --------------------------------------------------------------------------
-# Injectable measurements (production defaults)
+# Injectable transports (production defaults)
 # --------------------------------------------------------------------------
-
-
-def query_gpu(runner: Runner) -> Any:
-    """nvidia-smi free/total/used MiB through the injectable runner."""
-    returncode, out, err = runner(
-        [
-            "nvidia-smi",
-            "--query-gpu=memory.total,memory.used,memory.free",
-            "--format=csv,noheader,nounits",
-        ],
-        timeout=PROBE_TIMEOUT_SECONDS,
-    )
-    if returncode != 0:
-        raise VisionError(
-            f"nvidia-smi query failed (exit {returncode}): {(err or '').strip()[-300:]}"
-        )
-    return parse_nvidia_smi_mib(out)
-
-
-def default_vmstat_fn() -> Any:
-    """Immediate-baseline swap snapshot from /proc/vmstat (pure parser)."""
-    with open("/proc/vmstat", "r", encoding="utf-8") as handle:
-        text = handle.read()
-    return parse_vmstat_swap(text, os.sysconf("SC_PAGE_SIZE"))
 
 
 def default_post_json(
@@ -261,33 +231,6 @@ def crop_filter_expression() -> str:
 # --------------------------------------------------------------------------
 # Precondition checks
 # --------------------------------------------------------------------------
-
-
-def assert_whisper_stopped(runner: Runner) -> None:
-    """Fail closed unless podman proves NO whisper container is running.
-
-    Read-only query only: the pipeline NEVER stops services itself — that
-    is an operator-authorized action (MVP-PRD section 5).
-    """
-    returncode, out, err = runner(
-        ["podman", "ps", "--format", "{{.Names}}"],
-        timeout=PODMAN_QUERY_TIMEOUT_SECONDS,
-    )
-    if returncode != 0:
-        raise VisionError(
-            "cannot verify that the whisper service is stopped (podman ps "
-            f"failed: {(err or '').strip()[-200:]}); failing closed"
-        )
-    names = [line.strip() for line in (out or "").splitlines() if line.strip()]
-    running_whisper = [
-        name for name in names if "whisper" in name.lower()
-    ]
-    if running_whisper:
-        raise VisionError(
-            "stop the whisper service first (operator-authorized action): "
-            f"still running: {running_whisper}; this code never stops "
-            "services itself"
-        )
 
 
 def assert_llm_hub_ready(
